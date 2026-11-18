@@ -1,169 +1,102 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QGC TEAM - Atendimento</title>
-    <link rel="stylesheet" href="colaborador.css">
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-</head>
-<body>
+<script>
+    let clienteAtivo = null;
 
-    <div class="bg-grid"></div>
-    <div class="aurora-bg"></div>
-
-    <div class="app-container">
-        
-        <!-- TOPO SIMPLIFICADO -->
-        <header class="top">
-            <div class="logo">
-                <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
-                <span>QGC</span> TEAM
-            </div>
+    // Função para carregar os clientes do banco de dados
+    async function carregarClientes() {
+        try {
+            const response = await fetch('/api/clientes');
+            const clientes = await response.json();
+            const contactList = document.querySelector('.contact-list');
             
-            <div class="status">
-                <span class="dot"></span> ONLINE
-            </div>
+            contactList.innerHTML = ''; // Limpa a lista
 
-            <div class="top-actions">
-                <div class="user-info">
-                    <span>Claudio (Atendente)</span>
-                    <div class="avatar">C</div>
-                </div>
-                <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
-                    <button type="submit" class="btn-sair" style="background:none; border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sair</button>
-                </form>
-            </div>
-        </header>
+            if (clientes.length === 0) {
+                contactList.innerHTML = '<p style="padding:20px; color:var(--text-muted); text-align:center;">Nenhum cliente no banco.</p>';
+                return;
+            }
 
-        <!-- ÁREA DE TRABALHO -->
-        <main class="workspace">
-            
-            <!-- SIDEBAR: LISTA DE CONVERSAS -->
-            <aside class="sidebar">
-                <div class="filters">
-                    <button class="active">Aguardando</button>
-                    <button>Meus</button>
-                    <button>Finalizados</button>
-                </div>
+            clientes.forEach((cliente, index) => {
+                const iniciais = cliente.nome.substring(0, 2).toUpperCase();
+                const isAtivo = index === 0 ? 'active' : '';
                 
-                <div class="search-box">
-                    <input type="text" placeholder="Pesquisar contato...">
-                </div>
-
-                <div class="contact-list">
-                    <div class="contact-item active">
-                        <div class="avatar">J</div>
+                // Monta o HTML do card do contato
+                const html = `
+                    <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
+                        <div class="avatar">${iniciais}</div>
                         <div class="contact-info">
-                            <h4>João Silva</h4>
-                            <p>Gostaria de saber o valor...</p>
+                            <h4>${cliente.nome}</h4>
+                            <p>${cliente.mensagem || 'Sem mensagem'}</p>
                         </div>
-                        <span class="time">10:45</span>
+                        <span class="time">Agora</span>
                     </div>
-                    <div class="contact-item">
-                        <div class="avatar">M</div>
-                        <div class="contact-info">
-                            <h4>Maria Souza</h4>
-                            <p>Ok, vou pensar e te aviso.</p>
-                        </div>
-                        <span class="time">09:30</span>
-                    </div>
-                </div>
-            </aside>
-
-            <!-- CHAT CENTRAL -->
-            <section class="chat-area">
-                <div class="chat-header">
-                    <div class="avatar">J</div>
-                    <div>
-                        <h2>João Silva</h2>
-                        <p>Empresa: Tech Solutions LTDA</p>
-                    </div>
-                    <button class="btn-finalizar">Finalizar Atendimento</button>
-                </div>
-
-                <div class="messages">
-                    <div class="message received">
-                        <p>Olá, gostaria de saber mais sobre o serviço de vocês.</p>
-                        <span>10:45</span>
-                    </div>
-                    <div class="message sent">
-                        <p>Olá João! Claro, posso te ajudar. Qual é a sua principal necessidade hoje?</p>
-                        <span>10:46</span>
-                    </div>
-                </div>
-
-                <div class="input-area">
-                    <input type="text" placeholder="Digite sua mensagem...">
-                    <button>➤</button>
-                </div>
-            </section>
-
-            <!-- PAINEL DA FICHA (DIREITA) -->
-            <aside class="client-panel">
-                <h3>Ficha do Cliente</h3>
-                
-                <div class="info-group">
-                    <label>Nome</label>
-                    <p>João Silva</p>
-                </div>
-                <div class="info-group">
-                    <label>CNPJ</label>
-                    <p>12.345.678/0001-90</p>
-                </div>
-
-                <div class="divider"></div>
-
-                <h3>Status da Negociação</h3>
-                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
-                
-                <div class="status-options">
-                    <button class="status-btn vendido">Vendido (Contato Futuro)</button>
-                    <button class="status-btn pensando active">Pensando</button>
-                    <button class="status-btn nao-quis">Não Quis</button>
-                </div>
-            </aside>
-
-        </main>
-    </div>
-
-    <!-- SCRIPT DE INTEGRAÇÃO COM O BANCO DE DADOS -->
-    <script>
-        const statusButtons = document.querySelectorAll('.status-btn');
-
-        statusButtons.forEach(button => {
-            button.addEventListener('click', async () => {
-                // 1. Atualiza o visual (botão ativo)
-                statusButtons.forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
-
-                // 2. Define o valor do status
-                let statusValue = 'pensando';
-                if (button.classList.contains('vendido')) statusValue = 'vendido';
-                if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
-
-                // 3. Envia para o servidor salvar no PostgreSQL
-                try {
-                    // CORREÇÃO: Usando a URL relativa correta que o navegador entende
-                    const response = await fetch('/api/status', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            nome: 'João Silva', // No futuro, isso virá dinamicamente do chat ativo
-                            status: statusValue 
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        console.log('Status salvo no banco com sucesso!');
-                    } else {
-                        console.error('Falha ao salvar no banco. Código:', response.status);
-                    }
-                } catch (error) {
-                    console.error('Erro de conexão com o servidor:', error);
-                }
+                `;
+                contactList.innerHTML += html;
             });
+
+            // Abre o primeiro cliente automaticamente
+            if (clientes.length > 0) {
+                const primeiroItem = document.querySelector('.contact-item');
+                abrirCliente(primeiroItem, clientes[0].nome, clientes[0].telefone, clientes[0].mensagem);
+            }
+
+        } catch (error) {
+            console.error('Erro ao carregar clientes:', error);
+        }
+    }
+
+    // Função quando clica em um contato da lista
+    function abrirCliente(element, nome, telefone, mensagem) {
+        // Atualiza a classe active nos contatos
+        document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+        if(element) element.classList.add('active');
+
+        clienteAtivo = { nome, telefone };
+
+        // Atualiza o header do chat e a ficha
+        document.querySelector('.chat-header h2').textContent = nome;
+        document.querySelector('.chat-header p').textContent = `Telefone: ${telefone}`;
+        document.querySelector('.client-panel .info-group:nth-child(1) p').textContent = nome;
+        document.querySelector('.client-panel .info-group:nth-child(2) p').textContent = telefone;
+
+        // Adiciona a mensagem no chat
+        const chat = document.querySelector('.messages');
+        chat.innerHTML = `
+            <div class="message received">
+                <p>${mensagem}</p>
+                <span>Agora</span>
+            </div>
+        `;
+    }
+
+    // Quando o colaborador clica no status
+    const statusButtons = document.querySelectorAll('.status-btn');
+    statusButtons.forEach(button => {
+        button.addEventListener('click', async () => {
+            if (!clienteAtivo) return;
+
+            statusButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            let statusValue = 'pensando';
+            if (button.classList.contains('vendido')) statusValue = 'vendido';
+            if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
+
+            try {
+                await fetch('/api/status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        telefone: clienteAtivo.telefone, // Agora usa o telefone real!
+                        status: statusValue 
+                    })
+                });
+                console.log('Status atualizado no banco:', statusValue);
+            } catch (error) {
+                console.error('Erro ao salvar:', error);
+            }
         });
-    </script>
-</body>
-</html>
+    });
+
+    // Inicia a busca de clientes quando a página carregar
+    window.onload = carregarClientes;
+</script>

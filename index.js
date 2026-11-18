@@ -66,52 +66,45 @@ app.get('/admin', verificarToken('admin'), (req, res) => res.sendFile(path.join(
 app.get('/colaborador', verificarToken(['colaborador', 'admin']), (req, res) => res.sendFile(path.join(__dirname, 'colaborador.html')));
 
 // ---------------------------------------------------------
-// ROTAS DO BANCO DE DADOS (API)
+// API DO BANCO DE DADOS
 // ---------------------------------------------------------
 
-// SALVAR: O colaborador envia o status
+// Rota para o colaborador atualizar o status de um cliente
 app.post('/api/status', async (req, res) => {
-    const { nome, status } = req.body;
+    const { telefone, status } = req.body;
     try {
-        // Aqui adicionamos um telefone falso para o banco não dar erro de constraint
-        await pool.query(`
-            INSERT INTO clientes (nome, telefone, status) 
-            VALUES ($1, '11999999999', $2) 
-            ON CONFLICT (telefone) DO UPDATE SET status = $2
-        `, [nome, status]);
+        await pool.query('UPDATE clientes SET status = $1 WHERE telefone = $2', [status, telefone]);
         res.json({ success: true });
     } catch (error) {
-        console.error('Erro ao salvar:', error.message);
+        console.error(error);
         res.status(500).json({ success: false });
     }
 });
 
-// LER: O Admin busca os totais do banco
+// Rota para o Admin buscar os totais
 app.get('/api/status', async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT status, COUNT(*) as total 
-            FROM clientes 
-            GROUP BY status
-        `);
-        
-        // Transforma a resposta em um objeto fácil de ler
+        const result = await pool.query('SELECT status, COUNT(*) as total FROM clientes GROUP BY status');
         const counts = { vendido: 0, pensando: 0, 'nao-quis': 0 };
-        result.rows.forEach(row => {
-            if (counts[row.status] !== undefined) {
-                counts[row.status] = parseInt(row.total);
-            }
-        });
-        
+        result.rows.forEach(row => { if (counts[row.status] !== undefined) counts[row.status] = parseInt(row.total); });
         res.json(counts);
     } catch (error) {
-        console.error('Erro ao ler:', error.message);
         res.status(500).json({ error: 'Erro ao buscar dados' });
     }
 });
 
+// Rota para o colaborador buscar a lista de clientes no banco
+app.get('/api/clientes', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT nome, telefone, mensagem, status FROM clientes ORDER BY criado_em DESC LIMIT 20');
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: 'Erro ao buscar lista de clientes' });
+    }
+});
+
 // ---------------------------------------------------------
-// WEBHOOK
+// WEBHOOK DA WATI (CORRIGIDO COM BASE NO SEU LOG)
 // ---------------------------------------------------------
 app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -122,9 +115,35 @@ app.get('/webhook', (req, res) => {
     } else res.sendStatus(403);
 });
 
-app.post('/webhook', (req, res) => {
-    console.log(JSON.stringify(req.body, null, 2));
-    res.sendStatus(200);
+app.post('/webhook', async (req, res) => {
+    console.log('\n--- NOVO EVENTO RECEBIDO DA WATI ---');
+    
+    try {
+        const body = req.body;
+        
+        // O log mostra que a Wati envia "eventType": "message" e o texto em "text"
+        if (body.eventType === 'message' && body.text) {
+            const telefone = body.waId || 'desconhecido';
+            const nome = body.senderName || 'Cliente Novo';
+            const mensagem = body.text;
+
+            console.log(`Salvando no banco -> Nome: ${nome}, Telefone: ${telefone}, Msg: ${mensagem}`);
+
+            // Salva no banco (se o telefone já existir, só atualiza a mensagem)
+            await pool.query(`
+                INSERT INTO clientes (nome, telefone, mensagem, status) 
+                VALUES ($1, $2, $3, 'pensando') 
+                ON CONFLICT (telefone) DO UPDATE SET mensagem = $3, nome = $1
+            `, [nome, telefone, mensagem]);
+        } else {
+            console.log('Evento ignorado (não é uma mensagem de texto).');
+        }
+
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('Erro ao processar webhook:', error);
+        res.sendStatus(500);
+    }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
