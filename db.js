@@ -10,6 +10,7 @@
 'use strict';
 
 const { Pool } = require('pg');
+const { gerarHash } = require('./senha');
 
 // Carrega o .env local sem depender do pacote dotenv (Node 20.12+).
 if (!process.env.DATABASE_URL && typeof process.loadEnvFile === 'function') {
@@ -53,13 +54,76 @@ function criarBancoPostgres() {
                     total INTEGER NOT NULL DEFAULT 0,
                     contatos JSONB NOT NULL DEFAULT '[]'::jsonb,
                     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )`
+                )`,
+                `CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT NOT NULL UNIQUE,
+                    nome TEXT NOT NULL,
+                    senha_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'colaborador',
+                    ativo BOOLEAN NOT NULL DEFAULT TRUE,
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+                `CREATE TABLE IF NOT EXISTS campanhas (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    lista_id INTEGER,
+                    mensagem TEXT NOT NULL,
+                    intervalo_ms INTEGER NOT NULL DEFAULT 8000,
+                    status TEXT NOT NULL DEFAULT 'ativa',
+                    total INTEGER NOT NULL DEFAULT 0,
+                    enviados INTEGER NOT NULL DEFAULT 0,
+                    falhas INTEGER NOT NULL DEFAULT 0,
+                    proximo_envio_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+                `CREATE TABLE IF NOT EXISTS campanha_envios (
+                    id SERIAL PRIMARY KEY,
+                    campanha_id INTEGER NOT NULL REFERENCES campanhas (id) ON DELETE CASCADE,
+                    telefone TEXT NOT NULL,
+                    nome TEXT,
+                    status TEXT NOT NULL DEFAULT 'pendente',
+                    erro TEXT,
+                    enviado_em TIMESTAMPTZ
+                )`,
+                'CREATE INDEX IF NOT EXISTS idx_envios_campanha ON campanha_envios (campanha_id)',
+                'CREATE INDEX IF NOT EXISTS idx_envios_pendentes ON campanha_envios (status)',
+                `CREATE TABLE IF NOT EXISTS auditoria (
+                    id SERIAL PRIMARY KEY,
+                    ator TEXT,
+                    acao TEXT NOT NULL,
+                    detalhe TEXT,
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+                // envios que ficaram presos em "enviando" (restart no meio do processo)
+                "UPDATE campanha_envios SET status = 'pendente' WHERE status = 'enviando'"
             ];
 
             for (const comando of comandos) {
                 try { await pool.query(comando); }
                 catch (erro) { console.warn('Banco (estrutura):', erro.message); }
             }
+
+            // Usuários iniciais (só na primeira execução, quando a tabela está vazia)
+            try {
+                const { rows } = await pool.query('SELECT COUNT(*)::int AS total FROM usuarios');
+                if (rows[0].total === 0) {
+                    const iniciais = [
+                        ['admin@qgcteam.com', 'Admin Master', 'admin'],
+                        ['colaborador@qgcteam.com', 'Claudio', 'colaborador'],
+                        ['vendedor@qgcteam.com', 'Vendedor Jv', 'colaborador']
+                    ];
+                    for (const [email, nome, role] of iniciais) {
+                        await pool.query(
+                            'INSERT INTO usuarios (email, nome, senha_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING',
+                            [email, nome, gerarHash('123456'), role]
+                        );
+                    }
+                    console.log('Usuários iniciais criados.');
+                }
+            } catch (erro) { console.warn('Banco (usuários iniciais):', erro.message); }
+
             console.log('Estrutura do banco verificada.');
         },
 
@@ -96,7 +160,7 @@ function criarBancoPostgres() {
 
         async resumoDashboard() {
             const resumo = {
-                clientes: 0, conversasAtivas: 0, listas: 0, mensagensHoje: 0,
+                clientes: 0, conversasAtivas: 0, listas: 0, mensagensHoje: 0, campanhasAtivas: 0,
                 vendido: 0, pensando: 0, 'nao-quis': 0, finalizado: 0
             };
 
@@ -118,6 +182,11 @@ function criarBancoPostgres() {
                 const hoje = await pool.query('SELECT COUNT(*)::int AS total FROM mensagens WHERE criado_em >= CURRENT_DATE');
                 resumo.mensagensHoje = hoje.rows[0].total;
             } catch (erro) { console.error('Dashboard (mensagens):', erro.message); }
+
+            try {
+                const campanhas = await pool.query("SELECT COUNT(*) FILTER (WHERE status = 'ativa')::int AS ativas FROM campanhas");
+                resumo.campanhasAtivas = campanhas.rows[0].ativas;
+            } catch (erro) { console.error('Dashboard (campanhas):', erro.message); }
 
             return resumo;
         },
@@ -197,6 +266,224 @@ function criarBancoPostgres() {
 
         async excluirLista(id) {
             await pool.query('DELETE FROM listas WHERE id = $1', [id]);
+        },
+
+        async obterContatosLista(id) {
+            const { rows } = await pool.query('SELECT contatos FROM listas WHERE id = $1', [id]);
+            return rows[0] && Array.isArray(rows[0].contatos) ? rows[0].contatos : [];
+        },
+
+        /* ---------------- USUÁRIOS ---------------- */
+        async listarUsuarios() {
+            const { rows } = await pool.query(
+                'SELECT id, email, nome, role, ativo, criado_em FROM usuarios ORDER BY criado_em ASC, id ASC'
+            );
+            return rows;
+        },
+
+        async buscarUsuarioPorEmail(email) {
+            const { rows } = await pool.query(
+                'SELECT id, email, nome, role, ativo, senha_hash FROM usuarios WHERE LOWER(email) = LOWER($1)',
+                [email]
+            );
+            return rows[0] || null;
+        },
+
+        async criarUsuario({ email, nome, senhaHash, role }) {
+            const { rows } = await pool.query(
+                'INSERT INTO usuarios (email, nome, senha_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, email, nome, role, ativo',
+                [email, nome, senhaHash, role]
+            );
+            return rows[0];
+        },
+
+        async atualizarUsuario(id, { nome, role, ativo, senhaHash }) {
+            const sets = [];
+            const valores = [];
+
+            if (nome !== undefined) { valores.push(nome); sets.push(`nome = $${valores.length}`); }
+            if (role !== undefined) { valores.push(role); sets.push(`role = $${valores.length}`); }
+            if (ativo !== undefined) { valores.push(!!ativo); sets.push(`ativo = $${valores.length}`); }
+            if (senhaHash) { valores.push(senhaHash); sets.push(`senha_hash = $${valores.length}`); }
+
+            if (!sets.length) return false;
+
+            valores.push(id);
+            const resultado = await pool.query(
+                `UPDATE usuarios SET ${sets.join(', ')} WHERE id = $${valores.length}`,
+                valores
+            );
+            return resultado.rowCount > 0;
+        },
+
+        async excluirUsuario(id) {
+            const resultado = await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
+            return resultado.rowCount > 0;
+        },
+
+        /* ---------------- CAMPANHAS ---------------- */
+        async criarCampanha({ nome, listaId, mensagem, intervaloMs, contatos }) {
+            const cliente = await pool.connect();
+            try {
+                await cliente.query('BEGIN');
+
+                const { rows } = await cliente.query(
+                    `INSERT INTO campanhas (nome, lista_id, mensagem, intervalo_ms, total, status, proximo_envio_em)
+                     VALUES ($1, $2, $3, $4, $5, 'ativa', NOW())
+                     RETURNING id`,
+                    [nome, listaId || null, mensagem, intervaloMs, contatos.length]
+                );
+                const id = rows[0].id;
+
+                const tamanho = 200;
+                for (let i = 0; i < contatos.length; i += tamanho) {
+                    const parte = contatos.slice(i, i + tamanho);
+                    const valores = [];
+                    const linhas = parte.map((contato, indice) => {
+                        const base = indice * 3;
+                        valores.push(id, contato.telefone, contato.nome || null);
+                        return `($${base + 1}, $${base + 2}, $${base + 3})`;
+                    });
+                    await cliente.query(
+                        `INSERT INTO campanha_envios (campanha_id, telefone, nome) VALUES ${linhas.join(', ')}`,
+                        valores
+                    );
+                }
+
+                await cliente.query('COMMIT');
+                return { id, total: contatos.length };
+            } catch (erro) {
+                await cliente.query('ROLLBACK');
+                throw erro;
+            } finally {
+                cliente.release();
+            }
+        },
+
+        async listarCampanhas() {
+            const { rows } = await pool.query(
+                `SELECT c.id, c.nome, c.mensagem, c.intervalo_ms, c.status, c.total, c.enviados, c.falhas,
+                        c.criado_em, c.atualizado_em,
+                        (SELECT COUNT(*)::int FROM campanha_envios e
+                          WHERE e.campanha_id = c.id AND e.status IN ('pendente', 'enviando')) AS pendentes
+                   FROM campanhas c
+                  ORDER BY c.criado_em DESC
+                  LIMIT 50`
+            );
+            return rows;
+        },
+
+        async atualizarStatusCampanha(id, status) {
+            const resultado = await pool.query(
+                'UPDATE campanhas SET status = $2, atualizado_em = NOW() WHERE id = $1',
+                [id, status]
+            );
+            return resultado.rowCount > 0;
+        },
+
+        async excluirCampanha(id) {
+            const resultado = await pool.query('DELETE FROM campanhas WHERE id = $1', [id]);
+            return resultado.rowCount > 0;
+        },
+
+        async resumoCampanhas() {
+            try {
+                const { rows } = await pool.query(
+                    "SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'ativa')::int AS ativas FROM campanhas"
+                );
+                return { total: rows[0].total, ativas: rows[0].ativas };
+            } catch (erro) {
+                return { total: 0, ativas: 0 };
+            }
+        },
+
+        async proximoEnvioPendente() {
+            const { rows } = await pool.query(
+                `SELECT e.id AS envio_id, e.telefone, e.nome,
+                        c.id AS campanha_id, c.nome AS campanha, c.mensagem
+                   FROM campanha_envios e
+                   JOIN campanhas c ON c.id = e.campanha_id
+                  WHERE e.status = 'pendente'
+                    AND c.status = 'ativa'
+                    AND c.proximo_envio_em <= NOW()
+                  ORDER BY e.id ASC
+                  LIMIT 1`
+            );
+            return rows[0] || null;
+        },
+
+        async reservarEnvio(envioId) {
+            const resultado = await pool.query(
+                "UPDATE campanha_envios SET status = 'enviando' WHERE id = $1 AND status = 'pendente'",
+                [envioId]
+            );
+            return resultado.rowCount > 0;
+        },
+
+        async concluirEnvio(envioId, campanhaId, ok, erro) {
+            await pool.query(
+                'UPDATE campanha_envios SET status = $2, erro = $3, enviado_em = NOW() WHERE id = $1',
+                [envioId, ok ? 'enviado' : 'falha', erro ? String(erro).slice(0, 500) : null]
+            );
+
+            await pool.query(
+                `UPDATE campanhas c
+                    SET enviados = c.enviados + $2,
+                        falhas = c.falhas + $3,
+                        proximo_envio_em = NOW() + make_interval(secs => (c.intervalo_ms::float8 / 1000.0)),
+                        atualizado_em = NOW(),
+                        status = CASE
+                            WHEN NOT EXISTS (
+                                SELECT 1 FROM campanha_envios e
+                                 WHERE e.campanha_id = c.id AND e.status IN ('pendente', 'enviando')
+                            ) THEN 'concluida'
+                            ELSE c.status
+                        END
+                  WHERE c.id = $1`,
+                [campanhaId, ok ? 1 : 0, ok ? 0 : 1]
+            );
+        },
+
+        /* ---------------- LOGS / AUDITORIA ---------------- */
+        async listarLogs({ limite, direcao }) {
+            const filtros = [];
+            const valores = [];
+
+            if (direcao === 'recebida' || direcao === 'enviada') {
+                valores.push(direcao);
+                filtros.push(`m.direcao = $${valores.length}`);
+            }
+
+            valores.push(limite);
+            const { rows } = await pool.query(
+                `SELECT m.id, m.telefone, m.direcao, m.texto, m.criado_em, c.nome
+                   FROM mensagens m
+                   LEFT JOIN clientes c ON c.telefone = m.telefone
+                   ${filtros.length ? 'WHERE ' + filtros.join(' AND ') : ''}
+                  ORDER BY m.id DESC
+                  LIMIT $${valores.length}`,
+                valores
+            );
+            return rows;
+        },
+
+        async registrarAuditoria(ator, acao, detalhe) {
+            try {
+                await pool.query(
+                    'INSERT INTO auditoria (ator, acao, detalhe) VALUES ($1, $2, $3)',
+                    [ator || null, acao, detalhe ? String(detalhe).slice(0, 1000) : null]
+                );
+            } catch (erro) {
+                console.error('Erro ao gravar auditoria:', erro.message);
+            }
+        },
+
+        async listarAuditoria(limite) {
+            const { rows } = await pool.query(
+                'SELECT id, ator, acao, detalhe, criado_em FROM auditoria ORDER BY id DESC LIMIT $1',
+                [limite]
+            );
+            return rows;
         }
     };
 }
@@ -208,8 +495,20 @@ function criarBancoMemoria() {
     const clientes = new Map();
     const mensagens = [];
     const listas = [];
+    const usuarios = [
+        { id: 1, email: 'admin@qgcteam.com', nome: 'Admin Master', role: 'admin', ativo: true, senha_hash: gerarHash('123456'), criado_em: new Date().toISOString() },
+        { id: 2, email: 'colaborador@qgcteam.com', nome: 'Claudio', role: 'colaborador', ativo: true, senha_hash: gerarHash('123456'), criado_em: new Date().toISOString() },
+        { id: 3, email: 'vendedor@qgcteam.com', nome: 'Vendedor Jv', role: 'colaborador', ativo: true, senha_hash: gerarHash('123456'), criado_em: new Date().toISOString() }
+    ];
+    const campanhas = [];
+    const envios = [];
+    const auditoria = [];
     let mensagemId = 1;
     let listaId = 1;
+    let usuarioId = 4;
+    let campanhaId = 1;
+    let envioId = 1;
+    let auditoriaId = 1;
 
     function minutosAtras(minutos) {
         return new Date(Date.now() - minutos * 60 * 1000).toISOString();
@@ -327,6 +626,7 @@ function criarBancoMemoria() {
         async resumoDashboard() {
             const resumo = {
                 clientes: clientes.size, conversasAtivas: 0, listas: listas.length, mensagensHoje: 0,
+                campanhasAtivas: campanhas.filter((c) => c.status === 'ativa').length,
                 vendido: 0, pensando: 0, 'nao-quis': 0, finalizado: 0
             };
 
@@ -435,6 +735,206 @@ function criarBancoMemoria() {
         async excluirLista(id) {
             const indice = listas.findIndex((l) => String(l.id) === String(id));
             if (indice >= 0) listas.splice(indice, 1);
+        },
+
+        async obterContatosLista(id) {
+            const lista = listas.find((l) => String(l.id) === String(id));
+            return lista ? lista.contatos.slice() : [];
+        },
+
+        /* ---------------- USUÁRIOS ---------------- */
+        async listarUsuarios() {
+            return usuarios
+                .map((u) => ({ id: u.id, email: u.email, nome: u.nome, role: u.role, ativo: u.ativo, criado_em: u.criado_em }))
+                .sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em) || a.id - b.id);
+        },
+
+        async buscarUsuarioPorEmail(email) {
+            const alvo = String(email || '').toLowerCase();
+            return usuarios.find((u) => u.email.toLowerCase() === alvo) || null;
+        },
+
+        async criarUsuario({ email, nome, senhaHash, role }) {
+            const novo = {
+                id: usuarioId++,
+                email,
+                nome,
+                role: role || 'colaborador',
+                ativo: true,
+                senha_hash: senhaHash,
+                criado_em: new Date().toISOString()
+            };
+            usuarios.push(novo);
+            return { id: novo.id, email: novo.email, nome: novo.nome, role: novo.role, ativo: novo.ativo };
+        },
+
+        async atualizarUsuario(id, { nome, role, ativo, senhaHash }) {
+            const usuario = usuarios.find((u) => String(u.id) === String(id));
+            if (!usuario) return false;
+            if (nome !== undefined) usuario.nome = nome;
+            if (role !== undefined) usuario.role = role;
+            if (ativo !== undefined) usuario.ativo = !!ativo;
+            if (senhaHash) usuario.senha_hash = senhaHash;
+            return true;
+        },
+
+        async excluirUsuario(id) {
+            const indice = usuarios.findIndex((u) => String(u.id) === String(id));
+            if (indice < 0) return false;
+            usuarios.splice(indice, 1);
+            return true;
+        },
+
+        /* ---------------- CAMPANHAS ---------------- */
+        async criarCampanha({ nome, listaId: idLista, mensagem, intervaloMs, contatos }) {
+            const id = campanhaId++;
+            campanhas.push({
+                id,
+                nome,
+                lista_id: idLista || null,
+                mensagem,
+                intervalo_ms: intervaloMs,
+                status: 'ativa',
+                total: contatos.length,
+                enviados: 0,
+                falhas: 0,
+                proximo_envio_em: new Date().toISOString(),
+                criado_em: new Date().toISOString(),
+                atualizado_em: new Date().toISOString()
+            });
+
+            contatos.forEach((contato) => {
+                envios.push({
+                    id: envioId++,
+                    campanha_id: id,
+                    telefone: contato.telefone,
+                    nome: contato.nome || null,
+                    status: 'pendente',
+                    erro: null,
+                    enviado_em: null
+                });
+            });
+
+            return { id, total: contatos.length };
+        },
+
+        async listarCampanhas() {
+            return campanhas
+                .slice()
+                .sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
+                .slice(0, 50)
+                .map((c) => Object.assign({}, c, {
+                    pendentes: envios.filter((e) => e.campanha_id === c.id && (e.status === 'pendente' || e.status === 'enviando')).length
+                }));
+        },
+
+        async atualizarStatusCampanha(id, status) {
+            const campanha = campanhas.find((c) => String(c.id) === String(id));
+            if (!campanha) return false;
+            campanha.status = status;
+            campanha.atualizado_em = new Date().toISOString();
+            return true;
+        },
+
+        async excluirCampanha(id) {
+            const indice = campanhas.findIndex((c) => String(c.id) === String(id));
+            if (indice < 0) return false;
+            campanhas.splice(indice, 1);
+            for (let i = envios.length - 1; i >= 0; i--) {
+                if (String(envios[i].campanha_id) === String(id)) envios.splice(i, 1);
+            }
+            return true;
+        },
+
+        async resumoCampanhas() {
+            return {
+                total: campanhas.length,
+                ativas: campanhas.filter((c) => c.status === 'ativa').length
+            };
+        },
+
+        async proximoEnvioPendente() {
+            const agora = Date.now();
+
+            const envio = envios.find((e) => {
+                if (e.status !== 'pendente') return false;
+                const campanha = campanhas.find((c) => c.id === e.campanha_id);
+                if (!campanha || campanha.status !== 'ativa') return false;
+                return new Date(campanha.proximo_envio_em).getTime() <= agora;
+            });
+            if (!envio) return null;
+
+            const campanha = campanhas.find((c) => c.id === envio.campanha_id);
+            return {
+                envio_id: envio.id,
+                telefone: envio.telefone,
+                nome: envio.nome,
+                campanha_id: campanha.id,
+                campanha: campanha.nome,
+                mensagem: campanha.mensagem
+            };
+        },
+
+        async reservarEnvio(id) {
+            const envio = envios.find((e) => String(e.id) === String(id));
+            if (!envio || envio.status !== 'pendente') return false;
+            envio.status = 'enviando';
+            return true;
+        },
+
+        async concluirEnvio(id, idCampanha, ok, erro) {
+            const envio = envios.find((e) => String(e.id) === String(id));
+            if (envio) {
+                envio.status = ok ? 'enviado' : 'falha';
+                envio.erro = erro || null;
+                envio.enviado_em = new Date().toISOString();
+            }
+
+            const campanha = campanhas.find((c) => String(c.id) === String(idCampanha));
+            if (!campanha) return;
+
+            if (ok) campanha.enviados += 1; else campanha.falhas += 1;
+            campanha.proximo_envio_em = new Date(Date.now() + campanha.intervalo_ms).toISOString();
+            campanha.atualizado_em = new Date().toISOString();
+
+            const restantes = envios.filter((e) => e.campanha_id === campanha.id && (e.status === 'pendente' || e.status === 'enviando'));
+            if (!restantes.length) campanha.status = 'concluida';
+        },
+
+        /* ---------------- LOGS / AUDITORIA ---------------- */
+        async listarLogs({ limite, direcao }) {
+            return mensagens
+                .filter((m) => !direcao || m.direcao === direcao)
+                .sort((a, b) => b.id - a.id)
+                .slice(0, limite)
+                .map((m) => {
+                    const cliente = clientes.get(m.telefone);
+                    return {
+                        id: m.id,
+                        telefone: m.telefone,
+                        direcao: m.direcao,
+                        texto: m.texto,
+                        criado_em: m.criado_em,
+                        nome: cliente ? cliente.nome : null
+                    };
+                });
+        },
+
+        async registrarAuditoria(ator, acao, detalhe) {
+            auditoria.push({
+                id: auditoriaId++,
+                ator: ator || null,
+                acao,
+                detalhe: detalhe || null,
+                criado_em: new Date().toISOString()
+            });
+        },
+
+        async listarAuditoria(limite) {
+            return auditoria
+                .slice()
+                .sort((a, b) => b.id - a.id)
+                .slice(0, limite);
         }
     };
 }

@@ -314,6 +314,29 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .file-row small { color: var(--text-muted); font-size: 0.72rem; }
 
 /* =========================================================
+   CAMPANHAS
+   ========================================================= */
+.campanhas-lista { display: flex; flex-direction: column; gap: 14px; }
+.campanha-card {
+    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.campanha-head { display: flex; align-items: flex-start; gap: 12px; }
+.campanha-titulo { flex: 1; min-width: 0; }
+.campanha-titulo h4 { font-size: 0.95rem; font-weight: 800; color: #fff; margin: 0 0 3px; }
+.campanha-titulo small { color: var(--text-muted); font-size: 0.76rem; display: block; line-height: 1.4; word-break: break-word; }
+.campanha-status { font-size: 0.66rem; font-weight: 800; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+.campanha-status.ativa { color: #7CFFB2; border-color: rgba(0, 255, 128, 0.45); background: rgba(0, 255, 128, 0.12); }
+.campanha-status.pausada { color: #ffd479; border-color: rgba(255, 193, 7, 0.45); background: rgba(255, 193, 7, 0.12); }
+.campanha-status.concluida { color: #9fd8ff; border-color: rgba(0, 160, 255, 0.4); background: rgba(0, 160, 255, 0.12); }
+.campanha-status.cancelada { color: #ff9b9b; border-color: rgba(255, 68, 68, 0.4); background: rgba(255, 68, 68, 0.12); }
+.progresso { height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.progresso span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #00ff80, #00c46a); transition: width 0.4s ease; }
+.campanha-numeros { display: flex; justify-content: space-between; gap: 10px; font-size: 0.76rem; color: var(--text-muted); }
+.campanha-numeros strong { color: #fff; }
+.campanha-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* =========================================================
    AVISOS (TOASTS) E INDICADOR SSE
    ========================================================= */
 .toast-container { position: fixed; bottom: 95px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 300; pointer-events: none; }

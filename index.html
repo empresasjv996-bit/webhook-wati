@@ -100,7 +100,7 @@
                         <div class="card-icon">📢</div>
                         <div class="card-data">
                             <h3>Campanhas</h3>
-                            <p>0 em andamento</p>
+                            <p id="total-campanhas">0 em andamento</p>
                         </div>
                     </div>
                     <div class="card" onclick="irPara('canais')">
@@ -272,6 +272,192 @@
                         <li>Salve — o Render reinicia sozinho — e volte aqui para clicar em <strong>Testar conexão</strong>.</li>
                         <li>Na Wati, cadastre o webhook apontando para <code>https://SEU-APP.onrender.com/webhook?token=SEU_WEBHOOK_SECRET</code>.</li>
                     </ol>
+                </div>
+            </section>
+
+            <!-- CAMPANHAS -->
+            <section class="view oculto" id="view-campanhas">
+                <div class="section-title">
+                    <div>
+                        <h1>Campanhas</h1>
+                        <p>Disparo em fila: uma mensagem por vez, com intervalo configurável para proteger o número.</p>
+                    </div>
+                    <button class="btn-mini" onclick="carregarCampanhas()">↻ Atualizar</button>
+                </div>
+
+                <div class="listas-grid">
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 14px;">Nova campanha</h3>
+
+                        <div class="form-group">
+                            <label>Nome da campanha</label>
+                            <input id="campanha-nome" class="form-control" type="text" placeholder="Ex: Promoção Novembro">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Lista de contatos</label>
+                            <select id="campanha-lista" class="form-control">
+                                <option value="">Carregando listas...</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Mensagem</label>
+                            <textarea id="campanha-mensagem" class="form-control lista-texto" placeholder="Olá {{nome}}, temos uma novidade para você..."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Intervalo entre mensagens</label>
+                            <select id="campanha-intervalo" class="form-control">
+                                <option value="8000">8 segundos (recomendado)</option>
+                                <option value="15000">15 segundos</option>
+                                <option value="30000">30 segundos</option>
+                                <option value="60000">1 minuto</option>
+                            </select>
+                        </div>
+
+                        <button class="btn-primary" style="margin-top: 18px" onclick="criarCampanha(this)">Criar campanha</button>
+                        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 12px; line-height: 1.5;">
+                            O envio começa sozinho. Use <code>{{nome}}</code> para o nome do contato.
+                            Fora da janela de 24h do WhatsApp, a Wati só aceita <strong>template aprovado</strong>.
+                        </p>
+                    </div>
+
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Campanhas</h3>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Progresso em tempo real. Pause ou cancele quando quiser.</p>
+
+                        <div id="campanhas-lista" class="campanhas-lista">
+                            <p class="vazio">Carregando campanhas...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- LOGS -->
+            <section class="view oculto" id="view-logs">
+                <div class="section-title">
+                    <div>
+                        <h1>Logs</h1>
+                        <p>Histórico de mensagens recebidas e enviadas pelo WhatsApp.</p>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn-mini" onclick="carregarLogs('')">Todos</button>
+                        <button class="btn-mini" onclick="carregarLogs('recebida')">Recebidas</button>
+                        <button class="btn-mini" onclick="carregarLogs('enviada')">Enviadas</button>
+                        <button class="btn-mini" onclick="carregarLogs()">↻ Atualizar</button>
+                    </div>
+                </div>
+
+                <div class="screen-panel">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Quando</th>
+                                    <th>Contato</th>
+                                    <th>Direção</th>
+                                    <th>Mensagem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-logs">
+                                <tr><td colspan="4" class="vazio">Carregando logs...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AUDITORIA -->
+            <section class="view oculto" id="view-auditoria">
+                <div class="section-title">
+                    <div>
+                        <h1>Auditoria</h1>
+                        <p>Quem fez o quê e quando: logins, envios, status, campanhas e usuários.</p>
+                    </div>
+                    <button class="btn-mini" onclick="carregarAuditoria()">↻ Atualizar</button>
+                </div>
+
+                <div class="screen-panel">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Quando</th>
+                                    <th>Quem</th>
+                                    <th>Ação</th>
+                                    <th>Detalhe</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-auditoria">
+                                <tr><td colspan="4" class="vazio">Carregando auditoria...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- USUÁRIOS -->
+            <section class="view oculto" id="view-usuarios">
+                <div class="section-title">
+                    <div>
+                        <h1>Usuários</h1>
+                        <p>Quem pode entrar no painel. Desative em vez de excluir quando alguém sair da equipe.</p>
+                    </div>
+                    <button class="btn-mini" onclick="carregarUsuarios()">↻ Atualizar</button>
+                </div>
+
+                <div class="listas-grid">
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 14px;">Novo usuário</h3>
+
+                        <div class="form-group">
+                            <label>Nome</label>
+                            <input id="usuario-nome" class="form-control" type="text" placeholder="Nome do vendedor">
+                        </div>
+
+                        <div class="form-group">
+                            <label>E-mail</label>
+                            <input id="usuario-email" class="form-control" type="email" placeholder="vendedor@empresa.com">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Senha</label>
+                            <input id="usuario-senha" class="form-control" type="password" placeholder="mínimo 6 caracteres">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Perfil</label>
+                            <select id="usuario-role" class="form-control">
+                                <option value="colaborador">Colaborador (vendedor)</option>
+                                <option value="admin">Administrador</option>
+                            </select>
+                        </div>
+
+                        <button class="btn-primary" style="margin-top: 18px" onclick="criarUsuario(this)">Criar usuário</button>
+                    </div>
+
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Usuários cadastrados</h3>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Alterações de senha valem no próximo login.</p>
+
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>E-mail</th>
+                                        <th>Perfil</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-usuarios">
+                                    <tr><td colspan="5" class="vazio">Carregando usuários...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </section>
 

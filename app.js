@@ -124,6 +124,10 @@ function irPara(view) {
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
     if (view === 'canais') carregarCanais();
+    if (view === 'campanhas') { carregarListasCampanha(); carregarCampanhas(); }
+    if (view === 'logs') carregarLogs();
+    if (view === 'auditoria') carregarAuditoria();
+    if (view === 'usuarios') carregarUsuarios();
 
     const conteudo = document.querySelector('.content');
     if (conteudo) conteudo.scrollTop = 0;
@@ -184,6 +188,9 @@ async function carregarDashboard() {
 
         const totalMensagens = $('total-mensagens');
         if (totalMensagens) totalMensagens.textContent = 'Mensagens hoje: ' + (dados.mensagensHoje || 0);
+
+        const totalCampanhas = $('total-campanhas');
+        if (totalCampanhas) totalCampanhas.textContent = (dados.campanhasAtivas || 0) + ' em andamento';
     } catch (erro) {
         console.error('Erro ao carregar o painel:', erro);
     }
@@ -934,6 +941,12 @@ function conectarSSE() {
         carregarListas();
         carregarDashboard();
     });
+
+    sse.addEventListener('campanha', () => {
+        const painel = $('view-campanhas');
+        if (painel && !painel.classList.contains('oculto')) carregarCampanhas();
+        carregarDashboard();
+    });
 }
 
 function iniciarPainel() {
@@ -1028,6 +1041,421 @@ async function testarCanal(botao) {
         toast('Erro ao testar o canal.', 'erro');
     } finally {
         if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+/* =========================================================
+   PARTE 12 - CAMPANHAS
+   ========================================================= */
+
+let filtroLogs = '';
+
+function rotuloStatusCampanha(status) {
+    const mapa = {
+        ativa: 'Em andamento',
+        pausada: 'Pausada',
+        concluida: 'Concluída',
+        cancelada: 'Cancelada'
+    };
+    return mapa[status] || status || '—';
+}
+
+async function carregarListasCampanha() {
+    const select = $('campanha-lista');
+    if (!select) return;
+
+    try {
+        const resposta = await fetch('/api/listas');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const listas = await resposta.json();
+        if (!Array.isArray(listas) || !listas.length) {
+            select.innerHTML = '<option value="">Nenhuma lista importada</option>';
+            return;
+        }
+
+        const anterior = select.value;
+        select.innerHTML = '<option value="">Selecione a lista...</option>' + listas.map((lista) =>
+            `<option value="${escaparHtml(lista.id)}">${escaparHtml(lista.nome)} (${Number(lista.total) || 0} contatos)</option>`
+        ).join('');
+
+        if (anterior) select.value = anterior;
+    } catch (erro) {
+        select.innerHTML = '<option value="">Erro ao carregar listas</option>';
+    }
+}
+
+function cartaoCampanha(campanha) {
+    const total = Number(campanha.total) || 0;
+    const enviados = Number(campanha.enviados) || 0;
+    const falhas = Number(campanha.falhas) || 0;
+    const feitos = enviados + falhas;
+    const percentual = total ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
+    const status = String(campanha.status || '');
+    const mensagem = String(campanha.mensagem || '');
+
+    const botoes = [];
+    if (status === 'ativa') botoes.push('<button class="btn-mini" data-acao="pausar">⏸ Pausar</button>');
+    if (status === 'pausada') botoes.push('<button class="btn-mini" data-acao="retomar">▶ Retomar</button>');
+    if (status === 'ativa' || status === 'pausada') botoes.push('<button class="btn-mini" data-acao="cancelar">✕ Cancelar</button>');
+    botoes.push('<button class="btn-mini" data-acao="excluir">🗑️</button>');
+
+    return `
+        <div class="campanha-card" data-id="${escaparHtml(campanha.id)}">
+            <div class="campanha-head">
+                <div class="campanha-titulo">
+                    <h4>${escaparHtml(campanha.nome || 'Campanha')}</h4>
+                    <small>${escaparHtml(mensagem.slice(0, 90))}${mensagem.length > 90 ? '…' : ''}</small>
+                </div>
+                <span class="campanha-status ${escaparHtml(status)}">${escaparHtml(rotuloStatusCampanha(status))}</span>
+            </div>
+
+            <div class="progresso"><span style="width: ${percentual}%"></span></div>
+
+            <div class="campanha-numeros">
+                <span><strong>${enviados}</strong>/${total} enviados</span>
+                <span>${falhas} falha(s)</span>
+                <span>${percentual}%</span>
+            </div>
+
+            <div class="campanha-acoes">${botoes.join('')}</div>
+        </div>`;
+}
+
+async function carregarCampanhas() {
+    const container = $('campanhas-lista');
+    if (!container) return;
+
+    try {
+        const resposta = await fetch('/api/campanhas');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const campanhas = await resposta.json();
+        if (!Array.isArray(campanhas) || !campanhas.length) {
+            container.innerHTML = '<p class="vazio">Nenhuma campanha criada ainda.</p>';
+            return;
+        }
+
+        container.innerHTML = campanhas.map(cartaoCampanha).join('');
+
+        Array.from(container.querySelectorAll('.campanha-card')).forEach((card) => {
+            const id = card.dataset.id;
+            card.querySelectorAll('button[data-acao]').forEach((botao) => {
+                botao.onclick = () => {
+                    const acao = botao.dataset.acao;
+                    if (acao === 'excluir') excluirCampanha(id, botao);
+                    else acaoCampanha(id, acao, botao);
+                };
+            });
+        });
+    } catch (erro) {
+        container.innerHTML = '<p class="vazio">Não foi possível carregar as campanhas.</p>';
+    }
+}
+
+async function criarCampanha(botao) {
+    const nome = (($('campanha-nome') || {}).value || '').trim();
+    const listaId = ($('campanha-lista') || {}).value || '';
+    const mensagem = (($('campanha-mensagem') || {}).value || '').trim();
+    const intervalo = ($('campanha-intervalo') || {}).value || '8000';
+
+    if (!nome) { toast('Informe o nome da campanha.', 'erro'); return; }
+    if (!listaId) { toast('Escolha a lista de contatos.', 'erro'); return; }
+    if (!mensagem) { toast('Escreva a mensagem da campanha.', 'erro'); return; }
+
+    const textoOriginal = botao ? botao.textContent : '';
+    if (botao) { botao.disabled = true; botao.textContent = 'Criando...'; }
+
+    try {
+        const resposta = await fetch('/api/campanhas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, listaId, mensagem, intervalo: Number(intervalo) })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível criar a campanha.', 'erro');
+            return;
+        }
+
+        toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`);
+        if ($('campanha-nome')) $('campanha-nome').value = '';
+        if ($('campanha-mensagem')) $('campanha-mensagem').value = '';
+        carregarCampanhas();
+    } catch (erro) {
+        toast('Erro ao criar a campanha.', 'erro');
+    } finally {
+        if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+async function acaoCampanha(id, acao, botao) {
+    if (botao) botao.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/campanhas/' + encodeURIComponent(id) + '/' + acao, { method: 'POST' });
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível alterar a campanha.', 'erro');
+            return;
+        }
+
+        const rotulos = { pausar: 'pausada', retomar: 'retomada', cancelar: 'cancelada' };
+        toast('Campanha ' + (rotulos[acao] || 'atualizada') + '.');
+        carregarCampanhas();
+    } catch (erro) {
+        toast('Erro ao alterar a campanha.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
+async function excluirCampanha(id, botao) {
+    if (!confirm('Excluir esta campanha e todo o histórico de envios dela?')) return;
+    if (botao) botao.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/campanhas/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (!resposta.ok) { toast('Não foi possível excluir a campanha.', 'erro'); return; }
+        toast('Campanha excluída.');
+        carregarCampanhas();
+    } catch (erro) {
+        toast('Erro ao excluir a campanha.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
+/* =========================================================
+   PARTE 13 - LOGS E AUDITORIA
+   ========================================================= */
+
+async function carregarLogs(direcao) {
+    if (direcao !== undefined) filtroLogs = direcao;
+
+    const corpo = $('tabela-logs');
+    if (!corpo) return;
+
+    try {
+        const parametros = new URLSearchParams({ limite: 200 });
+        if (filtroLogs) parametros.set('direcao', filtroLogs);
+
+        const resposta = await fetch('/api/logs?' + parametros.toString());
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const logs = await resposta.json();
+        if (!Array.isArray(logs) || !logs.length) {
+            corpo.innerHTML = '<tr><td colspan="4" class="vazio">Nenhuma mensagem registrada.</td></tr>';
+            return;
+        }
+
+        corpo.innerHTML = logs.map((log) => `
+            <tr>
+                <td>${escaparHtml(formatarData(log.criado_em))}</td>
+                <td>${escaparHtml(log.nome || formatarTelefone(log.telefone))}</td>
+                <td>${log.direcao === 'recebida' ? '📥 Recebida' : '📤 Enviada'}</td>
+                <td>${escaparHtml(log.texto || '')}</td>
+            </tr>`).join('');
+    } catch (erro) {
+        corpo.innerHTML = '<tr><td colspan="4" class="vazio">Erro ao carregar os logs.</td></tr>';
+    }
+}
+
+async function carregarAuditoria() {
+    const corpo = $('tabela-auditoria');
+    if (!corpo) return;
+
+    try {
+        const resposta = await fetch('/api/auditoria?limite=200');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const registros = await resposta.json();
+        if (!Array.isArray(registros) || !registros.length) {
+            corpo.innerHTML = '<tr><td colspan="4" class="vazio">Nenhuma ação registrada ainda.</td></tr>';
+            return;
+        }
+
+        corpo.innerHTML = registros.map((registro) => `
+            <tr>
+                <td>${escaparHtml(formatarData(registro.criado_em))}</td>
+                <td>${escaparHtml(registro.ator || 'sistema')}</td>
+                <td>${escaparHtml(registro.acao || '')}</td>
+                <td>${escaparHtml(registro.detalhe || '')}</td>
+            </tr>`).join('');
+    } catch (erro) {
+        corpo.innerHTML = '<tr><td colspan="4" class="vazio">Erro ao carregar a auditoria.</td></tr>';
+    }
+}
+
+/* =========================================================
+   PARTE 14 - USUÁRIOS
+   ========================================================= */
+
+async function carregarUsuarios() {
+    const corpo = $('tabela-usuarios');
+    if (!corpo) return;
+
+    try {
+        const resposta = await fetch('/api/usuarios');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const usuarios = await resposta.json();
+        if (!Array.isArray(usuarios) || !usuarios.length) {
+            corpo.innerHTML = '<tr><td colspan="5" class="vazio">Nenhum usuário cadastrado.</td></tr>';
+            return;
+        }
+
+        corpo.innerHTML = '';
+
+        usuarios.forEach((usuario) => {
+            const linha = document.createElement('tr');
+            const ativo = usuario.ativo !== false;
+
+            linha.innerHTML = `
+                <td>${escaparHtml(usuario.nome || '-')}</td>
+                <td>${escaparHtml(usuario.email || '-')}</td>
+                <td>${usuario.role === 'admin' ? 'Administrador' : 'Colaborador'}</td>
+                <td><span class="mini-badge ${ativo ? 'status-vendido' : 'status-nao-quis'}">${ativo ? 'Ativo' : 'Inativo'}</span></td>
+                <td>
+                    <div class="actions-cell">
+                        <button class="btn-mini" data-acao="status">${ativo ? 'Desativar' : 'Ativar'}</button>
+                        <button class="btn-mini" data-acao="senha">Nova senha</button>
+                        <button class="btn-mini" data-acao="excluir">🗑️</button>
+                    </div>
+                </td>`;
+
+            const [bStatus, bSenha, bExcluir] = linha.querySelectorAll('button');
+            bStatus.onclick = () => alternarUsuario(usuario.id, !ativo, bStatus);
+            bSenha.onclick = () => trocarSenhaUsuario(usuario, bSenha);
+            bExcluir.onclick = () => excluirUsuario(usuario.id, usuario.nome, bExcluir);
+
+            corpo.appendChild(linha);
+        });
+    } catch (erro) {
+        corpo.innerHTML = '<tr><td colspan="5" class="vazio">Erro ao carregar usuários.</td></tr>';
+    }
+}
+
+async function criarUsuario(botao) {
+    const nome = (($('usuario-nome') || {}).value || '').trim();
+    const email = (($('usuario-email') || {}).value || '').trim();
+    const senha = ($('usuario-senha') || {}).value || '';
+    const role = ($('usuario-role') || {}).value || 'colaborador';
+
+    if (!nome) { toast('Informe o nome do usuário.', 'erro'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Informe um e-mail válido.', 'erro'); return; }
+    if (senha.length < 6) { toast('A senha precisa ter pelo menos 6 caracteres.', 'erro'); return; }
+
+    const textoOriginal = botao ? botao.textContent : '';
+    if (botao) { botao.disabled = true; botao.textContent = 'Criando...'; }
+
+    try {
+        const resposta = await fetch('/api/usuarios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, email, senha, role })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível criar o usuário.', 'erro');
+            return;
+        }
+
+        toast('Usuário criado.');
+        ['usuario-nome', 'usuario-email', 'usuario-senha'].forEach((id) => { if ($(id)) $(id).value = ''; });
+        carregarUsuarios();
+    } catch (erro) {
+        toast('Erro ao criar o usuário.', 'erro');
+    } finally {
+        if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+async function alternarUsuario(id, ativo, botao) {
+    if (botao) botao.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/usuarios/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ativo })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível alterar o usuário.', 'erro');
+            return;
+        }
+
+        toast(ativo ? 'Usuário ativado.' : 'Usuário desativado.');
+        carregarUsuarios();
+    } catch (erro) {
+        toast('Erro ao alterar o usuário.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
+async function trocarSenhaUsuario(usuario, botao) {
+    const nova = prompt('Nova senha para ' + (usuario.nome || usuario.email) + ' (mínimo 6 caracteres):');
+    if (nova === null) return;
+    if (String(nova).length < 6) { toast('A senha precisa ter pelo menos 6 caracteres.', 'erro'); return; }
+
+    if (botao) botao.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/usuarios/' + encodeURIComponent(usuario.id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ senha: String(nova) })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível alterar a senha.', 'erro');
+            return;
+        }
+
+        toast('Senha atualizada.');
+    } catch (erro) {
+        toast('Erro ao alterar a senha.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
+async function excluirUsuario(id, nome, botao) {
+    if (!confirm('Excluir o usuário ' + (nome || '') + '? O histórico dele continua na auditoria.')) return;
+    if (botao) botao.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/usuarios/' + encodeURIComponent(id), { method: 'DELETE' });
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível excluir o usuário.', 'erro');
+            return;
+        }
+
+        toast('Usuário excluído.');
+        carregarUsuarios();
+    } catch (erro) {
+        toast('Erro ao excluir o usuário.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
     }
 }
 
