@@ -144,6 +144,7 @@
 
                 // 3. Envia para o servidor salvar no PostgreSQL
                 try {
+                    // CORREÇÃO: Usando a URL relativa correta que o navegador entende
                     const response = await fetch('/api/status', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -156,20 +157,13 @@
                     if (response.ok) {
                         console.log('Status salvo no banco com sucesso!');
                     } else {
-                        console.error('Falha ao salvar no banco.');
+                        console.error('Falha ao salvar no banco. Código:', response.status);
                     }
                 } catch (error) {
                     console.error('Erro de conexão com o servidor:', error);
                 }
             });
         });
-
-        // (Opcional) Restaura a cor do botão baseado no banco ao carregar a página
-        window.onload = async () => {
-            try {
-                // Aqui no futuro faremos uma chamada GET para saber o status atual do cliente
-            } catch(e) {}
-        };
     </script>
 </body>
 </html>
