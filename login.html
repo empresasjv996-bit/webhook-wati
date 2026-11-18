@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QGC TEAM - Login</title>
+    <link rel="stylesheet" href="login.css">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="bg-grid"></div>
+    <div class="aurora-bg"></div>
+
+    <div class="login-container">
+        <div class="login-box">
+            <div class="logo">
+                <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
+                <h1><span>QGC</span> TEAM</h1>
+            </div>
+            <p class="subtitle">Acesse sua conta para continuar</p>
+
+            <form id="loginForm" onsubmit="fazerLogin(event)">
+                <div class="input-group">
+                    <label>E-mail</label>
+                    <input type="email" id="email" placeholder="admin@qgcteam.com" required>
+                </div>
+
+                <div class="input-group">
+                    <label>Senha</label>
+                    <input type="password" id="senha" placeholder="••••••••" required>
+                </div>
+
+                <button type="submit" class="btn-login">Entrar no Sistema</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function fazerLogin(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const senha = document.getElementById('senha').value;
+
+            // SIMULAÇÃO DE LOGIN
+            if (email === 'admin@qgcteam.com' && senha === '123456') {
+                localStorage.setItem('qgc_token', 'admin_token_123');
+                localStorage.setItem('qgc_role', 'admin');
+                window.location.href = '/admin'; 
+                
+            } else if (email === 'colaborador@qgcteam.com' && senha === '123456') {
+                localStorage.setItem('qgc_token', 'colab_token_456');
+                localStorage.setItem('qgc_role', 'colaborador');
+                window.location.href = '/colaborador';
+                
+            } else {
+                alert('E-mail ou senha incorretos!\n\nUse: admin@qgcteam.com ou colaborador@qgcteam.com\nSenha: 123456');
+            }
+        }
+    </script>
+</body>
+</html>
