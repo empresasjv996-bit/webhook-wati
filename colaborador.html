@@ -30,7 +30,6 @@
                     <span>Claudio (Atendente)</span>
                     <div class="avatar">C</div>
                 </div>
-                <!-- BOTÃO SAIR SEGURO -->
                 <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
                     <button type="submit" class="btn-sair" style="background:none; border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sair</button>
                 </form>
@@ -53,7 +52,6 @@
                 </div>
 
                 <div class="contact-list">
-                    <!-- Contato 1 (Ativo) -->
                     <div class="contact-item active">
                         <div class="avatar">J</div>
                         <div class="contact-info">
@@ -62,7 +60,6 @@
                         </div>
                         <span class="time">10:45</span>
                     </div>
-                    <!-- Contato 2 -->
                     <div class="contact-item">
                         <div class="avatar">M</div>
                         <div class="contact-info">
@@ -86,12 +83,10 @@
                 </div>
 
                 <div class="messages">
-                    <!-- Mensagem Recebida -->
                     <div class="message received">
                         <p>Olá, gostaria de saber mais sobre o serviço de vocês.</p>
                         <span>10:45</span>
                     </div>
-                    <!-- Mensagem Enviada -->
                     <div class="message sent">
                         <p>Olá João! Claro, posso te ajudar. Qual é a sua principal necessidade hoje?</p>
                         <span>10:46</span>
@@ -123,16 +118,44 @@
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
                 
                 <div class="status-options">
-                    <!-- Quando clicado, adicione a classe 'active' -->
                     <button class="status-btn vendido">Vendido (Contato Futuro)</button>
                     <button class="status-btn pensando active">Pensando</button>
                     <button class="status-btn nao-quis">Não Quis</button>
                 </div>
-
             </aside>
 
         </main>
     </div>
 
+    <!-- SCRIPT DE INTERAÇÃO DOS BOTÕES -->
+    <script>
+        const statusButtons = document.querySelectorAll('.status-btn');
+
+        // Função para remover 'active' de todos e adicionar no clicado
+        statusButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                statusButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+
+                let statusValue = 'pensando';
+                if (button.classList.contains('vendido')) statusValue = 'vendido';
+                if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
+
+                // Salva no navegador
+                localStorage.setItem('status_cliente_joao', statusValue);
+            });
+        });
+
+        // Restaura o status ao carregar a página
+        window.onload = () => {
+            const savedStatus = localStorage.getItem('status_cliente_joao');
+            if (savedStatus) {
+                statusButtons.forEach(btn => btn.classList.remove('active'));
+                if (savedStatus === 'vendido') document.querySelector('.status-btn.vendido').classList.add('active');
+                if (savedStatus === 'pensando') document.querySelector('.status-btn.pensando').classList.add('active');
+                if (savedStatus === 'nao-quis') document.querySelector('.status-btn.nao-quis').classList.add('active');
+            }
+        };
+    </script>
 </body>
 </html>

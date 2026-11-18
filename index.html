@@ -9,7 +9,6 @@
 </head>
 <body>
 
-    <!-- Fundo -->
     <div class="bg-grid"></div>
     <div class="aurora-bg"></div>
 
@@ -39,24 +38,20 @@
                     <span class="dot"></span> ONLINE
                 </div>
                 <div class="avatar">A</div>
-                <!-- BOTÃO SAIR SEGURO -->
                 <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
                     <button type="submit" class="btn-sair" style="border:none; background:none;">Sair</button>
                 </form>
             </div>
         </header>
 
-        <!-- CONTEÚDO PRINCIPAL -->
         <main class="content">
-            
-            <!-- DASHBOARD -->
             <section class="dashboard" id="home">
                 <div class="dashboard-intro">
                     <h1>Visão Geral</h1>
                     <p>Controle de desempenho e monitoramento do sistema.</p>
                 </div>
 
-                <!-- PAINEL DE DESEMPENHO (FIXO NO TOPO) -->
+                <!-- PAINEL DE DESEMPENHO -->
                 <div class="team-performance-panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="font-size: 1.2rem; color: #fff;">Desempenho da Equipe (Hoje)</h3>
@@ -71,9 +66,9 @@
                                 Claudio
                             </div>
                             <div class="seller-stats">
-                                <span class="status-badge status-vendido">3 Vendidos</span>
-                                <span class="status-badge status-pensando">2 Pensando</span>
-                                <span class="status-badge status-nao-quis">5 Não Quis</span>
+                                <span class="status-badge status-vendido" id="claudio-vendidos">3 Vendidos</span>
+                                <span class="status-badge status-pensando" id="claudio-pensando">2 Pensando</span>
+                                <span class="status-badge status-nao-quis" id="claudio-nao-quis">5 Não Quis</span>
                             </div>
                         </div>
                         <!-- Vendedor 2 -->
@@ -91,7 +86,7 @@
                     </div>
                 </div>
 
-                <!-- BENTO GRID (APENAS OS CARDS) -->
+                <!-- BENTO GRID -->
                 <div class="bento-grid">
                     <div class="card card-large" onclick="irParaAtendentes()">
                         <div class="card-icon">🎧</div>
@@ -141,7 +136,7 @@
                 </div>
             </section>
 
-            <!-- TELAS OCULTAS (Clientes, Usuários, etc - Mantidas) -->
+            <!-- TELAS OCULTAS -->
             <section class="screen-panel oculto" id="clientes-screen">
                 <div class="dashboard-intro" style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -180,7 +175,6 @@
             
             <section class="chat oculto"></section>
             <section class="client oculto" id="client-screen"></section>
-
         </main>
 
         <footer class="bottom-bar">
@@ -193,8 +187,39 @@
                 <span id="sse-indicador" class="sse-offline">● Sistema Desconectado</span>
             </div>
         </footer>
-
     </div>
-    <!-- O app.js antigo foi removido pois causava conflitos com as novas rotas -->
+
+    <!-- SCRIPT DE LEITURA DOS STATUS DO COLABORADOR -->
+    <script>
+        window.onload = () => {
+            // Verifica se o João foi marcado como "Vendido" pelo colaborador
+            const statusJoao = localStorage.getItem('status_cliente_joao');
+            
+            if (statusJoao === 'vendido') {
+                const tagClaudio = document.getElementById('claudio-vendidos');
+                if(tagClaudio) tagClaudio.textContent = '4 Vendidos'; // Atualiza o número
+            } 
+            else if (statusJoao === 'nao-quis') {
+                const tagClaudio = document.getElementById('claudio-nao-quis');
+                if(tagClaudio) tagClaudio.textContent = '6 Não Quis';
+            }
+            else if (statusJoao === 'pensando') {
+                const tagClaudio = document.getElementById('claudio-pensando');
+                if(tagClaudio) tagClaudio.textContent = '3 Pensando';
+            }
+        };
+
+        // Funções simples para o menu do topo não dar erro
+        function irParaHome() { document.getElementById('home').style.display='block'; }
+        function mostrarClientes() { 
+            document.getElementById('home').style.display='none'; 
+            document.getElementById('clientes-screen').classList.remove('oculto'); 
+        }
+        function irParaUsuarios() {
+            document.getElementById('home').style.display='none'; 
+            document.getElementById('usuarios-screen').classList.remove('oculto');
+        }
+        // (Pode ignorar as outras funções que ainda não criamos as telas)
+    </script>
 </body>
 </html>
