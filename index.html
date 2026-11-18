@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QGC TEAM - Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <title>QGC TEAM - Atendimento</title>
+    <link rel="stylesheet" href="colaborador.css">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -17,148 +17,192 @@
         <header class="top">
             <div class="logo">
                 <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
-                <span>QGC</span>
+                <span>QGC</span> TEAM
             </div>
             
-            <div class="top-nav" id="menu">
-                <button class="active">Início</button>
-                <button>Conversas</button>
-                <button>Clientes</button>
-                <button>Listas</button>
-                <button>Campanhas</button>
-                <button>Canais</button>
-                <button>Logs</button>
-                <button>Auditoria</button>
-                <button>Usuários</button>
+            <div class="status">
+                <span class="dot"></span> ONLINE
             </div>
 
             <div class="top-actions">
-                <div class="status">
-                    <span class="dot"></span> ONLINE
+                <div class="user-info">
+                    <span>Claudio (Atendente)</span>
+                    <div class="avatar">C</div>
                 </div>
-                <div class="avatar">A</div>
                 <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
-                    <button type="submit" class="btn-sair" style="border:none; background:none;">Sair</button>
+                    <button type="submit" class="btn-sair" style="background:none; border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sair</button>
                 </form>
             </div>
         </header>
 
-        <main class="content">
-            <section class="dashboard" id="home">
-                <div class="dashboard-intro">
-                    <h1>Visão Geral</h1>
-                    <p>Controle de desempenho e monitoramento do sistema em tempo real.</p>
+        <main class="workspace">
+            
+            <aside class="sidebar">
+                <div class="filters">
+                    <button class="active">Aguardando</button>
+                    <button>Meus</button>
+                    <button>Finalizados</button>
+                </div>
+                
+                <div class="search-box">
+                    <input type="text" placeholder="Pesquisar contato...">
                 </div>
 
-                <!-- PAINEL DE DESEMPENHO -->
-                <div class="team-performance-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3 style="font-size: 1.2rem; color: #fff;">Desempenho da Equipe (Hoje)</h3>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Atualizado do Banco de Dados</span>
+                <!-- ESSA É A DIV QUE O JS ESTAVA PROCURANDO E NÃO ACHAVA -->
+                <div class="contact-list">
+                    <!-- Os contatos vão aparecer aqui via JavaScript -->
+                </div>
+            </aside>
+
+            <section class="chat-area">
+                <div class="chat-header">
+                    <div class="avatar">J</div>
+                    <div>
+                        <h2>Nenhum cliente</h2>
+                        <p>Selecione um contato</p>
                     </div>
-                    
-                    <div class="team-performance-list">
-                        <!-- Vendedor 1 -->
-                        <div class="seller-row">
-                            <div class="seller-name">
-                                <div class="avatar" style="width: 30px; height: 30px; font-size: 0.8rem; background: rgba(255,255,255,0.1);">C</div>
-                                Claudio
-                            </div>
-                            <div class="seller-stats">
-                                <span class="status-badge status-vendido" id="admin-vendidos">0 Vendidos</span>
-                                <span class="status-badge status-pensando" id="admin-pensando">0 Pensando</span>
-                                <span class="status-badge status-nao-quis" id="admin-nao-quis">0 Não Quis</span>
-                            </div>
-                        </div>
-                    </div>
+                    <button class="btn-finalizar">Finalizar Atendimento</button>
                 </div>
 
-                <!-- BENTO GRID -->
-                <div class="bento-grid">
-                    <div class="card card-large">
-                        <div class="card-icon">🎧</div>
-                        <div class="card-data">
-                            <h3>Atendentes</h3>
-                            <p>3542 conversa(s) ativa(s)</p>
-                        </div>
-                    </div>
+                <div class="messages">
+                    <!-- As mensagens vão aparecer aqui -->
+                </div>
 
-                    <div class="card">
-                        <div class="card-icon">👥</div>
-                        <div class="card-data">
-                            <h3>Clientes</h3>
-                            <p>4701 cliente(s)</p>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-icon">📂</div>
-                        <div class="card-data">
-                            <h3>Listas</h3>
-                            <p>Importar .txt</p>
-                        </div>
-                    </div>
-                    
-                    <div class="card">
-                        <div class="card-icon">📢</div>
-                        <div class="card-data">
-                            <h3>Campanhas</h3>
-                            <p>0 em andamento</p>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-icon">🛠️</div>
-                        <div class="card-data">
-                            <h3>Canais</h3>
-                            <p>3 instância(s)</p>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-icon">📝</div>
-                        <div class="card-data">
-                            <h3>Logs</h3>
-                            <p>Tempo real</p>
-                        </div>
-                    </div>
+                <div class="input-area">
+                    <input type="text" placeholder="Digite sua mensagem...">
+                    <button>➤</button>
                 </div>
             </section>
-        </main>
 
-        <footer class="bottom-bar">
-            <div class="controls">
-                <button>🔊</button>
-                <button>🔕</button>
-                <button>🔕</button>
-            </div>
-            <div class="sse-status">
-                <span class="sse-offline">● Sistema Conectado ao BD</span>
-            </div>
-        </footer>
+            <aside class="client-panel">
+                <h3>Ficha do Cliente</h3>
+                
+                <div class="info-group">
+                    <label>Nome</label>
+                    <p>-</p>
+                </div>
+                <div class="info-group">
+                    <label>Telefone</label>
+                    <p>-</p>
+                </div>
+
+                <div class="divider"></div>
+
+                <h3>Status da Negociação</h3>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
+                
+                <div class="status-options">
+                    <button class="status-btn vendido">Vendido (Contato Futuro)</button>
+                    <button class="status-btn pensando active">Pensando</button>
+                    <button class="status-btn nao-quis">Não Quis</button>
+                </div>
+            </aside>
+
+        </main>
     </div>
 
-    <!-- SCRIPT QUE LÊ OS DADOS DO BANCO E ATUALIZA A TELA -->
     <script>
-        async function carregarDadosAdmin() {
+        let clienteAtivo = null;
+
+        async function carregarClientes() {
             try {
-                const response = await fetch('/api/status');
-                const dados = await response.json();
+                const response = await fetch('/api/clientes');
+                const clientes = await response.json();
+                
+                const contactList = document.querySelector('.contact-list');
+                
+                if (!contactList) {
+                    console.error("Erro: A div .contact-list não foi encontrada no HTML.");
+                    return;
+                }
 
-                // Atualiza os números na tela (se o elemento existir)
-                const elVendido = document.getElementById('admin-vendidos');
-                const elPensando = document.getElementById('admin-pensando');
-                const elNaoQuis = document.getElementById('admin-nao-quis');
+                contactList.innerHTML = ''; 
 
-                if (elVendido) elVendido.textContent = `${dados.vendido} Vendidos`;
-                if (elPensando) elPensando.textContent = `${dados.pensando} Pensando`;
-                if (elNaoQuis) elNaoQuis.textContent = `${dados['nao-quis']} Não Quis`;
+                if (clientes.length === 0) {
+                    contactList.innerHTML = '<p style="padding:20px; color:var(--text-muted); text-align:center;">Nenhum cliente no banco.</p>';
+                    return;
+                }
+
+                clientes.forEach((cliente, index) => {
+                    const iniciais = cliente.nome.substring(0, 2).toUpperCase();
+                    const isAtivo = index === 0 ? 'active' : '';
+                    
+                    const html = `
+                        <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
+                            <div class="avatar">${iniciais}</div>
+                            <div class="contact-info">
+                                <h4>${cliente.nome}</h4>
+                                <p>${cliente.mensagem || 'Sem mensagem'}</p>
+                            </div>
+                            <span class="time">Agora</span>
+                        </div>
+                    `;
+                    contactList.innerHTML += html;
+                });
+
+                if (clientes.length > 0) {
+                    const primeiroItem = document.querySelector('.contact-item');
+                    abrirCliente(primeiroItem, clientes[0].nome, clientes[0].telefone, clientes[0].mensagem);
+                }
 
             } catch (error) {
-                console.error('Erro ao buscar dados do banco:', error);
+                console.error('Erro ao carregar clientes:', error);
             }
         }
 
-        // Executa a busca assim que a página carrega
-        window.onload = carregarDadosAdmin;
+        function abrirCliente(element, nome, telefone, mensagem) {
+            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+            if(element) element.classList.add('active');
+
+            clienteAtivo = { nome, telefone };
+
+            document.querySelector('.chat-header h2').textContent = nome;
+            document.querySelector('.chat-header p').textContent = `Telefone: ${telefone}`;
+            
+            const fichaInfoGroups = document.querySelectorAll('.client-panel .info-group p');
+            if(fichaInfoGroups.length >= 2) {
+                fichaInfoGroups[0].textContent = nome;
+                fichaInfoGroups[1].textContent = telefone;
+            }
+
+            const chat = document.querySelector('.messages');
+            chat.innerHTML = `
+                <div class="message received">
+                    <p>${mensagem || 'Nenhuma mensagem recebida.'}</p>
+                    <span>Agora</span>
+                </div>
+            `;
+        }
+
+        const statusButtons = document.querySelectorAll('.status-btn');
+        statusButtons.forEach(button => {
+            button.addEventListener('click', async () => {
+                if (!clienteAtivo) return;
+
+                statusButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+
+                let statusValue = 'pensando';
+                if (button.classList.contains('vendido')) statusValue = 'vendido';
+                if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
+
+                try {
+                    await fetch('/api/status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            telefone: clienteAtivo.telefone,
+                            status: statusValue 
+                        })
+                    });
+                    console.log('Status atualizado no banco:', statusValue);
+                } catch (error) {
+                    console.error('Erro ao salvar:', error);
+                }
+            });
+        });
+
+        window.onload = carregarClientes;
     </script>
 </body>
 </html>
