@@ -21,22 +21,22 @@
             </div>
             
             <div class="top-nav" id="menu">
-                <button class="active">Início</button>
-                <button>Conversas</button>
-                <button>Clientes</button>
-                <button>Listas</button>
-                <button>Campanhas</button>
-                <button>Canais</button>
-                <button>Logs</button>
-                <button>Auditoria</button>
-                <button>Usuários</button>
+                <button class="active" data-view="inicio" onclick="irPara('inicio')">Início</button>
+                <button data-view="conversas" onclick="irParaConversas()">Conversas</button>
+                <button data-view="clientes" onclick="mostrarClientes()">Clientes</button>
+                <button data-view="listas" onclick="mostrarListas()">Listas</button>
+                <button data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
+                <button data-view="canais" onclick="irPara('canais')">Canais</button>
+                <button data-view="logs" onclick="irPara('logs')">Logs</button>
+                <button data-view="auditoria" onclick="irPara('auditoria')">Auditoria</button>
+                <button data-view="usuarios" onclick="irPara('usuarios')">Usuários</button>
             </div>
 
             <div class="top-actions">
                 <div class="status">
                     <span class="dot"></span> ONLINE
                 </div>
-                <div class="avatar">A</div>
+                <div class="avatar" id="avatar-usuario" title="Usuário logado">A</div>
                 <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
                     <button type="submit" class="btn-sair" style="border:none; background:none;">Sair</button>
                 </form>
@@ -44,7 +44,7 @@
         </header>
 
         <main class="content">
-            <section class="dashboard" id="home">
+            <section class="view dashboard" id="view-inicio">
                 <div class="dashboard-intro">
                     <h1>Visão Geral</h1>
                     <p>Controle de desempenho e monitoramento do sistema em tempo real.</p>
@@ -72,87 +72,269 @@
                 </div>
 
                 <div class="bento-grid">
-                    <div class="card card-large">
+                    <div class="card card-large" onclick="irParaConversas()">
                         <div class="card-icon">🎧</div>
                         <div class="card-data">
                             <h3>Atendentes</h3>
-                            <p>3542 conversa(s) ativa(s)</p>
+                            <p id="total-conversas">0 conversa(s) ativa(s)</p>
                         </div>
                     </div>
 
-                    <div class="card">
+                    <div class="card" onclick="mostrarClientes()">
                         <div class="card-icon">👥</div>
                         <div class="card-data">
                             <h3>Clientes</h3>
-                            <p>4701 cliente(s)</p>
+                            <p id="total-clientes">0 cliente(s)</p>
                         </div>
                     </div>
 
-                    <div class="card">
+                    <div class="card" onclick="mostrarListas()">
                         <div class="card-icon">📂</div>
                         <div class="card-data">
                             <h3>Listas</h3>
-                            <p>Importar .txt</p>
+                            <p id="total-listas">Importar .txt</p>
                         </div>
                     </div>
-                    
-                    <div class="card">
+
+                    <div class="card" onclick="irPara('campanhas')">
                         <div class="card-icon">📢</div>
                         <div class="card-data">
                             <h3>Campanhas</h3>
                             <p>0 em andamento</p>
                         </div>
                     </div>
-                    <div class="card">
+                    <div class="card" onclick="irPara('canais')">
                         <div class="card-icon">🛠️</div>
                         <div class="card-data">
                             <h3>Canais</h3>
-                            <p>3 instância(s)</p>
+                            <p id="total-mensagens">Mensagens hoje: 0</p>
                         </div>
                     </div>
-                    <div class="card">
+                    <div class="card" onclick="irParaConversas()">
                         <div class="card-icon">📝</div>
                         <div class="card-data">
                             <h3>Logs</h3>
-                            <p>Tempo real</p>
+                            <p>Conversas em tempo real</p>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <!-- CONVERSAS -->
+            <section class="view oculto" id="view-conversas">
+                <div class="section-title">
+                    <div>
+                        <h1>Conversas</h1>
+                        <p>Atendimentos em tempo real — abra o contato e responda pelo WhatsApp.</p>
+                    </div>
+                    <button class="btn-mini" onclick="carregarConversas()">↻ Atualizar</button>
+                </div>
+
+                <div class="conversas-layout">
+                    <aside class="painel-contatos">
+                        <input id="pesquisa-conversas" class="form-control" type="text" placeholder="Pesquisar contato..." onkeyup="pesquisarClientes(this.value)">
+                        <div class="filtros">
+                            <button class="active" onclick="filtrarConversas('ativos', this)">Aguardando</button>
+                            <button onclick="filtrarConversas('todos', this)">Todos</button>
+                            <button onclick="filtrarConversas('finalizado', this)">Finalizados</button>
+                        </div>
+                        <div class="contact-list" id="contact-list"></div>
+                    </aside>
+
+                    <section class="chat-area">
+                        <div class="chat-header">
+                            <div class="avatar" id="chat-avatar">?</div>
+                            <div>
+                                <h2 id="chat-name">Nenhuma conversa</h2>
+                                <p id="chat-status">Selecione um contato</p>
+                            </div>
+                            <div class="chat-actions">
+                                <button class="btn-mini" onclick="abrirFicha()">📋 Ficha</button>
+                                <button class="btn-mini danger" onclick="finalizarAtendimento()">✅ Finalizar</button>
+                            </div>
+                        </div>
+                        <div class="messages" id="messages"></div>
+                        <div class="input-area">
+                            <input id="message" type="text" placeholder="Digite uma mensagem...">
+                            <button onclick="sendMessage()">➤</button>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <!-- CLIENTES -->
+            <section class="view oculto" id="view-clientes">
+                <div class="section-title">
+                    <div>
+                        <h1>Clientes</h1>
+                        <p>Base completa do banco de dados com status de negociação.</p>
+                    </div>
+                    <input id="pesquisa-clientes" class="form-control" type="text" placeholder="Pesquisar por nome ou telefone..." onkeyup="pesquisarClientes(this.value)">
+                </div>
+
+                <div class="screen-panel">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Cliente</th>
+                                    <th>Telefone</th>
+                                    <th>Última mensagem</th>
+                                    <th>Status</th>
+                                    <th>Entrada</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-clientes">
+                                <tr><td colspan="6" class="vazio">Carregando clientes...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+            <!-- LISTAS -->
+            <section class="view oculto" id="view-listas">
+                <div class="section-title">
+                    <div>
+                        <h1>Listas</h1>
+                        <p>Importe um arquivo .txt (um contato por linha: telefone;nome) ou cole os contatos direto no campo.</p>
+                    </div>
+                    <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
+                </div>
+
+                <div class="listas-grid">
+                    <div class="screen-panel">
+                        <div class="form-group">
+                            <label>Nome da lista</label>
+                            <input id="lista-nome" class="form-control" type="text" placeholder="Ex: Clientes SP - Novembro">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Contatos</label>
+                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="5511999999999;João&#10;5511888888888;Maria"></textarea>
+                        </div>
+
+                        <div class="file-row">
+                            <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
+                            <small>Formatos aceitos: .txt e .csv</small>
+                        </div>
+
+                        <button class="btn-primary" style="margin-top: 18px" onclick="salvarLista()">Importar lista</button>
+                    </div>
+
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Listas salvas</h3>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Clique na lixeira para excluir uma lista.</p>
+
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Lista</th>
+                                        <th>Contatos</th>
+                                        <th>Criada em</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-listas">
+                                    <tr><td colspan="4" class="vazio">Carregando listas...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- MÓDULOS EM CONSTRUÇÃO -->
+            <section class="view oculto" id="view-modulo">
+                <div class="screen-panel" style="text-align: center; padding: 70px 30px;">
+                    <div style="font-size: 3rem; margin-bottom: 18px;">🚧</div>
+                    <h1 id="modulo-titulo" style="font-size: 1.7rem; font-weight: 800; margin-bottom: 10px;">Módulo</h1>
+                    <p style="color: var(--text-muted); max-width: 520px; margin: 0 auto;">Este módulo ainda está em construção. Já estão ativos: Conversas, Clientes, Listas e Ficha do cliente.</p>
                 </div>
             </section>
         </main>
 
         <footer class="bottom-bar">
             <div class="controls">
-                <button>🔊</button>
-                <button>🔕</button>
-                <button>🔕</button>
+                <button id="btn-som" title="Som de novas mensagens" onclick="toggleSom()">🔊</button>
+                <button id="btn-notif" title="Notificações de desktop" onclick="toggleNotificacoes()">🔕</button>
+                <button id="btn-mudo" title="Silenciar tudo" onclick="toggleMudo()">🔔</button>
             </div>
             <div class="sse-status">
-                <span class="sse-offline">● Sistema Conectado ao BD</span>
+                <span class="sse-offline" id="sse-status">● reconectando...</span>
             </div>
         </footer>
+
+        <!-- FICHA DO CLIENTE -->
+        <aside class="ficha-overlay oculto" id="ficha-overlay" onclick="if (event.target === this) fecharFicha()">
+            <div class="ficha-drawer">
+                <div class="ficha-head">
+                    <h2>📋 Ficha</h2>
+                    <button class="btn-fechar" onclick="fecharFicha()" title="Fechar">✕</button>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Empresa</h3>
+                    <div class="info-group">
+                        <label>CNPJ</label>
+                        <input id="ficha-cnpj" class="form-control" type="text" placeholder="00.000.000/0000-00">
+                    </div>
+                    <div class="info-group">
+                        <label>Nome / Empresa</label>
+                        <p id="ficha-empresa">-</p>
+                    </div>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Sócio Mestre</h3>
+                    <div class="info-group">
+                        <label>Nome</label>
+                        <input id="ficha-socio" class="form-control" type="text" placeholder="Nome do sócio">
+                    </div>
+                    <div class="info-group">
+                        <label>CPF</label>
+                        <input id="ficha-cpf" class="form-control" type="text" placeholder="000.000.000-00">
+                    </div>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Contato</h3>
+                    <div class="info-group">
+                        <label>Telefone</label>
+                        <p id="ficha-telefone">-</p>
+                    </div>
+                    <div class="info-group">
+                        <label>Responsável</label>
+                        <input id="ficha-responsavel" class="form-control" type="text" placeholder="Quem atendeu">
+                    </div>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Outros Sócios</h3>
+                    <div class="info-group">
+                        <label>Um por linha</label>
+                        <textarea id="ficha-outros" class="form-control" placeholder="Nome - CPF"></textarea>
+                    </div>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Status da Negociação</h3>
+                    <div class="status-options">
+                        <button class="status-btn vendido" data-status="vendido" onclick="mudarStatus('vendido')">Vendido (Contato Futuro)</button>
+                        <button class="status-btn pensando" data-status="pensando" onclick="mudarStatus('pensando')">Pensando</button>
+                        <button class="status-btn nao-quis" data-status="nao-quis" onclick="mudarStatus('nao-quis')">Não Quis</button>
+                    </div>
+                </div>
+
+                <div class="ficha-acoes">
+                    <button class="btn-primary" style="flex: 1" onclick="salvarFicha()">Salvar ficha</button>
+                    <button class="btn-mini" onclick="copiarFicha()">Copiar</button>
+                </div>
+            </div>
+        </aside>
     </div>
 
-    <script>
-        async function carregarDadosAdmin() {
-            try {
-                const response = await fetch('/api/status');
-                const dados = await response.json();
-
-                const elVendido = document.getElementById('admin-vendidos');
-                const elPensando = document.getElementById('admin-pensando');
-                const elNaoQuis = document.getElementById('admin-nao-quis');
-
-                if (elVendido) elVendido.textContent = `${dados.vendido} Vendidos`;
-                if (elPensando) elPensando.textContent = `${dados.pensando} Pensando`;
-                if (elNaoQuis) elNaoQuis.textContent = `${dados['nao-quis']} Não Quis`;
-
-            } catch (error) {
-                console.error('Erro ao buscar dados do banco:', error);
-            }
-        }
-
-        window.onload = carregarDadosAdmin;
-    </script>
+    <script src="app.js"></script>
 </body>
 </html>
