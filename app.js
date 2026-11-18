@@ -123,6 +123,7 @@ function irPara(view) {
     if (view === 'conversas') carregarConversas(true);
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
+    if (view === 'canais') carregarCanais();
 
     const conteudo = document.querySelector('.content');
     if (conteudo) conteudo.scrollTop = 0;
@@ -951,6 +952,100 @@ function iniciarPainel() {
         });
     }
 }
+
+/* =========================================================
+   PARTE 11 - CANAIS (WhatsApp / Wati)
+   ========================================================= */
+
+function rotuloCanal(canal) {
+    if (canal.modoDemo) return { chave: 'demo', texto: 'Modo demo' };
+    if (canal.ativo) return { chave: 'conectado', texto: 'Configurado' };
+    return { chave: 'pendente', texto: 'Pendente' };
+}
+
+function cartaoCanal(canal) {
+    const rotulo = rotuloCanal(canal);
+
+    return `
+        <div class="screen-panel canal-card">
+            <div class="canal-head">
+                <span class="canal-icone">🛠️</span>
+                <div class="canal-titulo">
+                    <h3>${escaparHtml(canal.nome || 'Canal')}</h3>
+                    <small>${escaparHtml(canal.provedor || '—')}</small>
+                </div>
+                <span class="canal-status ${rotulo.chave}">${rotulo.texto}</span>
+            </div>
+
+            <div class="canal-dados">
+                <div class="info-group"><label>Número</label><p>${escaparHtml(canal.numero || '—')}</p></div>
+                <div class="info-group"><label>Tenant</label><p>${escaparHtml(canal.tenant || '—')}</p></div>
+                <div class="info-group"><label>Host</label><p>${escaparHtml(canal.host || '—')}</p></div>
+                <div class="info-group"><label>Token</label><p>${escaparHtml(canal.token || '—')}</p></div>
+            </div>
+        </div>`;
+}
+
+async function carregarCanais() {
+    const container = $('canais-lista');
+    if (!container) return;
+
+    try {
+        const resposta = await fetch('/api/canais');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const canais = await resposta.json();
+        if (!Array.isArray(canais) || !canais.length) {
+            container.innerHTML = '<div class="screen-panel"><p class="vazio">Nenhum canal configurado.</p></div>';
+            return;
+        }
+
+        container.innerHTML = canais.map(cartaoCanal).join('');
+    } catch (erro) {
+        container.innerHTML = '<div class="screen-panel"><p class="vazio">Não foi possível carregar o canal.</p></div>';
+        toast('Erro ao carregar canais.', 'erro');
+    }
+}
+
+async function testarCanal(botao) {
+    const textoOriginal = botao ? botao.textContent : '';
+    if (botao) { botao.disabled = true; botao.textContent = 'Testando...'; }
+
+    try {
+        const resposta = await fetch('/api/canais/testar', { method: 'POST' });
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (resposta.ok && dados.ok) {
+            const extra = dados.tempoMs ? ` (${dados.tempoMs} ms)` : '';
+            toast((dados.message || 'Conexão OK.') + extra);
+        } else {
+            toast(dados.message || 'Falha ao testar a conexão.', 'erro');
+        }
+
+        carregarCanais();
+    } catch (erro) {
+        toast('Erro ao testar o canal.', 'erro');
+    } finally {
+        if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+/* =========================================================
+   SESSÃO EXPIRADA - volta para o login em qualquer 401
+   ========================================================= */
+const fetchSemSessao = window.fetch;
+
+window.fetch = async function (...argumentos) {
+    const resposta = await fetchSemSessao.apply(this, argumentos);
+    const alvo = String(argumentos[0] || '');
+
+    if (resposta.status === 401 && alvo.indexOf('/api/login') === -1 && alvo.indexOf('/api/logout') === -1) {
+        window.location.href = '/login';
+    }
+
+    return resposta;
+};
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', iniciarPainel);

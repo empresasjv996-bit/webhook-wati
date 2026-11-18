@@ -245,6 +245,36 @@
                 </div>
             </section>
 
+            <!-- CANAIS -->
+            <section class="view oculto" id="view-canais">
+                <div class="section-title">
+                    <div>
+                        <h1>Canais</h1>
+                        <p>Número de WhatsApp conectado e status da integração com a Wati.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button class="btn-mini" onclick="carregarCanais()">↻ Atualizar</button>
+                        <button class="btn-primary" onclick="testarCanal(this)">Testar conexão</button>
+                    </div>
+                </div>
+
+                <div class="canais-grid" id="canais-lista">
+                    <div class="screen-panel">
+                        <p class="vazio">Carregando canal...</p>
+                    </div>
+                </div>
+
+                <div class="screen-panel canal-ajuda-painel">
+                    <h3>Como vincular o WhatsApp</h3>
+                    <ol class="canal-ajuda">
+                        <li>No painel da Wati abra <strong>Settings → API</strong> e copie o <strong>API Endpoint</strong> (ex.: <code>https://live-mt-server.wati.io/123456789</code>) e o <strong>Bearer token</strong>.</li>
+                        <li>No Render, em <strong>Environment</strong>, crie: <code>WATI_NUMERO</code> (o número/tenant que aparece na URL), <code>WATI_TOKEN</code> (o Bearer token), <code>JWT_SECRET</code> (chave longa aleatória) e <code>WEBHOOK_SECRET</code> (opcional, protege o webhook).</li>
+                        <li>Salve — o Render reinicia sozinho — e volte aqui para clicar em <strong>Testar conexão</strong>.</li>
+                        <li>Na Wati, cadastre o webhook apontando para <code>https://SEU-APP.onrender.com/webhook?token=SEU_WEBHOOK_SECRET</code>.</li>
+                    </ol>
+                </div>
+            </section>
+
             <!-- MÓDULOS EM CONSTRUÇÃO -->
             <section class="view oculto" id="view-modulo">
                 <div class="screen-panel" style="text-align: center; padding: 70px 30px;">

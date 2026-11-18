@@ -17,13 +17,59 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(__dirname));
 
+/* ---------------------------------------------------------
+   PROTEÇÃO DAS ROTAS DE API
+   Tudo em /api exige sessão válida, exceto login/logout/health.
+   Responde 401 em JSON (o painel trata como sessão expirada).
+   --------------------------------------------------------- */
+const ROTAS_API_ABERTAS = new Set(['/login', '/logout', '/health']);
+
+app.use('/api', (req, res, next) => {
+    if (ROTAS_API_ABERTAS.has(req.path)) return next();
+
+    const token = req.cookies && req.cookies.qgc_token;
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Sessão expirada. Faça login novamente.' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (erro, decodificado) => {
+        if (erro) {
+            return res.status(401).json({ success: false, message: 'Sessão expirada. Faça login novamente.' });
+        }
+        req.user = decodificado;
+        next();
+    });
+});
+
 const PORT = process.env.PORT || 3000;
+
+// ---------------------------------------------------------
+// SEGURANÇA / CONFIGURAÇÃO (Environment do Render)
+// ---------------------------------------------------------
 const JWT_SECRET = process.env.JWT_SECRET || 'sua_chave_secreta_super_segura_123!@#';
+const JWT_SECRET_PROPRIO = Boolean(process.env.JWT_SECRET);
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''; // opcional: ?token=... no webhook
 
 // Configurações da Wati (vêm do Environment do Render)
 const WATI_TOKEN = process.env.WATI_TOKEN;
-const WATI_NUMERO = process.env.WATI_NUMERO; // seu número conectado, ex: 5513999999999
-const WATI_HOST = 'https://live-mt-server.wati.io';
+const WATI_NUMERO = process.env.WATI_NUMERO;             // número conectado, ex: 5513999999999
+const WATI_TENANT = process.env.WATI_TENANT || WATI_NUMERO; // id da URL da API (normalmente = número)
+const WATI_HOST = (process.env.WATI_HOST || 'https://live-mt-server.wati.io').replace(/\/+$/, '');
+
+function watiBase() {
+    return `${WATI_HOST}/${WATI_TENANT || ''}`.replace(/\/+$/, '');
+}
+
+function mascarar(valor) {
+    if (!valor) return '';
+    const texto = String(valor);
+    if (texto.length <= 8) return '••••';
+    return texto.substring(0, 4) + '••••' + texto.substring(texto.length - 4);
+}
+
+function watiConfigurada() {
+    return Boolean(WATI_TOKEN && WATI_TENANT);
+}
 
 // ---------------------------------------------------------
 // TEMPO REAL (SSE) - avisa o painel sempre que algo muda
@@ -134,8 +180,98 @@ app.get('/colaborador', verificarToken(['colaborador', 'admin']), (req, res) => 
 
 // Diagnóstico rápido (útil para saber se está em modo demo)
 app.get('/api/health', (req, res) => {
-    res.json({ ok: true, modoDemo: banco.modoDemo });
+    res.json({
+        ok: true,
+        modoDemo: banco.modoDemo,
+        configurado: {
+            wati: watiConfigurada(),
+            jwtSecretProprio: JWT_SECRET_PROPRIO,
+            webhookSecret: Boolean(WEBHOOK_SECRET)
+        },
+        wati: {
+            host: WATI_HOST,
+            tenant: WATI_TENANT || null,
+            numero: WATI_NUMERO || null,
+            token: mascarar(WATI_TOKEN)
+        }
+    });
 });
+
+// ---------------------------------------------------------
+// CANAIS (WhatsApp conectado)
+// ---------------------------------------------------------
+async function testarWati() {
+    if (banco.modoDemo) {
+        return { ok: true, demo: true, httpStatus: null, message: 'Modo demo: envio simulado, sem chamar a Wati.' };
+    }
+    if (!watiConfigurada()) {
+        return { ok: false, message: 'WATI_TOKEN e/ou WATI_NUMERO não configurados no Environment do Render.' };
+    }
+
+    const url = `${watiBase()}/api/v1/getContacts?pageSize=1`;
+    const inicio = Date.now();
+    const controle = new AbortController();
+    const limite = setTimeout(() => controle.abort(), 20000);
+
+    try {
+        const resposta = await fetch(url, {
+            headers: { Authorization: `Bearer ${WATI_TOKEN}` },
+            signal: controle.signal
+        });
+        const texto = await resposta.text();
+        const tempoMs = Date.now() - inicio;
+
+        let dados = null;
+        try { dados = texto ? JSON.parse(texto) : null; } catch (erro) { dados = null; }
+
+        if (resposta.ok) {
+            return {
+                ok: true,
+                httpStatus: resposta.status,
+                tempoMs,
+                message: 'Conexão com a Wati OK.',
+                amostra: Array.isArray(dados && dados.contact_list) ? dados.contact_list.length : null
+            };
+        }
+
+        const detalhe = (dados && (dados.message || dados.error)) || texto.substring(0, 200);
+        return { ok: false, httpStatus: resposta.status, tempoMs, message: `Wati respondeu ${resposta.status}: ${detalhe}` };
+    } catch (erro) {
+        const tempoMs = Date.now() - inicio;
+        const motivo = erro.name === 'AbortError' ? 'tempo esgotado (20s)' : erro.message;
+        return { ok: false, tempoMs, message: `Falha ao conectar na Wati: ${motivo}` };
+    } finally {
+        clearTimeout(limite);
+    }
+}
+
+app.get('/api/canais', (req, res) => {
+    res.json([
+        {
+            id: 'wati',
+            nome: 'WhatsApp (Wati)',
+            provedor: 'wati',
+            host: WATI_HOST,
+            tenant: WATI_TENANT || null,
+            numero: WATI_NUMERO || null,
+            token: mascarar(WATI_TOKEN),
+            ativo: watiConfigurada(),
+            modoDemo: banco.modoDemo,
+            status: banco.modoDemo ? 'demo' : (watiConfigurada() ? 'configurado' : 'pendente')
+        }
+    ]);
+});
+
+app.post('/api/canais/testar', async (req, res) => {
+    try {
+        const resultado = await testarWati();
+        res.status(resultado.ok ? 200 : 502).json(resultado);
+    } catch (erro) {
+        console.error('Erro ao testar canal:', erro.message);
+        res.status(500).json({ ok: false, message: 'Erro inesperado ao testar o canal.' });
+    }
+});
+
 
 // ---------------------------------------------------------
 // API DO BANCO DE DADOS
@@ -318,13 +454,13 @@ app.post('/api/enviar-mensagem', async (req, res) => {
     }
 
     // ----- PRODUÇÃO (Wati) -----
-    if (!WATI_TOKEN || !WATI_NUMERO) {
+    if (!watiConfigurada()) {
         console.error('WATI_TOKEN ou WATI_NUMERO não configurados no Render!');
         return res.status(500).json({ success: false, message: 'API da Wati não configurada no servidor.' });
     }
 
     try {
-        const url = `${WATI_HOST}/${WATI_NUMERO}/api/v1/sendSessionMessage/${telefone}?messageText=${encodeURIComponent(mensagem)}`;
+        const url = `${watiBase()}/api/v1/sendSessionMessage/${telefone}?messageText=${encodeURIComponent(mensagem)}`;
 
         const response = await fetch(url, {
             method: 'POST',
@@ -378,6 +514,15 @@ app.post('/api/finalizar', async (req, res) => {
 // ---------------------------------------------------------
 app.post('/webhook', async (req, res) => {
     try {
+        // Se WEBHOOK_SECRET estiver configurado, exige ?token=... (ou header x-webhook-secret)
+        if (WEBHOOK_SECRET) {
+            const recebido = req.query.token || req.get('x-webhook-secret') || '';
+            if (recebido !== WEBHOOK_SECRET) {
+                console.warn('Webhook recusado: segredo inválido.');
+                return res.sendStatus(401);
+            }
+        }
+
         const body = req.body || {};
 
         if (body.eventType === 'message' && body.text) {
