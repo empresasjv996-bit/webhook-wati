@@ -1,221 +1,104 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QGC TEAM - Atendimento</title>
-    <link rel="stylesheet" href="colaborador.css">
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-</head>
-<body>
+<script>
+    let clienteAtivo = null;
 
-    <div class="bg-grid"></div>
-    <div class="aurora-bg"></div>
-
-    <div class="app-container">
-        
-        <!-- TOPO SIMPLIFICADO -->
-        <header class="top">
-            <div class="logo">
-                <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
-                <span>QGC</span> TEAM
-            </div>
+    // Função para carregar os clientes do banco de dados
+    async function carregarClientes() {
+        try {
+            const response = await fetch('/api/clientes');
+            const clientes = await response.json();
             
-            <div class="status">
-                <span class="dot"></span> ONLINE
-            </div>
+            const contactList = document.querySelector('.contact-list');
+            contactList.innerHTML = ''; 
 
-            <div class="top-actions">
-                <div class="user-info">
-                    <span>Claudio (Atendente)</span>
-                    <div class="avatar">C</div>
-                </div>
-                <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
-                    <button type="submit" class="btn-sair" style="background:none; border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sair</button>
-                </form>
-            </div>
-        </header>
-
-        <!-- ÁREA DE TRABALHO -->
-        <main class="workspace">
-            
-            <!-- SIDEBAR: LISTA DE CONVERSAS -->
-            <aside class="sidebar">
-                <div class="filters">
-                    <button class="active">Aguardando</button>
-                    <button>Meus</button>
-                    <button>Finalizados</button>
-                </div>
-                
-                <div class="search-box">
-                    <input type="text" placeholder="Pesquisar contato...">
-                </div>
-
-                <!-- ESSA É A DIV QUE O JS ESTAVA PROCURANDO E NÃO ACHAVA -->
-                <div class="contact-list">
-                    <!-- Os contatos vão aparecer aqui via JavaScript -->
-                </div>
-            </aside>
-
-            <!-- CHAT CENTRAL -->
-            <section class="chat-area">
-                <div class="chat-header">
-                    <div class="avatar">J</div>
-                    <div>
-                        <h2>Nenhum cliente</h2>
-                        <p>Selecione um contato</p>
-                    </div>
-                    <button class="btn-finalizar">Finalizar Atendimento</button>
-                </div>
-
-                <div class="messages">
-                    <!-- As mensagens vão aparecer aqui -->
-                </div>
-
-                <div class="input-area">
-                    <input type="text" placeholder="Digite sua mensagem...">
-                    <button>➤</button>
-                </div>
-            </section>
-
-            <!-- PAINEL DA FICHA (DIREITA) -->
-            <aside class="client-panel">
-                <h3>Ficha do Cliente</h3>
-                
-                <div class="info-group">
-                    <label>Nome</label>
-                    <p>-</p>
-                </div>
-                <div class="info-group">
-                    <label>Telefone</label>
-                    <p>-</p>
-                </div>
-
-                <div class="divider"></div>
-
-                <h3>Status da Negociação</h3>
-                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
-                
-                <div class="status-options">
-                    <button class="status-btn vendido">Vendido (Contato Futuro)</button>
-                    <button class="status-btn pensando active">Pensando</button>
-                    <button class="status-btn nao-quis">Não Quis</button>
-                </div>
-            </aside>
-
-        </main>
-    </div>
-
-    <!-- SCRIPT DE INTEGRAÇÃO COM O BANCO DE DADOS -->
-    <script>
-        let clienteAtivo = null;
-
-        // Função para carregar os clientes do banco de dados
-        async function carregarClientes() {
-            try {
-                const response = await fetch('/api/clientes');
-                const clientes = await response.json();
-                
-                // Busca a div da lista
-                const contactList = document.querySelector('.contact-list');
-                
-                if (!contactList) {
-                    console.error("Erro: A div .contact-list não foi encontrada no HTML.");
-                    return;
-                }
-
-                contactList.innerHTML = ''; // Limpa a lista
-
-                if (clientes.length === 0) {
-                    contactList.innerHTML = '<p style="padding:20px; color:var(--text-muted); text-align:center;">Nenhum cliente no banco.</p>';
-                    return;
-                }
-
-                clientes.forEach((cliente, index) => {
-                    const iniciais = cliente.nome.substring(0, 2).toUpperCase();
-                    const isAtivo = index === 0 ? 'active' : '';
-                    
-                    // Monta o HTML do card do contato
-                    const html = `
-                        <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
-                            <div class="avatar">${iniciais}</div>
-                            <div class="contact-info">
-                                <h4>${cliente.nome}</h4>
-                                <p>${cliente.mensagem || 'Sem mensagem'}</p>
-                            </div>
-                            <span class="time">Agora</span>
-                        </div>
-                    `;
-                    contactList.innerHTML += html;
-                });
-
-                // Abre o primeiro cliente automaticamente
-                if (clientes.length > 0) {
-                    const primeiroItem = document.querySelector('.contact-item');
-                    abrirCliente(primeiroItem, clientes[0].nome, clientes[0].telefone, clientes[0].mensagem);
-                }
-
-            } catch (error) {
-                console.error('Erro ao carregar clientes:', error);
+            if (clientes.length === 0) {
+                contactList.innerHTML = '<p style="padding:20px; color:var(--text-muted); text-align:center;">Nenhum cliente no banco.</p>';
+                return;
             }
-        }
 
-        // Função quando clica em um contato da lista
-        function abrirCliente(element, nome, telefone, mensagem) {
-            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
-            if(element) element.classList.add('active');
-
-            clienteAtivo = { nome, telefone };
-
-            // Atualiza o header do chat
-            document.querySelector('.chat-header h2').textContent = nome;
-            document.querySelector('.chat-header p').textContent = `Telefone: ${telefone}`;
-            
-            // Atualiza a ficha do cliente na direita
-            document.querySelector('.client-panel .info-group:nth-child(1) p').textContent = nome;
-            document.querySelector('.client-panel .info-group:nth-child(2) p').textContent = telefone;
-
-            // Adiciona a mensagem no chat
-            const chat = document.querySelector('.messages');
-            chat.innerHTML = `
-                <div class="message received">
-                    <p>${mensagem}</p>
-                    <span>Agora</span>
-                </div>
-            `;
-        }
-
-        // Quando o colaborador clica no status
-        const statusButtons = document.querySelectorAll('.status-btn');
-        statusButtons.forEach(button => {
-            button.addEventListener('click', async () => {
-                if (!clienteAtivo) return;
-
-                statusButtons.forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
-
-                let statusValue = 'pensando';
-                if (button.classList.contains('vendido')) statusValue = 'vendido';
-                if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
-
-                try {
-                    await fetch('/api/status', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            telefone: clienteAtivo.telefone,
-                            status: statusValue 
-                        })
-                    });
-                    console.log('Status atualizado no banco:', statusValue);
-                } catch (error) {
-                    console.error('Erro ao salvar:', error);
-                }
+            clientes.forEach((cliente, index) => {
+                const iniciais = cliente.nome.substring(0, 2).toUpperCase();
+                const isAtivo = index === 0 ? 'active' : '';
+                
+                const html = `
+                    <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
+                        <div class="avatar">${iniciais}</div>
+                        <div class="contact-info">
+                            <h4>${cliente.nome}</h4>
+                            <p>${cliente.mensagem || 'Sem mensagem'}</p>
+                        </div>
+                        <span class="time">Agora</span>
+                    </div>
+                `;
+                contactList.innerHTML += html;
             });
-        });
 
-        // Inicia a busca de clientes quando a página carregar
-        window.onload = carregarClientes;
-    </script>
-</body>
-</html>
+            if (clientes.length > 0) {
+                const primeiroItem = document.querySelector('.contact-item');
+                abrirCliente(primeiroItem, clientes[0].nome, clientes[0].telefone, clientes[0].mensagem);
+            }
+
+        } catch (error) {
+            console.error('Erro ao carregar clientes:', error);
+        }
+    }
+
+    // Função quando clica em um contato da lista (CORRIGIDA)
+    function abrirCliente(element, nome, telefone, mensagem) {
+        document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+        if(element) element.classList.add('active');
+
+        clienteAtivo = { nome, telefone };
+
+        // Atualiza o Header do Chat
+        document.querySelector('.chat-header h2').textContent = nome;
+        document.querySelector('.chat-header p').textContent = `Telefone: ${telefone}`;
+        
+        // Atualiza a Ficha do Cliente (Usando os seletores corretos)
+        const fichaInfoGroups = document.querySelectorAll('.client-panel .info-group p');
+        if(fichaInfoGroups.length >= 2) {
+            fichaInfoGroups[0].textContent = nome;
+            fichaInfoGroups[1].textContent = telefone;
+        }
+
+        // Adiciona a mensagem no chat
+        const chat = document.querySelector('.messages');
+        chat.innerHTML = `
+            <div class="message received">
+                <p>${mensagem || 'Nenhuma mensagem recebida.'}</p>
+                <span>Agora</span>
+            </div>
+        `;
+    }
+
+    // Quando o colaborador clica no status
+    const statusButtons = document.querySelectorAll('.status-btn');
+    statusButtons.forEach(button => {
+        button.addEventListener('click', async () => {
+            if (!clienteAtivo) return;
+
+            statusButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            let statusValue = 'pensando';
+            if (button.classList.contains('vendido')) statusValue = 'vendido';
+            if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
+
+            try {
+                await fetch('/api/status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        telefone: clienteAtivo.telefone,
+                        status: statusValue 
+                    })
+                });
+                console.log('Status atualizado no banco:', statusValue);
+            } catch (error) {
+                console.error('Erro ao salvar:', error);
+            }
+        });
+    });
+
+    // Inicia a busca de clientes quando a página carregar
+    window.onload = carregarClientes;
+</script>
