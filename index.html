@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QGC TEAM - Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="bg-grid"></div>
+    <div class="aurora-bg"></div>
+
+    <div class="app-container">
+        
+        <header class="top">
+            <div class="logo">
+                <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
+                <span>QGC</span>
+            </div>
+            
+            <div class="top-nav" id="menu">
+                <button onclick="irParaHome()" class="active">Início</button>
+                <button onclick="irParaConversas()">Conversas</button>
+                <button onclick="mostrarClientes()">Clientes</button>
+                <button onclick="mostrarListas()" id="btn-listas">Listas</button>
+                <button onclick="irParaCampanhas()">Campanhas</button>
+                <button onclick="irParaCanais()">Canais</button>
+                <button onclick="irParaLogs()">Logs</button>
+                <button onclick="irParaAuditoria()">Auditoria</button>
+                <button onclick="irParaUsuarios()">Usuários</button>
+            </div>
+
+            <div class="top-actions">
+                <div class="status">
+                    <span class="dot"></span> ONLINE
+                </div>
+                <div class="avatar">A</div>
+                <button class="btn-sair" onclick="sair()">Sair</button>
+            </div>
+        </header>
+
+        <main class="content">
+            
+            <!-- DASHBOARD -->
+            <section class="dashboard" id="home">
+                <div class="dashboard-intro">
+                    <h1>Visão Geral</h1>
+                    <p>Controle de desempenho e monitoramento do sistema.</p>
+                </div>
+
+                <!-- PAINEL DE DESEMPENHO (FIXO NO TOPO) -->
+                <div class="team-performance-panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="font-size: 1.2rem; color: #fff;">Desempenho da Equipe (Hoje)</h3>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Atualizado agora</span>
+                    </div>
+                    
+                    <div class="team-performance-list">
+                        <!-- Vendedor 1 -->
+                        <div class="seller-row">
+                            <div class="seller-name">
+                                <div class="avatar" style="width: 30px; height: 30px; font-size: 0.8rem; background: rgba(255,255,255,0.1);">C</div>
+                                Claudio
+                            </div>
+                            <div class="seller-stats">
+                                <span class="status-badge status-vendido">3 Vendidos</span>
+                                <span class="status-badge status-pensando">2 Pensando</span>
+                                <span class="status-badge status-nao-quis">5 Não Quis</span>
+                            </div>
+                        </div>
+                        <!-- Vendedor 2 -->
+                        <div class="seller-row">
+                            <div class="seller-name">
+                                <div class="avatar" style="width: 30px; height: 30px; font-size: 0.8rem; background: rgba(255,255,255,0.1);">M</div>
+                                Maria
+                            </div>
+                            <div class="seller-stats">
+                                <span class="status-badge status-vendido">7 Vendidos</span>
+                                <span class="status-badge status-pensando">1 Pensando</span>
+                                <span class="status-badge status-nao-quis">2 Não Quis</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BENTO GRID (APENAS OS CARDS) -->
+                <div class="bento-grid">
+                    <div class="card card-large" onclick="irParaAtendentes()">
+                        <div class="card-icon">🎧</div>
+                        <div class="card-data">
+                            <h3>Atendentes</h3>
+                            <p>3542 conversa(s) ativa(s)</p>
+                        </div>
+                    </div>
+
+                    <div class="card" onclick="mostrarClientes()">
+                        <div class="card-icon">👥</div>
+                        <div class="card-data">
+                            <h3>Clientes</h3>
+                            <p>4701 cliente(s)</p>
+                        </div>
+                    </div>
+
+                    <div class="card" onclick="mostrarListas()">
+                        <div class="card-icon">📂</div>
+                        <div class="card-data">
+                            <h3>Listas</h3>
+                            <p>Importar .txt</p>
+                        </div>
+                    </div>
+                    
+                    <div class="card" onclick="irParaCampanhas()">
+                        <div class="card-icon">📢</div>
+                        <div class="card-data">
+                            <h3>Campanhas</h3>
+                            <p>0 em andamento</p>
+                        </div>
+                    </div>
+                    <div class="card" onclick="irParaCanais()">
+                        <div class="card-icon">🛠️</div>
+                        <div class="card-data">
+                            <h3>Canais</h3>
+                            <p>3 instância(s)</p>
+                        </div>
+                    </div>
+                    <div class="card" onclick="irParaLogs()">
+                        <div class="card-icon">📝</div>
+                        <div class="card-data">
+                            <h3>Logs</h3>
+                            <p>Tempo real</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TELAS OCULTAS -->
+            <section class="screen-panel oculto" id="clientes-screen">
+                <div class="dashboard-intro" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <h1>Gestão de Clientes</h1>
+                        <p>Visualize e gerencie todos os clientes cadastrados.</p>
+                    </div>
+                    <button class="btn-primary">+ Novo Cliente</button>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>CNPJ</th>
+                                <th>Empresa</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>12.345.678/0001-90</td>
+                                <td>Tech Solutions LTDA</td>
+                                <td><span class="status-badge status-vendido">Vendido</span></td>
+                                <td><button style="color:var(--green); background:none; border:none; cursor:pointer;">Editar</button></td>
+                            </tr>
+                            <tr>
+                                <td>98.765.432/0001-10</td>
+                                <td>Comércio Varejista S.A</td>
+                                <td><span class="status-badge status-pensando">Pensando</span></td>
+                                <td><button style="color:var(--green); background:none; border:none; cursor:pointer;">Editar</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="screen-panel oculto" id="usuarios-screen">
+                <div class="dashboard-intro">
+                    <h1>Gestão de Usuários</h1>
+                </div>
+                <div class="form-group">
+                    <label>Nome do Colaborador</label>
+                    <input type="text" class="form-control" placeholder="Ex: Claudio">
+                </div>
+                <button class="btn-primary">Cadastrar</button>
+            </section>
+
+            <section class="chat oculto">
+                <div class="chat-header">
+                    <button id="btn-voltar-chat" class="btn-mobile">←</button>
+                    <h2 id="chat-name">Conversa</h2>
+                </div>
+                <div id="messages" class="messages"></div>
+            </section>
+
+            <section class="client oculto" id="client-screen"></section>
+
+        </main>
+
+        <footer class="bottom-bar">
+            <div class="controls">
+                <button id="btn-som">🔊</button>
+                <button id="btn-notif">🔕</button>
+                <button id="btn-mudo">🔕</button>
+            </div>
+            <div class="sse-status">
+                <span id="sse-indicador" class="sse-offline">● Sistema Desconectado</span>
+            </div>
+        </footer>
+
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
