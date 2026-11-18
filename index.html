@@ -14,7 +14,6 @@
 
     <div class="app-container">
         
-        <!-- NAVBAR SUPERIOR -->
         <header class="top">
             <div class="logo">
                 <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
@@ -22,15 +21,15 @@
             </div>
             
             <div class="top-nav" id="menu">
-                <button onclick="irParaHome()" class="active">Início</button>
-                <button onclick="irParaConversas()">Conversas</button>
-                <button onclick="mostrarClientes()">Clientes</button>
-                <button onclick="mostrarListas()" id="btn-listas">Listas</button>
-                <button onclick="irParaCampanhas()">Campanhas</button>
-                <button onclick="irParaCanais()">Canais</button>
-                <button onclick="irParaLogs()">Logs</button>
-                <button onclick="irParaAuditoria()">Auditoria</button>
-                <button onclick="irParaUsuarios()">Usuários</button>
+                <button class="active">Início</button>
+                <button>Conversas</button>
+                <button>Clientes</button>
+                <button>Listas</button>
+                <button>Campanhas</button>
+                <button>Canais</button>
+                <button>Logs</button>
+                <button>Auditoria</button>
+                <button>Usuários</button>
             </div>
 
             <div class="top-actions">
@@ -48,14 +47,14 @@
             <section class="dashboard" id="home">
                 <div class="dashboard-intro">
                     <h1>Visão Geral</h1>
-                    <p>Controle de desempenho e monitoramento do sistema.</p>
+                    <p>Controle de desempenho e monitoramento do sistema em tempo real.</p>
                 </div>
 
                 <!-- PAINEL DE DESEMPENHO -->
                 <div class="team-performance-panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="font-size: 1.2rem; color: #fff;">Desempenho da Equipe (Hoje)</h3>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Atualizado agora</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Atualizado do Banco de Dados</span>
                     </div>
                     
                     <div class="team-performance-list">
@@ -66,21 +65,9 @@
                                 Claudio
                             </div>
                             <div class="seller-stats">
-                                <span class="status-badge status-vendido" id="claudio-vendidos">3 Vendidos</span>
-                                <span class="status-badge status-pensando" id="claudio-pensando">2 Pensando</span>
-                                <span class="status-badge status-nao-quis" id="claudio-nao-quis">5 Não Quis</span>
-                            </div>
-                        </div>
-                        <!-- Vendedor 2 -->
-                        <div class="seller-row">
-                            <div class="seller-name">
-                                <div class="avatar" style="width: 30px; height: 30px; font-size: 0.8rem; background: rgba(255,255,255,0.1);">M</div>
-                                Maria
-                            </div>
-                            <div class="seller-stats">
-                                <span class="status-badge status-vendido">7 Vendidos</span>
-                                <span class="status-badge status-pensando">1 Pensando</span>
-                                <span class="status-badge status-nao-quis">2 Não Quis</span>
+                                <span class="status-badge status-vendido" id="admin-vendidos">0 Vendidos</span>
+                                <span class="status-badge status-pensando" id="admin-pensando">0 Pensando</span>
+                                <span class="status-badge status-nao-quis" id="admin-nao-quis">0 Não Quis</span>
                             </div>
                         </div>
                     </div>
@@ -88,7 +75,7 @@
 
                 <!-- BENTO GRID -->
                 <div class="bento-grid">
-                    <div class="card card-large" onclick="irParaAtendentes()">
+                    <div class="card card-large">
                         <div class="card-icon">🎧</div>
                         <div class="card-data">
                             <h3>Atendentes</h3>
@@ -96,7 +83,7 @@
                         </div>
                     </div>
 
-                    <div class="card" onclick="mostrarClientes()">
+                    <div class="card">
                         <div class="card-icon">👥</div>
                         <div class="card-data">
                             <h3>Clientes</h3>
@@ -104,7 +91,7 @@
                         </div>
                     </div>
 
-                    <div class="card" onclick="mostrarListas()">
+                    <div class="card">
                         <div class="card-icon">📂</div>
                         <div class="card-data">
                             <h3>Listas</h3>
@@ -112,21 +99,21 @@
                         </div>
                     </div>
                     
-                    <div class="card" onclick="irParaCampanhas()">
+                    <div class="card">
                         <div class="card-icon">📢</div>
                         <div class="card-data">
                             <h3>Campanhas</h3>
                             <p>0 em andamento</p>
                         </div>
                     </div>
-                    <div class="card" onclick="irParaCanais()">
+                    <div class="card">
                         <div class="card-icon">🛠️</div>
                         <div class="card-data">
                             <h3>Canais</h3>
                             <p>3 instância(s)</p>
                         </div>
                     </div>
-                    <div class="card" onclick="irParaLogs()">
+                    <div class="card">
                         <div class="card-icon">📝</div>
                         <div class="card-data">
                             <h3>Logs</h3>
@@ -135,91 +122,43 @@
                     </div>
                 </div>
             </section>
-
-            <!-- TELAS OCULTAS -->
-            <section class="screen-panel oculto" id="clientes-screen">
-                <div class="dashboard-intro" style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <h1>Gestão de Clientes</h1>
-                        <p>Visualize e gerencie todos os clientes cadastrados.</p>
-                    </div>
-                    <button class="btn-primary">+ Novo Cliente</button>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>CNPJ</th>
-                                <th>Empresa</th>
-                                <th>Status</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>12.345.678/0001-90</td>
-                                <td>Tech Solutions LTDA</td>
-                                <td><span class="status-badge status-vendido">Vendido</span></td>
-                                <td><button style="color:var(--green); background:none; border:none; cursor:pointer;">Editar</button></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="screen-panel oculto" id="usuarios-screen">
-                <div class="dashboard-intro">
-                    <h1>Gestão de Usuários</h1>
-                </div>
-            </section>
-            
-            <section class="chat oculto"></section>
-            <section class="client oculto" id="client-screen"></section>
         </main>
 
         <footer class="bottom-bar">
             <div class="controls">
-                <button id="btn-som">🔊</button>
-                <button id="btn-notif">🔕</button>
-                <button id="btn-mudo">🔕</button>
+                <button>🔊</button>
+                <button>🔕</button>
+                <button>🔕</button>
             </div>
             <div class="sse-status">
-                <span id="sse-indicador" class="sse-offline">● Sistema Desconectado</span>
+                <span class="sse-offline">● Sistema Conectado ao BD</span>
             </div>
         </footer>
     </div>
 
-    <!-- SCRIPT DE LEITURA DOS STATUS DO COLABORADOR -->
+    <!-- SCRIPT QUE LÊ OS DADOS DO BANCO E ATUALIZA A TELA -->
     <script>
-        window.onload = () => {
-            // Verifica se o João foi marcado como "Vendido" pelo colaborador
-            const statusJoao = localStorage.getItem('status_cliente_joao');
-            
-            if (statusJoao === 'vendido') {
-                const tagClaudio = document.getElementById('claudio-vendidos');
-                if(tagClaudio) tagClaudio.textContent = '4 Vendidos'; // Atualiza o número
-            } 
-            else if (statusJoao === 'nao-quis') {
-                const tagClaudio = document.getElementById('claudio-nao-quis');
-                if(tagClaudio) tagClaudio.textContent = '6 Não Quis';
-            }
-            else if (statusJoao === 'pensando') {
-                const tagClaudio = document.getElementById('claudio-pensando');
-                if(tagClaudio) tagClaudio.textContent = '3 Pensando';
-            }
-        };
+        async function carregarDadosAdmin() {
+            try {
+                const response = await fetch('/api/status');
+                const dados = await response.json();
 
-        // Funções simples para o menu do topo não dar erro
-        function irParaHome() { document.getElementById('home').style.display='block'; }
-        function mostrarClientes() { 
-            document.getElementById('home').style.display='none'; 
-            document.getElementById('clientes-screen').classList.remove('oculto'); 
+                // Atualiza os números na tela (se o elemento existir)
+                const elVendido = document.getElementById('admin-vendidos');
+                const elPensando = document.getElementById('admin-pensando');
+                const elNaoQuis = document.getElementById('admin-nao-quis');
+
+                if (elVendido) elVendido.textContent = `${dados.vendido} Vendidos`;
+                if (elPensando) elPensando.textContent = `${dados.pensando} Pensando`;
+                if (elNaoQuis) elNaoQuis.textContent = `${dados['nao-quis']} Não Quis`;
+
+            } catch (error) {
+                console.error('Erro ao buscar dados do banco:', error);
+            }
         }
-        function irParaUsuarios() {
-            document.getElementById('home').style.display='none'; 
-            document.getElementById('usuarios-screen').classList.remove('oculto');
-        }
-        // (Pode ignorar as outras funções que ainda não criamos as telas)
+
+        // Executa a busca assim que a página carrega
+        window.onload = carregarDadosAdmin;
     </script>
 </body>
 </html>
