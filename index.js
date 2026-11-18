@@ -12,6 +12,11 @@ app.use(express.static(__dirname));
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'sua_chave_secreta_super_segura_123!@#';
 
+// Configurações da Wati (vêm do Environment do Render)
+const WATI_TOKEN = process.env.WATI_TOKEN;
+const WATI_NUMERO = process.env.WATI_NUMERO; // seu número conectado, ex: 5513999999999
+const WATI_HOST = 'https://live-mt-server.wati.io';
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
@@ -99,13 +104,37 @@ app.get('/api/clientes', async (req, res) => {
     } catch (error) { res.status(500).json({ error: 'Erro' }); }
 });
 
+// ENVIO REAL DE MENSAGEM VIA API DA WATI
 app.post('/api/enviar-mensagem', async (req, res) => {
     const { telefone, mensagem } = req.body;
-    console.log(`Enviando para Wati -> Para: ${telefone}, Msg: ${mensagem}`);
+
+    if (!WATI_TOKEN || !WATI_NUMERO) {
+        console.error('WATI_TOKEN ou WATI_NUMERO não configurados no Render!');
+        return res.status(500).json({ success: false, message: 'API da Wati não configurada no servidor.' });
+    }
+
     try {
-        await pool.query('UPDATE clientes SET mensagem = $1 WHERE telefone = $2', [`Você: ${mensagem}`, telefone]);
-        res.json({ success: true });
-    } catch (error) { res.status(500).json({ success: false }); }
+        const url = `${WATI_HOST}/${WATI_NUMERO}/api/v1/sendSessionMessage/${telefone}?messageText=${encodeURIComponent(mensagem)}`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${WATI_TOKEN}` }
+        });
+
+        const data = await response.json();
+        console.log('Resposta da Wati:', JSON.stringify(data));
+
+        if (response.ok && (data.result === true || data.success === true)) {
+            await pool.query('UPDATE clientes SET mensagem = $1 WHERE telefone = $2', [`Você: ${mensagem}`, telefone]);
+            return res.json({ success: true });
+        } else {
+            console.error('Wati recusou o envio:', data.message || data);
+            return res.status(502).json({ success: false, message: data.message || 'Wati recusou o envio.' });
+        }
+    } catch (error) {
+        console.error('Erro ao chamar a API da Wati:', error.message);
+        res.status(500).json({ success: false, message: 'Erro de conexão com a Wati.' });
+    }
 });
 
 app.post('/api/finalizar', async (req, res) => {
@@ -117,7 +146,7 @@ app.post('/api/finalizar', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// WEBHOOK
+// WEBHOOK DA WATI
 // ---------------------------------------------------------
 app.post('/webhook', async (req, res) => {
     try {
@@ -127,14 +156,21 @@ app.post('/webhook', async (req, res) => {
             const nome = body.senderName || 'Cliente Novo';
             const mensagem = body.text;
 
+            // CORREÇÃO: se o cliente voltar a falar, o status volta para 'pensando' (reabre o atendimento)
             await pool.query(`
                 INSERT INTO clientes (nome, telefone, mensagem, status) 
                 VALUES ($1, $2, $3, 'pensando') 
-                ON CONFLICT (telefone) DO UPDATE SET mensagem = $3, nome = $1, criado_em = NOW()
+                ON CONFLICT (telefone) DO UPDATE 
+                SET mensagem = $3, nome = $1, criado_em = NOW(), status = 'pensando'
             `, [nome, telefone, mensagem]);
+
+            console.log(`Mensagem salva -> ${nome} (${telefone}): ${mensagem}`);
         }
         res.sendStatus(200);
-    } catch (error) { res.sendStatus(500); }
+    } catch (error) {
+        console.error('Erro no webhook:', error);
+        res.sendStatus(500);
+    }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
