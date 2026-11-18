@@ -127,34 +127,48 @@
         </main>
     </div>
 
-    <!-- SCRIPT DE INTERAÇÃO DOS BOTÕES -->
+    <!-- SCRIPT DE INTEGRAÇÃO COM O BANCO DE DADOS -->
     <script>
         const statusButtons = document.querySelectorAll('.status-btn');
 
-        // Função para remover 'active' de todos e adicionar no clicado
         statusButtons.forEach(button => {
-            button.addEventListener('click', () => {
+            button.addEventListener('click', async () => {
+                // 1. Atualiza o visual (botão ativo)
                 statusButtons.forEach(btn => btn.classList.remove('active'));
                 button.classList.add('active');
 
+                // 2. Define o valor do status
                 let statusValue = 'pensando';
                 if (button.classList.contains('vendido')) statusValue = 'vendido';
                 if (button.classList.contains('nao-quis')) statusValue = 'nao-quis';
 
-                // Salva no navegador
-                localStorage.setItem('status_cliente_joao', statusValue);
+                // 3. Envia para o servidor salvar no PostgreSQL
+                try {
+                    const response = await fetch('/api/status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            nome: 'João Silva', // No futuro, isso virá dinamicamente do chat ativo
+                            status: statusValue 
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        console.log('Status salvo no banco com sucesso!');
+                    } else {
+                        console.error('Falha ao salvar no banco.');
+                    }
+                } catch (error) {
+                    console.error('Erro de conexão com o servidor:', error);
+                }
             });
         });
 
-        // Restaura o status ao carregar a página
-        window.onload = () => {
-            const savedStatus = localStorage.getItem('status_cliente_joao');
-            if (savedStatus) {
-                statusButtons.forEach(btn => btn.classList.remove('active'));
-                if (savedStatus === 'vendido') document.querySelector('.status-btn.vendido').classList.add('active');
-                if (savedStatus === 'pensando') document.querySelector('.status-btn.pensando').classList.add('active');
-                if (savedStatus === 'nao-quis') document.querySelector('.status-btn.nao-quis').classList.add('active');
-            }
+        // (Opcional) Restaura a cor do botão baseado no banco ao carregar a página
+        window.onload = async () => {
+            try {
+                // Aqui no futuro faremos uma chamada GET para saber o status atual do cliente
+            } catch(e) {}
         };
     </script>
 </body>
