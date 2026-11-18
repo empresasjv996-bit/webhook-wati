@@ -30,7 +30,10 @@
                     <span>Claudio (Atendente)</span>
                     <div class="avatar">C</div>
                 </div>
-                <button class="btn-sair" onclick="sair()">Sair</button>
+                <!-- BOTÃO SAIR SEGURO -->
+                <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
+                    <button type="submit" class="btn-sair" style="background:none; border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sair</button>
+                </form>
             </div>
         </header>
 

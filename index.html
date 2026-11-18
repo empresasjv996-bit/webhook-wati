@@ -9,11 +9,13 @@
 </head>
 <body>
 
+    <!-- Fundo -->
     <div class="bg-grid"></div>
     <div class="aurora-bg"></div>
 
     <div class="app-container">
         
+        <!-- NAVBAR SUPERIOR -->
         <header class="top">
             <div class="logo">
                 <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
@@ -37,10 +39,14 @@
                     <span class="dot"></span> ONLINE
                 </div>
                 <div class="avatar">A</div>
-                <button class="btn-sair" onclick="sair()">Sair</button>
+                <!-- BOTÃO SAIR SEGURO -->
+                <form action="/api/logout" method="POST" style="display:inline; margin:0; padding:0;">
+                    <button type="submit" class="btn-sair" style="border:none; background:none;">Sair</button>
+                </form>
             </div>
         </header>
 
+        <!-- CONTEÚDO PRINCIPAL -->
         <main class="content">
             
             <!-- DASHBOARD -->
@@ -135,7 +141,7 @@
                 </div>
             </section>
 
-            <!-- TELAS OCULTAS -->
+            <!-- TELAS OCULTAS (Clientes, Usuários, etc - Mantidas) -->
             <section class="screen-panel oculto" id="clientes-screen">
                 <div class="dashboard-intro" style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -161,12 +167,6 @@
                                 <td><span class="status-badge status-vendido">Vendido</span></td>
                                 <td><button style="color:var(--green); background:none; border:none; cursor:pointer;">Editar</button></td>
                             </tr>
-                            <tr>
-                                <td>98.765.432/0001-10</td>
-                                <td>Comércio Varejista S.A</td>
-                                <td><span class="status-badge status-pensando">Pensando</span></td>
-                                <td><button style="color:var(--green); background:none; border:none; cursor:pointer;">Editar</button></td>
-                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -176,21 +176,9 @@
                 <div class="dashboard-intro">
                     <h1>Gestão de Usuários</h1>
                 </div>
-                <div class="form-group">
-                    <label>Nome do Colaborador</label>
-                    <input type="text" class="form-control" placeholder="Ex: Claudio">
-                </div>
-                <button class="btn-primary">Cadastrar</button>
             </section>
-
-            <section class="chat oculto">
-                <div class="chat-header">
-                    <button id="btn-voltar-chat" class="btn-mobile">←</button>
-                    <h2 id="chat-name">Conversa</h2>
-                </div>
-                <div id="messages" class="messages"></div>
-            </section>
-
+            
+            <section class="chat oculto"></section>
             <section class="client oculto" id="client-screen"></section>
 
         </main>
@@ -207,6 +195,6 @@
         </footer>
 
     </div>
-    <script src="app.js"></script>
+    <!-- O app.js antigo foi removido pois causava conflitos com as novas rotas -->
 </body>
 </html>
