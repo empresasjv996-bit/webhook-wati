@@ -18,21 +18,23 @@ const pool = new Pool({
 });
 
 // ---------------------------------------------------------
-// ROTAS DE AUTENTICAÇÃO E PROTEÇÃO
+// AUTENTICAÇÃO
 // ---------------------------------------------------------
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 
 app.post('/api/login', (req, res) => {
     const { email, senha } = req.body;
     let role = null;
-    if (email === 'admin@qgcteam.com' && senha === '123456') role = 'admin';
-    else if (email === 'colaborador@qgcteam.com' && senha === '123456') role = 'colaborador';
-    else if (email === 'vendedor@qgcteam.com' && senha === '123456') role = 'colaborador'; 
+    let nome = null;
+
+    if (email === 'admin@qgcteam.com' && senha === '123456') { role = 'admin'; nome = 'Admin Master'; }
+    else if (email === 'colaborador@qgcteam.com' && senha === '123456') { role = 'colaborador'; nome = 'Claudio'; }
+    else if (email === 'vendedor@qgcteam.com' && senha === '123456') { role = 'colaborador'; nome = 'Vendedor Jv'; }
 
     if (role) {
-        const token = jwt.sign({ email, role }, JWT_SECRET, { expiresIn: '8h' });
+        const token = jwt.sign({ email, role, nome }, JWT_SECRET, { expiresIn: '8h' });
         res.cookie('qgc_token', token, { httpOnly: true, maxAge: 8 * 60 * 60 * 1000 });
-        return res.json({ success: true, role });
+        return res.json({ success: true, role, nome });
     } else {
         return res.status(401).json({ success: false, message: 'E-mail ou senha incorretos.' });
     }
@@ -49,6 +51,7 @@ function verificarToken(rolePermitida) {
         if (!token) return res.redirect('/login');
         jwt.verify(token, JWT_SECRET, (err, decoded) => {
             if (err) return res.redirect('/login');
+            req.user = decoded;
             if (rolePermitida) {
                 const permitido = Array.isArray(rolePermitida) ? rolePermitida.includes(decoded.role) : decoded.role === rolePermitida;
                 if (!permitido) return res.status(403).send('Acesso negado.');
@@ -58,8 +61,12 @@ function verificarToken(rolePermitida) {
     };
 }
 
+app.get('/api/me', verificarToken(), (req, res) => {
+    res.json({ nome: req.user.nome, role: req.user.role });
+});
+
 // ---------------------------------------------------------
-// ROTAS PROTEGIDAS
+// ROTAS PROTEGIDAS (PÁGINAS)
 // ---------------------------------------------------------
 app.get('/', (req, res) => res.redirect('/login'));
 app.get('/admin', verificarToken('admin'), (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
@@ -68,82 +75,66 @@ app.get('/colaborador', verificarToken(['colaborador', 'admin']), (req, res) => 
 // ---------------------------------------------------------
 // API DO BANCO DE DADOS
 // ---------------------------------------------------------
-
-// Rota para o colaborador atualizar o status de um cliente
 app.post('/api/status', async (req, res) => {
     const { telefone, status } = req.body;
     try {
         await pool.query('UPDATE clientes SET status = $1 WHERE telefone = $2', [status, telefone]);
         res.json({ success: true });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false });
-    }
+    } catch (error) { res.status(500).json({ success: false }); }
 });
 
-// Rota para o Admin buscar os totais
 app.get('/api/status', async (req, res) => {
     try {
         const result = await pool.query('SELECT status, COUNT(*) as total FROM clientes GROUP BY status');
-        const counts = { vendido: 0, pensando: 0, 'nao-quis': 0 };
+        const counts = { vendido: 0, pensando: 0, 'nao-quis': 0, finalizado: 0 };
         result.rows.forEach(row => { if (counts[row.status] !== undefined) counts[row.status] = parseInt(row.total); });
         res.json(counts);
-    } catch (error) {
-        res.status(500).json({ error: 'Erro ao buscar dados' });
-    }
+    } catch (error) { res.status(500).json({ error: 'Erro' }); }
 });
 
-// Rota para o colaborador buscar a lista de clientes no banco
 app.get('/api/clientes', async (req, res) => {
     try {
-        const result = await pool.query('SELECT nome, telefone, mensagem, status FROM clientes ORDER BY criado_em DESC LIMIT 20');
+        const result = await pool.query("SELECT nome, telefone, mensagem, status FROM clientes WHERE status != 'finalizado' ORDER BY criado_em DESC LIMIT 20");
         res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: 'Erro ao buscar lista de clientes' });
-    }
+    } catch (error) { res.status(500).json({ error: 'Erro' }); }
+});
+
+app.post('/api/enviar-mensagem', async (req, res) => {
+    const { telefone, mensagem } = req.body;
+    console.log(`Enviando para Wati -> Para: ${telefone}, Msg: ${mensagem}`);
+    try {
+        await pool.query('UPDATE clientes SET mensagem = $1 WHERE telefone = $2', [`Você: ${mensagem}`, telefone]);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false }); }
+});
+
+app.post('/api/finalizar', async (req, res) => {
+    const { telefone } = req.body;
+    try {
+        await pool.query("UPDATE clientes SET status = 'finalizado' WHERE telefone = $1", [telefone]);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false }); }
 });
 
 // ---------------------------------------------------------
-// WEBHOOK DA WATI (CORRIGIDO COM BASE NO SEU LOG)
+// WEBHOOK
 // ---------------------------------------------------------
-app.get('/webhook', (req, res) => {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-    if (mode === 'subscribe' && token === (process.env.VERIFY_TOKEN || 'seu_token_de_verificacao_aqui')) {
-        res.status(200).send(challenge);
-    } else res.sendStatus(403);
-});
-
 app.post('/webhook', async (req, res) => {
-    console.log('\n--- NOVO EVENTO RECEBIDO DA WATI ---');
-    
     try {
         const body = req.body;
-        
-        // O log mostra que a Wati envia "eventType": "message" e o texto em "text"
         if (body.eventType === 'message' && body.text) {
             const telefone = body.waId || 'desconhecido';
             const nome = body.senderName || 'Cliente Novo';
             const mensagem = body.text;
 
-            console.log(`Salvando no banco -> Nome: ${nome}, Telefone: ${telefone}, Msg: ${mensagem}`);
-
-            // Salva no banco (se o telefone já existir, só atualiza a mensagem)
             await pool.query(`
                 INSERT INTO clientes (nome, telefone, mensagem, status) 
                 VALUES ($1, $2, $3, 'pensando') 
-                ON CONFLICT (telefone) DO UPDATE SET mensagem = $3, nome = $1
+                ON CONFLICT (telefone) DO UPDATE SET mensagem = $3, nome = $1, criado_em = NOW()
             `, [nome, telefone, mensagem]);
-        } else {
-            console.log('Evento ignorado (não é uma mensagem de texto).');
         }
-
         res.sendStatus(200);
-    } catch (error) {
-        console.error('Erro ao processar webhook:', error);
-        res.sendStatus(500);
-    }
+    } catch (error) { res.sendStatus(500); }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
