@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QGC TEAM - Atendimento</title>
+    <link rel="stylesheet" href="colaborador.css">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="bg-grid"></div>
+    <div class="aurora-bg"></div>
+
+    <div class="app-container">
+        
+        <!-- TOPO SIMPLIFICADO -->
+        <header class="top">
+            <div class="logo">
+                <img src="logo-qgc.png.jpeg" class="logo-img" alt="QGC" onerror="this.style.display='none'">
+                <span>QGC</span> TEAM
+            </div>
+            
+            <div class="status">
+                <span class="dot"></span> ONLINE
+            </div>
+
+            <div class="top-actions">
+                <div class="user-info">
+                    <span>Claudio (Atendente)</span>
+                    <div class="avatar">C</div>
+                </div>
+                <button class="btn-sair" onclick="sair()">Sair</button>
+            </div>
+        </header>
+
+        <!-- ÁREA DE TRABALHO -->
+        <main class="workspace">
+            
+            <!-- SIDEBAR: LISTA DE CONVERSAS -->
+            <aside class="sidebar">
+                <div class="filters">
+                    <button class="active">Aguardando</button>
+                    <button>Meus</button>
+                    <button>Finalizados</button>
+                </div>
+                
+                <div class="search-box">
+                    <input type="text" placeholder="Pesquisar contato...">
+                </div>
+
+                <div class="contact-list">
+                    <!-- Contato 1 (Ativo) -->
+                    <div class="contact-item active">
+                        <div class="avatar">J</div>
+                        <div class="contact-info">
+                            <h4>João Silva</h4>
+                            <p>Gostaria de saber o valor...</p>
+                        </div>
+                        <span class="time">10:45</span>
+                    </div>
+                    <!-- Contato 2 -->
+                    <div class="contact-item">
+                        <div class="avatar">M</div>
+                        <div class="contact-info">
+                            <h4>Maria Souza</h4>
+                            <p>Ok, vou pensar e te aviso.</p>
+                        </div>
+                        <span class="time">09:30</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CHAT CENTRAL -->
+            <section class="chat-area">
+                <div class="chat-header">
+                    <div class="avatar">J</div>
+                    <div>
+                        <h2>João Silva</h2>
+                        <p>Empresa: Tech Solutions LTDA</p>
+                    </div>
+                    <button class="btn-finalizar">Finalizar Atendimento</button>
+                </div>
+
+                <div class="messages">
+                    <!-- Mensagem Recebida -->
+                    <div class="message received">
+                        <p>Olá, gostaria de saber mais sobre o serviço de vocês.</p>
+                        <span>10:45</span>
+                    </div>
+                    <!-- Mensagem Enviada -->
+                    <div class="message sent">
+                        <p>Olá João! Claro, posso te ajudar. Qual é a sua principal necessidade hoje?</p>
+                        <span>10:46</span>
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <input type="text" placeholder="Digite sua mensagem...">
+                    <button>➤</button>
+                </div>
+            </section>
+
+            <!-- PAINEL DA FICHA (DIREITA) -->
+            <aside class="client-panel">
+                <h3>Ficha do Cliente</h3>
+                
+                <div class="info-group">
+                    <label>Nome</label>
+                    <p>João Silva</p>
+                </div>
+                <div class="info-group">
+                    <label>CNPJ</label>
+                    <p>12.345.678/0001-90</p>
+                </div>
+
+                <div class="divider"></div>
+
+                <h3>Status da Negociação</h3>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
+                
+                <div class="status-options">
+                    <!-- Quando clicado, adicione a classe 'active' -->
+                    <button class="status-btn vendido">Vendido (Contato Futuro)</button>
+                    <button class="status-btn pensando active">Pensando</button>
+                    <button class="status-btn nao-quis">Não Quis</button>
+                </div>
+
+            </aside>
+
+        </main>
+    </div>
+
+</body>
+</html>
