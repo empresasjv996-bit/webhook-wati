@@ -124,7 +124,7 @@ function irPara(view) {
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
     if (view === 'canais') carregarCanais();
-    if (view === 'campanhas') { carregarListasCampanha(); carregarCampanhas(); }
+    if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); }
     if (view === 'logs') carregarLogs();
     if (view === 'auditoria') carregarAuditoria();
     if (view === 'usuarios') carregarUsuarios();
@@ -449,7 +449,7 @@ async function carregarTabelaClientes() {
         corpo.innerHTML = '';
 
         if (!clientes.length) {
-            corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum cliente encontrado.</td></tr>';
+            corpo.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum cliente encontrado.</td></tr>';
             return;
         }
 
@@ -460,6 +460,7 @@ async function carregarTabelaClientes() {
                 <td>${escaparHtml(formatarTelefone(cliente.telefone))}</td>
                 <td>${escaparHtml(cliente.mensagem || '-')}</td>
                 <td><span class="mini-badge ${STATUS_CLASSE[cliente.status] || ''}">${escaparHtml(STATUS_LABEL[cliente.status] || cliente.status || '-')}</span></td>
+                <td>${escaparHtml(cliente.vendedor_nome || '—')}</td>
                 <td>${escaparHtml(formatarData(cliente.criado_em))}</td>
                 <td>
                     <div class="actions-cell">
@@ -947,6 +948,13 @@ function conectarSSE() {
         if (painel && !painel.classList.contains('oculto')) carregarCampanhas();
         carregarDashboard();
     });
+
+    // Lead novo direcionado para um vendedor (campanhas)
+    sse.addEventListener('clientes', () => {
+        const painel = $('view-clientes');
+        if (painel && !painel.classList.contains('oculto')) carregarTabelaClientes();
+        carregarDashboard();
+    });
 }
 
 function iniciarPainel() {
@@ -1049,6 +1057,46 @@ async function testarCanal(botao) {
    ========================================================= */
 
 let filtroLogs = '';
+let vendedoresDisponiveis = [];
+let vendedoresCarregados = false;
+
+async function carregarVendedoresCampanha() {
+    const select = $('campanha-vendedor');
+
+    try {
+        const resposta = await fetch('/api/usuarios');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+        const usuarios = await resposta.json();
+        vendedoresDisponiveis = (Array.isArray(usuarios) ? usuarios : []).filter((u) => u.ativo !== false);
+        vendedoresCarregados = true;
+
+        if (select) {
+            const atual = select.value;
+            select.innerHTML = '<option value="">Todos (sem direcionamento)</option>' + vendedoresDisponiveis.map((u) =>
+                `<option value="${escaparHtml(u.email)}">${escaparHtml(u.nome)}${u.role === 'admin' ? ' (admin)' : ''}</option>`
+            ).join('');
+            if (atual) select.value = atual;
+        }
+    } catch (erro) {
+        if (select) select.innerHTML = '<option value="">Erro ao carregar vendedores</option>';
+        console.error('Erro ao carregar vendedores:', erro);
+    }
+
+    return vendedoresDisponiveis;
+}
+
+function opcoesVendedor(selecionado) {
+    const alvo = String(selecionado || '').toLowerCase();
+    const existe = vendedoresDisponiveis.some((u) => String(u.email || '').toLowerCase() === alvo);
+    const extra = alvo && !existe
+        ? `<option value="${escaparHtml(selecionado)}" selected>${escaparHtml(selecionado)} (removido)</option>`
+        : '';
+
+    return '<option value="">Sem direcionamento</option>' + extra + vendedoresDisponiveis.map((u) => {
+        const marcado = String(u.email || '').toLowerCase() === alvo ? ' selected' : '';
+        return `<option value="${escaparHtml(u.email)}"${marcado}>${escaparHtml(u.nome)}</option>`;
+    }).join('');
+}
 
 function rotuloStatusCampanha(status) {
     const mapa = {
@@ -1118,6 +1166,11 @@ function cartaoCampanha(campanha) {
                 <span>${percentual}%</span>
             </div>
 
+            <div class="campanha-destino">
+                <span>👤 Direcionar leads para</span>
+                <select data-destino class="campanha-destino-select">${opcoesVendedor(campanha.vendedor_email)}</select>
+            </div>
+
             <div class="campanha-acoes">${botoes.join('')}</div>
         </div>`;
 }
@@ -1125,6 +1178,9 @@ function cartaoCampanha(campanha) {
 async function carregarCampanhas() {
     const container = $('campanhas-lista');
     if (!container) return;
+
+    // Garante a lista de vendedores antes de montar os selects de direcionamento
+    if (!vendedoresCarregados) await carregarVendedoresCampanha();
 
     try {
         const resposta = await fetch('/api/campanhas');
@@ -1147,6 +1203,9 @@ async function carregarCampanhas() {
                     else acaoCampanha(id, acao, botao);
                 };
             });
+
+            const destino = card.querySelector('select[data-destino]');
+            if (destino) destino.onchange = () => direcionarCampanha(id, destino.value, destino);
         });
     } catch (erro) {
         container.innerHTML = '<p class="vazio">Não foi possível carregar as campanhas.</p>';
@@ -1158,6 +1217,7 @@ async function criarCampanha(botao) {
     const listaId = ($('campanha-lista') || {}).value || '';
     const mensagem = (($('campanha-mensagem') || {}).value || '').trim();
     const intervalo = ($('campanha-intervalo') || {}).value || '8000';
+    const vendedorEmail = ($('campanha-vendedor') || {}).value || '';
 
     if (!nome) { toast('Informe o nome da campanha.', 'erro'); return; }
     if (!listaId) { toast('Escolha a lista de contatos.', 'erro'); return; }
@@ -1170,7 +1230,7 @@ async function criarCampanha(botao) {
         const resposta = await fetch('/api/campanhas', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, listaId, mensagem, intervalo: Number(intervalo) })
+            body: JSON.stringify({ nome, listaId, mensagem, intervalo: Number(intervalo), vendedorEmail })
         });
 
         let dados = {};
@@ -1181,7 +1241,8 @@ async function criarCampanha(botao) {
             return;
         }
 
-        toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`);
+        toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`
+            + (dados.vendedorNome ? ` Leads direcionados para ${dados.vendedorNome}.` : ''));
         if ($('campanha-nome')) $('campanha-nome').value = '';
         if ($('campanha-mensagem')) $('campanha-mensagem').value = '';
         carregarCampanhas();
@@ -1189,6 +1250,37 @@ async function criarCampanha(botao) {
         toast('Erro ao criar a campanha.', 'erro');
     } finally {
         if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+async function direcionarCampanha(id, vendedorEmail, select) {
+    if (select) select.disabled = true;
+
+    try {
+        const resposta = await fetch('/api/campanhas/' + encodeURIComponent(id) + '/direcionar', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vendedorEmail: vendedorEmail || '' })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível direcionar a campanha.', 'erro');
+            carregarCampanhas();
+            return;
+        }
+
+        toast(dados.vendedorNome
+            ? `Leads direcionados para ${dados.vendedorNome}.`
+            : 'Campanha sem direcionamento (todos veem os leads).');
+        carregarCampanhas();
+    } catch (erro) {
+        toast('Erro ao direcionar a campanha.', 'erro');
+        carregarCampanhas();
+    } finally {
+        if (select) select.disabled = false;
     }
 }
 

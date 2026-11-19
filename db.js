@@ -40,6 +40,10 @@ function criarBancoPostgres() {
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cpf TEXT',
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel TEXT',
                 "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS outros_socios JSONB DEFAULT '[]'::jsonb",
+                // dono do lead (vendedor que recebeu a lista da campanha)
+                'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS vendedor_email TEXT',
+                'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS vendedor_nome TEXT',
+                'CREATE INDEX IF NOT EXISTS idx_clientes_vendedor ON clientes (vendedor_email)',
                 `CREATE TABLE IF NOT EXISTS mensagens (
                     id SERIAL PRIMARY KEY,
                     telefone TEXT NOT NULL,
@@ -74,6 +78,8 @@ function criarBancoPostgres() {
                     total INTEGER NOT NULL DEFAULT 0,
                     enviados INTEGER NOT NULL DEFAULT 0,
                     falhas INTEGER NOT NULL DEFAULT 0,
+                    vendedor_email TEXT,
+                    vendedor_nome TEXT,
                     proximo_envio_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -89,6 +95,9 @@ function criarBancoPostgres() {
                 )`,
                 'CREATE INDEX IF NOT EXISTS idx_envios_campanha ON campanha_envios (campanha_id)',
                 'CREATE INDEX IF NOT EXISTS idx_envios_pendentes ON campanha_envios (status)',
+                // destino da campanha (vendedor que recebe os leads)
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_email TEXT',
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT',
                 `CREATE TABLE IF NOT EXISTS auditoria (
                     id SERIAL PRIMARY KEY,
                     ator TEXT,
@@ -127,7 +136,7 @@ function criarBancoPostgres() {
             console.log('Estrutura do banco verificada.');
         },
 
-        async listarClientes({ status, busca, limite }) {
+        async listarClientes({ status, busca, limite, vendedorEmail, somenteMeus }) {
             const filtros = [];
             const valores = [];
 
@@ -139,11 +148,22 @@ function criarBancoPostgres() {
                 filtros.push(`(nome ILIKE $${valores.length} OR telefone ILIKE $${valores.length})`);
             }
 
+            // Vendedor logado: "meus" mostra só os leads dele; sem o filtro ele
+            // também vê os leads sem dono (que ainda não vieram de campanha).
+            if (vendedorEmail) {
+                valores.push(vendedorEmail);
+                if (somenteMeus) filtros.push(`LOWER(vendedor_email) = LOWER($${valores.length})`);
+                else filtros.push(`(vendedor_email IS NULL OR LOWER(vendedor_email) = LOWER($${valores.length}))`);
+            }
+
             valores.push(limite);
             const where = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
 
             const { rows } = await pool.query(
-                `SELECT nome, telefone, mensagem, status, criado_em FROM clientes ${where} ORDER BY criado_em DESC NULLS LAST LIMIT $${valores.length}`,
+                `SELECT nome, telefone, mensagem, status, criado_em, vendedor_email, vendedor_nome
+                   FROM clientes ${where}
+                  ORDER BY criado_em DESC NULLS LAST
+                  LIMIT $${valores.length}`,
                 valores
             );
             return rows;
@@ -247,6 +267,26 @@ function criarBancoPostgres() {
             await pool.query('UPDATE clientes SET status = $1 WHERE telefone = $2', [status, telefone]);
         },
 
+        // Coloca o lead na carteira do vendedor escolhido na campanha.
+        // Cria o cliente se ele ainda não existir no banco.
+        async atribuirVendedor({ telefone, nomeContato, vendedorEmail, vendedorNome }) {
+            if (!telefone || !vendedorEmail) return false;
+
+            const nomeLimpo = String(nomeContato || '').trim() || telefone;
+
+            await pool.query(
+                `INSERT INTO clientes (nome, telefone, mensagem, status, vendedor_email, vendedor_nome, responsavel)
+                 VALUES ($1, $2, '', 'pensando', $3, $4, $5)
+                 ON CONFLICT (telefone) DO UPDATE
+                    SET vendedor_email = EXCLUDED.vendedor_email,
+                        vendedor_nome = EXCLUDED.vendedor_nome,
+                        responsavel = COALESCE(NULLIF(clientes.responsavel, ''), EXCLUDED.responsavel)`,
+                [nomeLimpo, telefone, vendedorEmail, vendedorNome || null, vendedorNome || null]
+            );
+
+            return true;
+        },
+
         async finalizarAtendimento(telefone) {
             await pool.query("UPDATE clientes SET status = 'finalizado' WHERE telefone = $1", [telefone]);
         },
@@ -322,16 +362,16 @@ function criarBancoPostgres() {
         },
 
         /* ---------------- CAMPANHAS ---------------- */
-        async criarCampanha({ nome, listaId, mensagem, intervaloMs, contatos }) {
+        async criarCampanha({ nome, listaId, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome }) {
             const cliente = await pool.connect();
             try {
                 await cliente.query('BEGIN');
 
                 const { rows } = await cliente.query(
-                    `INSERT INTO campanhas (nome, lista_id, mensagem, intervalo_ms, total, status, proximo_envio_em)
-                     VALUES ($1, $2, $3, $4, $5, 'ativa', NOW())
+                    `INSERT INTO campanhas (nome, lista_id, mensagem, intervalo_ms, total, status, vendedor_email, vendedor_nome, proximo_envio_em)
+                     VALUES ($1, $2, $3, $4, $5, 'ativa', $6, $7, NOW())
                      RETURNING id`,
-                    [nome, listaId || null, mensagem, intervaloMs, contatos.length]
+                    [nome, listaId || null, mensagem, intervaloMs, contatos.length, vendedorEmail || null, vendedorNome || null]
                 );
                 const id = rows[0].id;
 
@@ -363,6 +403,7 @@ function criarBancoPostgres() {
         async listarCampanhas() {
             const { rows } = await pool.query(
                 `SELECT c.id, c.nome, c.mensagem, c.intervalo_ms, c.status, c.total, c.enviados, c.falhas,
+                        c.vendedor_email, c.vendedor_nome,
                         c.criado_em, c.atualizado_em,
                         (SELECT COUNT(*)::int FROM campanha_envios e
                           WHERE e.campanha_id = c.id AND e.status IN ('pendente', 'enviando')) AS pendentes
@@ -377,6 +418,14 @@ function criarBancoPostgres() {
             const resultado = await pool.query(
                 'UPDATE campanhas SET status = $2, atualizado_em = NOW() WHERE id = $1',
                 [id, status]
+            );
+            return resultado.rowCount > 0;
+        },
+
+        async direcionarCampanha(id, vendedorEmail, vendedorNome) {
+            const resultado = await pool.query(
+                'UPDATE campanhas SET vendedor_email = $2, vendedor_nome = $3, atualizado_em = NOW() WHERE id = $1',
+                [id, vendedorEmail || null, vendedorNome || null]
             );
             return resultado.rowCount > 0;
         },
@@ -400,7 +449,8 @@ function criarBancoPostgres() {
         async proximoEnvioPendente() {
             const { rows } = await pool.query(
                 `SELECT e.id AS envio_id, e.telefone, e.nome,
-                        c.id AS campanha_id, c.nome AS campanha, c.mensagem
+                        c.id AS campanha_id, c.nome AS campanha, c.mensagem,
+                        c.vendedor_email, c.vendedor_nome
                    FROM campanha_envios e
                    JOIN campanhas c ON c.id = e.campanha_id
                   WHERE e.status = 'pendente'
@@ -521,6 +571,8 @@ function criarBancoMemoria() {
             cpf: null,
             responsavel: null,
             outros_socios: [],
+            vendedor_email: null,
+            vendedor_nome: null,
             mensagem: '',
             status: 'pensando',
             criado_em: minutosAtras(30)
@@ -548,13 +600,15 @@ function criarBancoMemoria() {
         nome: 'Maria Oliveira', telefone: '5521987776655', status: 'vendido',
         mensagem: 'Pode mandar o contrato amanhã.', criado_em: minutosAtras(40),
         cnpj: '98.765.432/0001-10', socio: 'Maria Oliveira', cpf: '321.654.987-00',
-        responsavel: 'Vendedor Jv', outros_socios: []
+        responsavel: 'Vendedor Jv', outros_socios: [],
+        vendedor_email: 'vendedor@qgcteam.com', vendedor_nome: 'Vendedor Jv'
     });
     semearCliente({
         nome: 'João Souza', telefone: '5511976665544', status: 'nao-quis',
         mensagem: 'Achei caro, obrigado.', criado_em: minutosAtras(95),
         cnpj: '11.222.333/0001-44', socio: 'João Souza', cpf: '111.222.333-44',
-        responsavel: 'Claudio', outros_socios: ['Paulo Souza - 555.666.777-88']
+        responsavel: 'Claudio', outros_socios: ['Paulo Souza - 555.666.777-88'],
+        vendedor_email: 'colaborador@qgcteam.com', vendedor_nome: 'Claudio'
     });
     semearCliente({
         nome: 'Fernanda Lima', telefone: '5511965554433', status: 'finalizado',
@@ -593,7 +647,7 @@ function criarBancoMemoria() {
             console.log('MODO DEMO: banco em memória pronto com dados de exemplo.');
         },
 
-        async listarClientes({ status, busca, limite }) {
+        async listarClientes({ status, busca, limite, vendedorEmail, somenteMeus }) {
             let itens = Array.from(clientes.values());
 
             if (status === 'ativos') itens = itens.filter((c) => c.status !== 'finalizado');
@@ -607,11 +661,20 @@ function criarBancoMemoria() {
                 );
             }
 
+            if (vendedorEmail) {
+                const alvo = String(vendedorEmail).toLowerCase();
+                itens = itens.filter((c) => {
+                    const dono = String(c.vendedor_email || '').toLowerCase();
+                    return somenteMeus ? dono === alvo : (!dono || dono === alvo);
+                });
+            }
+
             itens.sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em));
 
             return itens.slice(0, limite).map((c) => ({
                 nome: c.nome, telefone: c.telefone, mensagem: c.mensagem,
-                status: c.status, criado_em: c.criado_em
+                status: c.status, criado_em: c.criado_em,
+                vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null
             }));
         },
 
@@ -707,6 +770,25 @@ function criarBancoMemoria() {
             if (c) c.status = status;
         },
 
+        async atribuirVendedor({ telefone, nomeContato, vendedorEmail, vendedorNome }) {
+            if (!telefone || !vendedorEmail) return false;
+
+            const atual = clientes.get(telefone) || {
+                cnpj: null, socio: null, cpf: null, responsavel: null, outros_socios: [],
+                mensagem: '', status: 'pensando', criado_em: new Date().toISOString()
+            };
+
+            clientes.set(telefone, Object.assign({}, atual, {
+                nome: atual.nome || String(nomeContato || '').trim() || telefone,
+                telefone,
+                vendedor_email: vendedorEmail,
+                vendedor_nome: vendedorNome || null,
+                responsavel: atual.responsavel || vendedorNome || null
+            }));
+
+            return true;
+        },
+
         async finalizarAtendimento(telefone) {
             const c = clientes.get(telefone);
             if (c) c.status = 'finalizado';
@@ -786,7 +868,7 @@ function criarBancoMemoria() {
         },
 
         /* ---------------- CAMPANHAS ---------------- */
-        async criarCampanha({ nome, listaId: idLista, mensagem, intervaloMs, contatos }) {
+        async criarCampanha({ nome, listaId: idLista, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome }) {
             const id = campanhaId++;
             campanhas.push({
                 id,
@@ -794,6 +876,8 @@ function criarBancoMemoria() {
                 lista_id: idLista || null,
                 mensagem,
                 intervalo_ms: intervaloMs,
+                vendedor_email: vendedorEmail || null,
+                vendedor_nome: vendedorNome || null,
                 status: 'ativa',
                 total: contatos.length,
                 enviados: 0,
@@ -836,6 +920,15 @@ function criarBancoMemoria() {
             return true;
         },
 
+        async direcionarCampanha(id, vendedorEmail, vendedorNome) {
+            const campanha = campanhas.find((c) => String(c.id) === String(id));
+            if (!campanha) return false;
+            campanha.vendedor_email = vendedorEmail || null;
+            campanha.vendedor_nome = vendedorNome || null;
+            campanha.atualizado_em = new Date().toISOString();
+            return true;
+        },
+
         async excluirCampanha(id) {
             const indice = campanhas.findIndex((c) => String(c.id) === String(id));
             if (indice < 0) return false;
@@ -871,7 +964,9 @@ function criarBancoMemoria() {
                 nome: envio.nome,
                 campanha_id: campanha.id,
                 campanha: campanha.nome,
-                mensagem: campanha.mensagem
+                mensagem: campanha.mensagem,
+                vendedor_email: campanha.vendedor_email || null,
+                vendedor_nome: campanha.vendedor_nome || null
             };
         },
 

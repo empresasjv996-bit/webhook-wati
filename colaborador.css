@@ -82,6 +82,15 @@ header.top {
 .contact-info h4 { font-size: 0.9rem; color: #fff; margin-bottom: 3px; }
 .contact-info p { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contact-item .time { font-size: 0.7rem; color: var(--text-muted); }
+.contact-item .owner {
+    font-size: 0.62rem; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid rgba(0, 255, 128, 0.35); color: var(--green);
+    background: rgba(0, 255, 128, 0.08); white-space: nowrap;
+}
+.contact-item .owner.livre {
+    border-color: rgba(255, 255, 255, 0.15); color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+}
 
 /* 2. CHAT CENTRAL */
 .chat-area {

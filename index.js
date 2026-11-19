@@ -345,9 +345,13 @@ app.get('/api/clientes', async (req, res) => {
     const busca = String(req.query.busca || '').trim();
     const status = String(req.query.status || 'ativos');
     const limite = Math.min(parseInt(req.query.limite, 10) || 50, 200);
+    const somenteMeus = req.query.meus === '1';
+
+    // Vendedor logado só enxerga os leads dele e os que ainda não têm dono.
+    const vendedorEmail = req.user && req.user.role !== 'admin' ? req.user.email : null;
 
     try {
-        const clientes = await banco.listarClientes({ status, busca, limite });
+        const clientes = await banco.listarClientes({ status, busca, limite, vendedorEmail, somenteMeus });
         res.json(clientes);
     } catch (error) {
         console.error('Erro em /api/clientes:', error.message);
@@ -715,6 +719,25 @@ async function processarCampanhas() {
             if (resultado.ok) {
                 await banco.registrarMensagem(item.telefone, 'enviada', textoFinal);
                 await banco.atualizarUltimaMensagem(item.telefone, `Você: ${textoFinal}`);
+
+                // Direciona o lead para o vendedor escolhido na campanha
+                if (item.vendedor_email) {
+                    try {
+                        await banco.atribuirVendedor({
+                            telefone: item.telefone,
+                            nomeContato: item.nome,
+                            vendedorEmail: item.vendedor_email,
+                            vendedorNome: item.vendedor_nome
+                        });
+                        emitirEvento('clientes', {
+                            telefone: item.telefone,
+                            vendedor: item.vendedor_nome || item.vendedor_email
+                        });
+                    } catch (erro) {
+                        console.error('Erro ao direcionar o lead:', erro.message);
+                    }
+                }
+
                 emitirEvento('mensagem', { telefone: item.telefone, direcao: 'enviada', texto: textoFinal });
             } else {
                 console.warn(`Campanha ${item.campanha} -> ${item.telefone}: ${resultado.message}`);
@@ -746,7 +769,7 @@ app.get('/api/campanhas', async (req, res) => {
 });
 
 app.post('/api/campanhas', exigirAdmin, async (req, res) => {
-    const { nome, listaId, mensagem, intervalo } = req.body || {};
+    const { nome, listaId, mensagem, intervalo, vendedorEmail } = req.body || {};
 
     if (!nome || !String(nome).trim()) {
         return res.status(400).json({ success: false, message: 'Informe um nome para a campanha.' });
@@ -759,6 +782,17 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
     }
 
     try {
+        // Destino dos leads: valida o vendedor escolhido (opcional)
+        let vendedor = null;
+        const emailVendedor = String(vendedorEmail || '').trim().toLowerCase();
+
+        if (emailVendedor) {
+            vendedor = await banco.buscarUsuarioPorEmail(emailVendedor);
+            if (!vendedor || vendedor.ativo === false) {
+                return res.status(400).json({ success: false, message: 'Vendedor escolhido não encontrado ou desativado.' });
+            }
+        }
+
         const contatos = await banco.obterContatosLista(listaId);
         if (!contatos.length) {
             return res.status(400).json({ success: false, message: 'A lista escolhida está vazia.' });
@@ -772,7 +806,9 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             listaId: parseInt(listaId, 10) || null,
             mensagem: String(mensagem).trim(),
             intervaloMs,
-            contatos
+            contatos,
+            vendedorEmail: vendedor ? vendedor.email : null,
+            vendedorNome: vendedor ? vendedor.nome : null
         });
 
         emitirEvento('campanha', { id: campanha.id, criada: true, total: campanha.total });
@@ -780,9 +816,17 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             req.user && req.user.nome,
             'campanha criada',
             `${campanha.id} - ${String(nome).trim()} (${campanha.total} contatos, ${intervaloMs} ms)`
+                + (vendedor ? ` -> ${vendedor.nome} (${vendedor.email})` : ' -> sem direcionamento')
         );
 
-        res.json({ success: true, id: campanha.id, total: campanha.total, intervaloMs });
+        res.json({
+            success: true,
+            id: campanha.id,
+            total: campanha.total,
+            intervaloMs,
+            vendedorEmail: vendedor ? vendedor.email : null,
+            vendedorNome: vendedor ? vendedor.nome : null
+        });
     } catch (erro) {
         console.error('Erro ao criar campanha:', erro.message);
         res.status(500).json({ success: false, message: 'Erro ao criar a campanha.' });
@@ -809,6 +853,48 @@ app.post('/api/campanhas/:id/:acao', exigirAdmin, async (req, res) => {
     } catch (erro) {
         console.error('Erro ao alterar campanha:', erro.message);
         res.status(500).json({ success: false, message: 'Erro ao alterar a campanha.' });
+    }
+});
+
+// Troca o vendedor que recebe os leads da campanha (vale para os envios seguintes)
+app.patch('/api/campanhas/:id/direcionar', exigirAdmin, async (req, res) => {
+    const emailVendedor = String((req.body && req.body.vendedorEmail) || '').trim().toLowerCase();
+
+    try {
+        let vendedor = null;
+
+        if (emailVendedor) {
+            vendedor = await banco.buscarUsuarioPorEmail(emailVendedor);
+            if (!vendedor || vendedor.ativo === false) {
+                return res.status(400).json({ success: false, message: 'Vendedor não encontrado ou desativado.' });
+            }
+        }
+
+        const alterou = await banco.direcionarCampanha(
+            req.params.id,
+            vendedor ? vendedor.email : null,
+            vendedor ? vendedor.nome : null
+        );
+
+        if (!alterou) {
+            return res.status(404).json({ success: false, message: 'Campanha não encontrada.' });
+        }
+
+        emitirEvento('campanha', { id: req.params.id, vendedor: vendedor ? vendedor.nome : null });
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            'campanha direcionada',
+            `${req.params.id} -> ${vendedor ? `${vendedor.nome} (${vendedor.email})` : 'sem direcionamento'}`
+        );
+
+        res.json({
+            success: true,
+            vendedorEmail: vendedor ? vendedor.email : null,
+            vendedorNome: vendedor ? vendedor.nome : null
+        });
+    } catch (erro) {
+        console.error('Erro ao direcionar campanha:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao direcionar a campanha.' });
     }
 });
 

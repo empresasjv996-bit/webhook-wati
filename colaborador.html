@@ -39,9 +39,9 @@
             
             <aside class="sidebar">
                 <div class="filters">
-                    <button class="active">Aguardando</button>
-                    <button>Meus</button>
-                    <button>Finalizados</button>
+                    <button class="active" data-filtro="aguardando">Aguardando</button>
+                    <button data-filtro="meus">Meus</button>
+                    <button data-filtro="finalizados">Finalizados</button>
                 </div>
                 
                 <div class="search-box">
@@ -102,6 +102,7 @@
 
     <script>
         let clienteAtivo = null;
+        let filtroAtual = 'aguardando';
 
         async function carregarUsuario() {
             try {
@@ -112,22 +113,34 @@
             } catch (e) { console.error(e); }
         }
 
-        async function carregarClientes() {
+        async function carregarClientes(filtro) {
+            if (filtro) filtroAtual = filtro;
+
             try {
-                const response = await fetch('/api/clientes');
+                const parametros = new URLSearchParams();
+                parametros.set('status', filtroAtual === 'finalizados' ? 'finalizado' : 'ativos');
+                if (filtroAtual === 'meus') parametros.set('meus', '1');
+
+                const response = await fetch('/api/clientes?' + parametros.toString());
                 const clientes = await response.json();
                 const contactList = document.querySelector('.contact-list');
                 
                 contactList.innerHTML = ''; 
 
-                if (clientes.length === 0) {
-                    contactList.innerHTML = '<p style="padding:20px; color:var(--text-muted); text-align:center;">Nenhum cliente aguardando.</p>';
+                if (!Array.isArray(clientes) || clientes.length === 0) {
+                    const vazio = filtroAtual === 'meus'
+                        ? 'Nenhum lead direcionado para você.'
+                        : 'Nenhum cliente aguardando.';
+                    contactList.innerHTML = `<p style="padding:20px; color:var(--text-muted); text-align:center;">${vazio}</p>`;
                     return;
                 }
 
                 clientes.forEach((cliente, index) => {
-                    const iniciais = cliente.nome.substring(0, 2).toUpperCase();
+                    const iniciais = (cliente.nome || '?').substring(0, 2).toUpperCase();
                     const isAtivo = index === 0 ? 'active' : '';
+                    const dono = cliente.vendedor_nome
+                        ? `<span class="owner">${cliente.vendedor_nome}</span>`
+                        : '<span class="owner livre">Livre</span>';
                     
                     const html = `
                         <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
@@ -136,7 +149,7 @@
                                 <h4>${cliente.nome}</h4>
                                 <p>${cliente.mensagem || 'Sem mensagem'}</p>
                             </div>
-                            <span class="time">Agora</span>
+                            ${dono}
                         </div>
                     `;
                     contactList.innerHTML += html;
@@ -233,9 +246,17 @@
             if (e.key === 'Enter') enviarMensagem();
         });
 
+        document.querySelectorAll('.filters button').forEach((botao) => {
+            botao.addEventListener('click', () => {
+                document.querySelectorAll('.filters button').forEach((b) => b.classList.remove('active'));
+                botao.classList.add('active');
+                carregarClientes(botao.dataset.filtro);
+            });
+        });
+
         window.onload = () => {
             carregarUsuario();
-            carregarClientes();
+            carregarClientes('aguardando');
         };
     </script>
 </body>

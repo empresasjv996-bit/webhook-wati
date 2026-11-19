@@ -181,12 +181,13 @@
                                     <th>Telefone</th>
                                     <th>Última mensagem</th>
                                     <th>Status</th>
+                                    <th>Vendedor</th>
                                     <th>Entrada</th>
                                     <th>Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="tabela-clientes">
-                                <tr><td colspan="6" class="vazio">Carregando clientes...</td></tr>
+                                <tr><td colspan="7" class="vazio">Carregando clientes...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -299,6 +300,16 @@
                             <select id="campanha-lista" class="form-control">
                                 <option value="">Carregando listas...</option>
                             </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Direcionar os leads para</label>
+                            <select id="campanha-vendedor" class="form-control">
+                                <option value="">Todos (sem direcionamento)</option>
+                            </select>
+                            <small style="color: var(--text-muted); font-size: 0.72rem; display: block; margin-top: 6px;">
+                                Quem responde esta campanha cai na carteira do vendedor escolhido (painel /colaborador).
+                            </small>
                         </div>
 
                         <div class="form-group">
