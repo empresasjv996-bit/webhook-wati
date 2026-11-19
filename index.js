@@ -233,6 +233,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         ok: true,
         modoDemo: banco.modoDemo,
+        uptimeSegundos: Math.round(process.uptime()),
         configurado: {
             wati: watiConfigurada(),
             jwtSecretProprio: JWT_SECRET_PROPRIO,
