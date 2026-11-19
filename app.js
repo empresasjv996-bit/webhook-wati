@@ -521,6 +521,8 @@ function abrirFicha(telefone) {
     if (telefoneEl) telefoneEl.textContent = formatarTelefone(alvo);
 
     ['ficha-cnpj', 'ficha-socio', 'ficha-cpf', 'ficha-responsavel', 'ficha-outros'].forEach((id) => preencherCampo(id, ''));
+    const listaAtributos = $('ficha-atributos');
+    if (listaAtributos) listaAtributos.innerHTML = '<li><span>Carregando...</span></li>';
     marcarStatusAtivo(null);
 
     carregarFicha(alvo);
@@ -553,6 +555,16 @@ async function carregarFicha(telefone) {
 
         const textarea = $('ficha-outros');
         if (textarea) textarea.value = linhas.join('\n');
+
+        const listaAtributos = $('ficha-atributos');
+        if (listaAtributos) {
+            const atributos = (ficha.atributos && typeof ficha.atributos === 'object') ? ficha.atributos : {};
+            const itens = Object.keys(atributos)
+                .filter((chave) => atributos[chave])
+                .map((chave) => '<li><span>' + escaparHtml(chave) + '</span><strong>' + escaparHtml(atributos[chave]) + '</strong></li>');
+
+            listaAtributos.innerHTML = itens.length ? itens.join('') : '<li><span>Nenhum atributo importado</span></li>';
+        }
 
         marcarStatusAtivo(ficha.status);
     } catch (erro) {
@@ -649,21 +661,198 @@ async function copiarFicha() {
    PARTE 8 - LISTAS (importar .txt / colar contatos)
    ========================================================= */
 
-function interpretarLinhaContato(linha) {
-    const limpa = String(linha || '').trim();
-    if (!limpa) return null;
+/* Campos que o mapa de colunas oferece (o mesmo nome vira atributo na Wati) */
+const CAMPOS_LISTA = [
+    { chave: 'telefone', rotulo: 'Telefone (obrigatório)' },
+    { chave: 'nome', rotulo: 'Nome' },
+    { chave: 'cnpj', rotulo: 'CNPJ' },
+    { chave: 'cpf', rotulo: 'CPF' },
+    { chave: 'razao_social', rotulo: 'Razão social' },
+    { chave: 'ag_conta', rotulo: 'Agência / Conta' },
+    { chave: 'socio', rotulo: 'Sócio' },
+    { chave: 'responsavel', rotulo: 'Responsável' }
+];
 
-    const partes = limpa.split(/[;,\t]/).map((parte) => parte.trim()).filter(Boolean);
-    if (!partes.length) return null;
+const MAPA_MEMORIA_CHAVE = 'qgc-mapa-lista';
 
-    const indiceTelefone = partes.findIndex((parte) => parte.replace(/\D/g, '').length >= 10);
-    if (indiceTelefone < 0) return null;
+let tabelaLista = null; // { colunas: [], linhas: [[...]], mapa: [], custom: [] }
 
-    const telefone = partes[indiceTelefone].replace(/\D/g, '');
-    if (telefone.length < 10) return null;
+/* "Razão Social" -> "razao_social" (mesmo padrão de atributo da Wati) */
+function normalizarChave(texto) {
+    return String(texto || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .substring(0, 40);
+}
 
-    const nome = partes.filter((parte, indice) => indice !== indiceTelefone).join(' ').trim();
-    return { telefone, nome };
+function separadorDoCsv(linha) {
+    const candidatos = [';', ',', '\t'];
+    let escolhido = ';';
+    let maior = 0;
+
+    candidatos.forEach((separador) => {
+        const total = String(linha).split(separador).length - 1;
+        if (total > maior) { maior = total; escolhido = separador; }
+    });
+
+    return escolhido;
+}
+
+/* Divide uma linha respeitando aspas ("Silva; Filho"). */
+function dividirLinhaCsv(linha, separador) {
+    const celulas = [];
+    let atual = '';
+    let dentroAspas = false;
+
+    for (let i = 0; i < linha.length; i++) {
+        const caractere = linha[i];
+
+        if (caractere === '"') {
+            if (dentroAspas && linha[i + 1] === '"') { atual += '"'; i++; }
+            else dentroAspas = !dentroAspas;
+            continue;
+        }
+
+        if (caractere === separador && !dentroAspas) {
+            celulas.push(atual);
+            atual = '';
+            continue;
+        }
+
+        atual += caractere;
+    }
+
+    celulas.push(atual);
+    return celulas.map((celula) => celula.trim());
+}
+
+function lerTabelaCsv(texto) {
+    const linhas = String(texto || '')
+        .replace(/^\uFEFF/, '')
+        .split(/\r?\n/)
+        .map((linha) => linha.trim())
+        .filter((linha) => linha.replace(/[;,\t\s]/g, '').length);
+
+    if (!linhas.length) return null;
+
+    const separador = separadorDoCsv(linhas[0]);
+    const celulas = linhas.map((linha) => dividirLinhaCsv(linha, separador));
+    const primeira = celulas[0];
+
+    // Cabeçalho = primeira linha sem nenhum telefone.
+    const temCabecalho = !primeira.some((celula) => apenasNumeros(celula).length >= 10);
+    const colunas = primeira.map((celula, indice) => (temCabecalho && celula) ? celula : ('Coluna ' + (indice + 1)));
+    const dados = temCabecalho ? celulas.slice(1) : celulas;
+
+    return { colunas, linhas: dados.filter((linha) => linha.some((celula) => celula)) };
+}
+
+function lerMapaMemoria() {
+    try {
+        const bruto = window.localStorage.getItem(MAPA_MEMORIA_CHAVE);
+        return bruto ? (JSON.parse(bruto) || {}) : {};
+    } catch (erro) {
+        return {};
+    }
+}
+
+function gravarMapaMemoria() {
+    if (!tabelaLista) return;
+
+    try {
+        const memoria = lerMapaMemoria();
+        tabelaLista.colunas.forEach((coluna, indice) => {
+            const chave = normalizarChave(coluna);
+            const destino = tabelaLista.mapa[indice];
+            if (chave && destino && destino !== 'custom') memoria[chave] = destino;
+        });
+        window.localStorage.setItem(MAPA_MEMORIA_CHAVE, JSON.stringify(memoria));
+    } catch (erro) { /* localStorage indisponível */ }
+}
+
+/* Adivinha o destino da coluna pelo nome e, quando não há nome, pelo conteúdo. */
+function adivinharDestino(coluna, indice, linhas) {
+    const chave = normalizarChave(coluna);
+
+    if (chave) {
+        if (/cnpj/.test(chave)) return 'cnpj';
+        if (/cpf/.test(chave)) return 'cpf';
+        if (/(razao|social|empresa|fantasia|company)/.test(chave)) return 'razao_social';
+        if (/(agencia|ag_conta|conta|banco)/.test(chave)) return 'ag_conta';
+        if (/(socio|socios)/.test(chave)) return 'socio';
+        if (/(responsavel|vendedor)/.test(chave)) return 'responsavel';
+        if (/(telefone|phone|whats|celular|fone|numero|number)/.test(chave)) return 'telefone';
+        if (/(nome|name|contato|cliente)/.test(chave)) return 'nome';
+    }
+
+    const amostras = linhas.slice(0, 6)
+        .map((linha) => String(linha[indice] || '').trim())
+        .filter(Boolean);
+
+    if (!amostras.length) return '';
+
+    const digitos = amostras.map((amostra) => apenasNumeros(amostra));
+    if (digitos.every((numero) => numero.length >= 10 && numero.length <= 13)) return 'telefone';
+
+    return '';
+}
+
+function analisarLista() {
+    const campo = $('lista-texto');
+    const tabela = lerTabelaCsv(campo ? campo.value : '');
+
+    if (!tabela || !tabela.linhas.length) {
+        toast('Cole os contatos ou envie o arquivo antes de analisar.', 'erro');
+        return;
+    }
+
+    const memoria = lerMapaMemoria();
+    tabela.mapa = tabela.colunas.map((coluna, indice) => {
+        const lembrado = memoria[normalizarChave(coluna)];
+        // "custom" depende do nome digitado na hora, então não reaproveita.
+        return (lembrado && lembrado !== 'custom') ? lembrado : adivinharDestino(coluna, indice, tabela.linhas);
+    });
+    tabela.custom = tabela.colunas.map(() => '');
+
+    // Se ninguém ficou como telefone, pega a coluna que só tem números de telefone.
+    if (!tabela.mapa.includes('telefone')) {
+        const indice = tabela.colunas.findIndex((coluna, posicao) => {
+            const amostras = tabela.linhas.slice(0, 6).map((linha) => apenasNumeros(linha[posicao]));
+            return amostras.length && amostras.every((numero) => numero.length >= 10 && numero.length <= 13);
+        });
+
+        if (indice >= 0) tabela.mapa[indice] = 'telefone';
+    }
+
+    // Sem coluna de nome: a primeira coluna de texto que sobrou vira o nome
+    // (cobre listas antigas no formato "telefone;nome" e cabeçalhos desconhecidos).
+    if (!tabela.mapa.includes('nome')) {
+        const indice = tabela.colunas.findIndex((coluna, posicao) => {
+            if (tabela.mapa[posicao]) return false;
+
+            const amostras = tabela.linhas.slice(0, 6)
+                .map((linha) => String(linha[posicao] || '').trim())
+                .filter(Boolean);
+
+            return amostras.length > 0 && amostras.every((valor) =>
+                /[a-zA-ZÀ-ÿ]/.test(valor) && apenasNumeros(valor).length < 10
+            );
+        });
+
+        if (indice >= 0) tabela.mapa[indice] = 'nome';
+    }
+
+    tabelaLista = tabela;
+    renderizarMapaLista();
+
+    const painel = $('lista-mapeamento');
+    if (painel) painel.classList.remove('oculto');
+
+    const progresso = $('lista-progresso');
+    if (progresso) progresso.textContent = '';
 }
 
 function lerArquivoLista(input) {
@@ -676,31 +865,144 @@ function lerArquivoLista(input) {
         const campo = $('lista-texto');
         if (!campo) return;
 
-        const conteudo = String(leitor.result || '').trim();
-        const atual = campo.value.trim();
-        campo.value = atual ? atual + '\n' + conteudo : conteudo;
+        campo.value = String(leitor.result || '').trim();
         toast('Arquivo carregado: ' + arquivo.name);
+        analisarLista();
     };
 
     leitor.onerror = () => toast('Não foi possível ler o arquivo.', 'erro');
     leitor.readAsText(arquivo, 'UTF-8');
 }
 
+function renderizarMapaLista() {
+    const caixa = $('lista-colunas');
+    if (!caixa || !tabelaLista) return;
+
+    caixa.innerHTML = '';
+
+    tabelaLista.colunas.forEach((coluna, indice) => {
+        const exemplos = tabelaLista.linhas.slice(0, 3)
+            .map((linha) => String(linha[indice] || '').trim())
+            .filter(Boolean);
+
+        const linha = document.createElement('div');
+        linha.className = 'mapa-linha';
+
+        const info = document.createElement('div');
+        info.className = 'mapa-coluna';
+        info.innerHTML = '<strong>' + escaparHtml(coluna) + '</strong>' +
+            '<small>' + escaparHtml(exemplos.join(' · ') || 'sem exemplo') + '</small>';
+
+        const seletor = document.createElement('select');
+        seletor.className = 'form-control mapa-select';
+        seletor.innerHTML = '<option value="">Ignorar coluna</option>' +
+            CAMPOS_LISTA.map((campo) => `<option value="${campo.chave}">${escaparHtml(campo.rotulo)}</option>`).join('') +
+            '<option value="custom">Atributo personalizado…</option>';
+        seletor.value = tabelaLista.mapa[indice] || '';
+
+        const personalizado = document.createElement('input');
+        personalizado.className = 'form-control mapa-custom';
+        personalizado.type = 'text';
+        personalizado.placeholder = 'nome do atributo (ex.: ag_conta)';
+        personalizado.value = tabelaLista.custom[indice] || '';
+        personalizado.classList.toggle('oculto', seletor.value !== 'custom');
+
+        seletor.onchange = () => {
+            tabelaLista.mapa[indice] = seletor.value;
+            personalizado.classList.toggle('oculto', seletor.value !== 'custom');
+
+            if (seletor.value === 'custom' && !personalizado.value) {
+                personalizado.value = normalizarChave(coluna);
+                tabelaLista.custom[indice] = personalizado.value;
+            }
+
+            atualizarResumoLista();
+        };
+
+        personalizado.oninput = () => {
+            tabelaLista.custom[indice] = personalizado.value;
+            atualizarResumoLista();
+        };
+
+        linha.appendChild(info);
+        linha.appendChild(seletor);
+        linha.appendChild(personalizado);
+        caixa.appendChild(linha);
+    });
+
+    atualizarResumoLista();
+}
+
+function montarContatosDaLista() {
+    if (!tabelaLista) return [];
+
+    const vistos = new Set();
+    const contatos = [];
+
+    tabelaLista.linhas.forEach((linha) => {
+        const contato = { telefone: '', nome: '', atributos: {} };
+
+        tabelaLista.colunas.forEach((coluna, indice) => {
+            const destino = tabelaLista.mapa[indice];
+            const valor = String(linha[indice] || '').trim();
+            if (!destino || !valor) return;
+
+            if (destino === 'telefone') contato.telefone = apenasNumeros(valor);
+            else if (destino === 'nome') contato.nome = valor;
+            else if (destino === 'custom') {
+                const atributo = normalizarChave(tabelaLista.custom[indice]);
+                if (atributo) contato.atributos[atributo] = valor;
+            } else {
+                contato.atributos[destino] = valor;
+            }
+        });
+
+        if (contato.telefone.length < 10 || vistos.has(contato.telefone)) return;
+        vistos.add(contato.telefone);
+        contatos.push(contato);
+    });
+
+    return contatos;
+}
+
+function atualizarResumoLista() {
+    const resumo = $('lista-resumo');
+    if (!resumo) return;
+
+    const contatos = montarContatosDaLista();
+    const atributos = new Set();
+
+    contatos.forEach((contato) => Object.keys(contato.atributos).forEach((nome) => atributos.add(nome)));
+
+    const listaAtributos = Array.from(atributos);
+    const textoAtributos = listaAtributos.length
+        ? ' · atributos: ' + listaAtributos.slice(0, 6).join(', ') + (listaAtributos.length > 6 ? '…' : '')
+        : '';
+
+    resumo.innerHTML = '<strong>' + contatos.length + '</strong> contato(s) válido(s) de ' +
+        (tabelaLista ? tabelaLista.linhas.length : 0) + ' linha(s)' + escaparHtml(textoAtributos) +
+        (contatos.length ? '' : ' — escolha a coluna do telefone.');
+}
+
 async function salvarLista() {
     const campoNome = $('lista-nome');
-    const campoTexto = $('lista-texto');
     const nome = (campoNome ? campoNome.value : '').trim();
-    const texto = (campoTexto ? campoTexto.value : '');
 
+    if (!tabelaLista) { toast('Clique em "Analisar colunas" antes de importar.', 'erro'); return; }
     if (!nome) { toast('Informe um nome para a lista.', 'erro'); return; }
 
-    const contatos = texto.split(/\r?\n/).map(interpretarLinhaContato).filter(Boolean);
+    const contatos = montarContatosDaLista();
     if (!contatos.length) { toast('Nenhum telefone válido encontrado.', 'erro'); return; }
 
     const botao = document.querySelector('button[onclick="salvarLista()"]');
     if (botao) botao.disabled = true;
 
+    const progresso = $('lista-progresso');
+    const mostrarProgresso = (texto) => { if (progresso) progresso.textContent = texto; };
+
     try {
+        mostrarProgresso('Gravando a lista...');
+
         const resposta = await fetch('/api/listas', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -710,16 +1012,72 @@ async function salvarLista() {
         const retorno = await resposta.json().catch(() => ({}));
         if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
 
-        toast('Lista "' + nome + '" importada com ' + retorno.total + ' contato(s).');
+        gravarMapaMemoria();
+
+        const querWati = $('lista-enviar-wati') ? $('lista-enviar-wati').checked : false;
+        let enviadosWati = null;
+        let falhasWati = 0;
+        let primeiroErroWati = '';
+
+        if (querWati) {
+            const tamanhoLote = 20;
+            enviadosWati = 0;
+
+            for (let inicio = 0; inicio < contatos.length; inicio += tamanhoLote) {
+                const lote = contatos.slice(inicio, inicio + tamanhoLote);
+                mostrarProgresso('Enviando para a Wati: ' + Math.min(inicio + tamanhoLote, contatos.length) + ' de ' + contatos.length + '...');
+
+                const envio = await fetch('/api/wati/contatos', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contatos: lote })
+                });
+
+                const resultado = await envio.json().catch(() => ({}));
+                if (!envio.ok) throw new Error(resultado.message || ('HTTP ' + envio.status));
+
+                enviadosWati += Number(resultado.enviados) || 0;
+                falhasWati += Number(resultado.falhas) || 0;
+
+                if (!primeiroErroWati && Array.isArray(resultado.resultados)) {
+                    const comErro = resultado.resultados.find((item) => !item.ok && item.message);
+                    if (comErro) primeiroErroWati = comErro.message;
+                }
+            }
+        }
+
+        const partes = ['Lista "' + nome + '" importada com ' + retorno.total + ' contato(s)'];
+
+        if (retorno.novos || retorno.atualizados) {
+            partes.push((retorno.novos || 0) + ' novo(s), ' + (retorno.atualizados || 0) + ' atualizado(s)');
+        }
+        if (enviadosWati !== null) {
+            partes.push(falhasWati
+                ? enviadosWati + ' na Wati, ' + falhasWati + ' com falha'
+                : enviadosWati + ' enviado(s) para a Wati com atributos');
+        }
+
+        mostrarProgresso(partes.join(' · '));
+        toast(partes.join(' · '), falhasWati ? 'erro' : undefined);
+
+        if (falhasWati && primeiroErroWati) console.warn('Wati:', primeiroErroWati);
+
         if (campoNome) campoNome.value = '';
+        const campoTexto = $('lista-texto');
         if (campoTexto) campoTexto.value = '';
+
         const arquivo = $('lista-arquivo');
         if (arquivo) arquivo.value = '';
+
+        tabelaLista = null;
+        const painel = $('lista-mapeamento');
+        if (painel) painel.classList.add('oculto');
 
         carregarListas();
         carregarDashboard();
     } catch (erro) {
         console.error('Erro ao salvar lista:', erro);
+        mostrarProgresso(erro.message || 'Não foi possível salvar a lista.');
         toast(erro.message || 'Não foi possível salvar a lista.', 'erro');
     } finally {
         if (botao) botao.disabled = false;

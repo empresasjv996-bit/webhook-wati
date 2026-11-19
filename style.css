@@ -256,6 +256,16 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .info-group p { font-size: 0.9rem; font-weight: 600; }
 .info-group textarea { min-height: 90px; resize: vertical; }
 
+/* atributos importados da lista (aparecem na ficha) */
+.ficha-atributos { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.ficha-atributos li {
+    display: flex; justify-content: space-between; gap: 10px;
+    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border);
+    border-radius: 10px; padding: 7px 10px; font-size: 0.76rem;
+}
+.ficha-atributos li span { color: var(--text-muted); text-transform: none; }
+.ficha-atributos li strong { font-weight: 700; word-break: break-word; text-align: right; }
+
 .ficha-acoes { display: flex; gap: 10px; padding-bottom: 12px; }
 
 /* STATUS DA NEGOCIAÇÃO */
@@ -329,6 +339,35 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
     padding: 10px 12px; color: var(--text-muted); font-size: 0.78rem; cursor: pointer; font-family: var(--font);
 }
 .file-row small { color: var(--text-muted); font-size: 0.72rem; }
+
+/* mapa de colunas (importação de lista no estilo da Wati, só que automático) */
+.mapa-topo { margin-top: 22px; }
+.mapa-topo h3 { font-size: 1rem; margin-bottom: 6px; }
+.mapa-ajuda { color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; margin-bottom: 12px; }
+.mapa-colunas { display: flex; flex-direction: column; gap: 10px; }
+.mapa-linha {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); gap: 10px; align-items: center;
+    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px;
+}
+.mapa-coluna { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mapa-coluna strong { font-size: 0.82rem; }
+.mapa-coluna small {
+    color: var(--text-muted); font-size: 0.7rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mapa-linha .form-control { padding: 9px 12px; font-size: 0.8rem; }
+.mapa-custom { grid-column: 1 / -1; }
+.mapa-resumo { color: var(--text-muted); font-size: 0.76rem; line-height: 1.5; margin-top: 12px; }
+.mapa-resumo strong { color: #fff; }
+.mapa-check {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px;
+    font-size: 0.8rem; color: var(--text-muted); cursor: pointer;
+}
+.mapa-check input { width: 16px; height: 16px; accent-color: var(--green); cursor: pointer; }
+
+@media (max-width: 560px) {
+    .mapa-linha { grid-template-columns: 1fr; }
+}
 
 /* =========================================================
    CAMPANHAS

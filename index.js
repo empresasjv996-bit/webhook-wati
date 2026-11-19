@@ -136,6 +136,32 @@ function watiConfigurada() {
     return Boolean(WATI_TOKEN && WATI_TENANT);
 }
 
+/* Nome de atributo aceito pela Wati: minúsculo, sem acento e com "_"
+   (ex.: "Razão Social" -> "razao_social"). */
+function normalizarAtributo(nome) {
+    return String(nome || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .substring(0, 40);
+}
+
+/* Só mantém atributos com nome e valor; ignora chaves vazias. */
+function limparAtributos(atributos) {
+    const saida = {};
+
+    Object.keys(atributos || {}).forEach((chave) => {
+        const nome = normalizarAtributo(chave);
+        const valor = String(atributos[chave] == null ? '' : atributos[chave]).trim();
+        if (!nome || !valor) return;
+        saida[nome] = valor.substring(0, 500);
+    });
+
+    return saida;
+}
+
 // ---------------------------------------------------------
 // TEMPO REAL (SSE) - avisa o painel sempre que algo muda
 // ---------------------------------------------------------
@@ -337,6 +363,129 @@ async function testarWati() {
     }
 }
 
+/* ---------------------------------------------------------
+   CONTATOS NA WATI (importação de listas)
+   Grava o contato já com os atributos mapeados no painel. A Wati cria o
+   atributo na conta no primeiro uso, então ele passa a aparecer também na
+   importação de CSV dentro da Wati.
+   --------------------------------------------------------- */
+async function watiRequisicao(url, metodo, corpo) {
+    const controle = new AbortController();
+    const limite = setTimeout(() => controle.abort(), 20000);
+
+    try {
+        const resposta = await fetch(url, {
+            method: metodo,
+            headers: {
+                Authorization: `Bearer ${WATI_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: corpo ? JSON.stringify(corpo) : undefined,
+            signal: controle.signal
+        });
+
+        const texto = await resposta.text();
+        let dados = null;
+        try { dados = texto ? JSON.parse(texto) : null; } catch (erro) { dados = null; }
+
+        return { ok: resposta.ok, status: resposta.status, dados, texto };
+    } catch (erro) {
+        const motivo = erro.name === 'AbortError' ? 'tempo esgotado (20s)' : erro.message;
+        return { ok: false, status: 0, dados: null, texto: motivo };
+    } finally {
+        clearTimeout(limite);
+    }
+}
+
+function descreverErroWati(resposta) {
+    if (!resposta) return 'sem resposta';
+
+    const dados = resposta.dados;
+    let detalhe = dados && (dados.message || dados.error);
+
+    if (!detalhe && dados && Array.isArray(dados.errors) && dados.errors.length) {
+        const primeiro = dados.errors[0];
+        detalhe = (primeiro && (primeiro.message || primeiro.error)) || primeiro;
+    }
+
+    if (detalhe) return `HTTP ${resposta.status}: ${String(detalhe).substring(0, 140)}`;
+    if (resposta.status) return `HTTP ${resposta.status}`;
+
+    return String(resposta.texto || 'falha de conexão').substring(0, 140);
+}
+
+/* A Wati às vezes responde 200 com result:false — não dá para confiar só no HTTP. */
+function watiSucesso(resposta) {
+    if (!resposta || !resposta.ok) return false;
+
+    const dados = resposta.dados;
+    if (dados && typeof dados === 'object') {
+        if (dados.result === false || dados.success === false) return false;
+        if (Array.isArray(dados.errors) && dados.errors.length) return false;
+        if (Array.isArray(dados.contact_list) && dados.contact_list.some((item) => item && item.result === false)) return false;
+    }
+
+    return true;
+}
+
+async function salvarContatoNaWati({ telefone, nome, atributos }) {
+    if (banco.modoDemo) return { ok: true, demo: true };
+
+    if (!watiConfigurada()) {
+        return { ok: false, message: 'WATI_TOKEN e/ou WATI_NUMERO não configurados no Environment do Render.' };
+    }
+
+    const numero = String(telefone || '').replace(/\D/g, '');
+    if (!numero) return { ok: false, message: 'Telefone inválido.' };
+
+    const params = Object.keys(atributos || {}).map((chave) => ({ name: chave, value: atributos[chave] }));
+    const tentativas = [];
+
+    // 1) API v3: contato novo já com os atributos
+    let resposta = await watiRequisicao(`${WATI_HOST}/api/ext/v3/contacts`, 'POST', {
+        whatsapp_number: numero,
+        name: nome || undefined,
+        custom_params: params
+    });
+    if (watiSucesso(resposta)) return { ok: true, via: 'v3-add' };
+    tentativas.push(`v3-add ${descreverErroWati(resposta)}`);
+
+    // 2) API v3: contato que já existe -> atualiza os atributos
+    if (params.length) {
+        resposta = await watiRequisicao(`${WATI_HOST}/api/ext/v3/contacts`, 'PUT', {
+            contacts: [{ target: numero, customParams: params }]
+        });
+        if (watiSucesso(resposta)) return { ok: true, via: 'v3-atualizado' };
+        tentativas.push(`v3-atualizado ${descreverErroWati(resposta)}`);
+    }
+
+    // 3) API v1 (contas que ainda não têm a v3 liberada)
+    resposta = await watiRequisicao(`${watiBase()}/api/v1/addContact/${numero}`, 'POST', {
+        name: nome || numero,
+        customParams: params
+    });
+    if (watiSucesso(resposta)) return { ok: true, via: 'v1-add' };
+    tentativas.push(`v1-add ${descreverErroWati(resposta)}`);
+
+    const respostaAdd = resposta;
+
+    if (params.length) {
+        resposta = await watiRequisicao(`${watiBase()}/api/v1/updateContactAttributes/${numero}`, 'POST', {
+            customParams: params
+        });
+        if (watiSucesso(resposta)) return { ok: true, via: 'v1-atributos' };
+        tentativas.push(`v1-atributos ${descreverErroWati(resposta)}`);
+    }
+
+    // Contato já existia e não havia atributo novo para gravar.
+    const textoAdd = `${(respostaAdd && respostaAdd.texto) || ''} ${JSON.stringify((respostaAdd && respostaAdd.dados) || {})}`.toLowerCase();
+    if (/exist|already|duplicate|cadastrad/.test(textoAdd)) {
+        return { ok: true, via: 'ja-existia' };
+    }
+
+    return { ok: false, message: `A Wati recusou (${tentativas.join(' | ')}).` };
+}
+
 app.get('/api/canais', (req, res) => {
     res.json([
         {
@@ -362,6 +511,57 @@ app.post('/api/canais/testar', async (req, res) => {
         console.error('Erro ao testar canal:', erro.message);
         res.status(500).json({ ok: false, message: 'Erro inesperado ao testar o canal.' });
     }
+});
+
+/* Envia para a Wati os contatos de uma lista já mapeada no painel.
+   O navegador manda em lotes de 20 para caber no tempo do Render. */
+app.post('/api/wati/contatos', exigirAdmin, async (req, res) => {
+    const { contatos } = req.body || {};
+
+    if (!Array.isArray(contatos) || !contatos.length) {
+        return res.status(400).json({ success: false, message: 'Nenhum contato para enviar.' });
+    }
+    if (contatos.length > 25) {
+        return res.status(400).json({ success: false, message: 'Envie no máximo 25 contatos por vez.' });
+    }
+
+    const resultados = [];
+    let enviados = 0;
+    let falhas = 0;
+
+    for (const item of contatos) {
+        const telefone = String((item && item.telefone) || '').replace(/\D/g, '');
+
+        if (telefone.length < 10) {
+            falhas++;
+            resultados.push({ telefone, ok: false, message: 'Telefone inválido.' });
+            continue;
+        }
+
+        const resultado = await salvarContatoNaWati({
+            telefone,
+            nome: String((item && item.nome) || '').trim().substring(0, 120),
+            atributos: limparAtributos(item && item.atributos)
+        });
+
+        if (resultado.ok) enviados++;
+        else falhas++;
+
+        resultados.push({ telefone, ok: resultado.ok, via: resultado.via || null, message: resultado.message || null });
+
+        // respiro curto para não esbarrar no limite de requisições da Wati
+        await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+
+    try {
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            'contatos enviados para a Wati',
+            `${enviados} enviado(s), ${falhas} falha(s)`
+        );
+    } catch (erro) { /* auditoria não pode derrubar o envio */ }
+
+    res.json({ success: falhas === 0, enviados, falhas, resultados });
 });
 
 // ---------------------------------------------------------
@@ -573,7 +773,20 @@ app.post('/api/listas', async (req, res) => {
         const telefone = String((item && item.telefone) || '').replace(/\D/g, '');
         if (!telefone || vistos.has(telefone)) return;
         vistos.add(telefone);
-        limpos.push({ telefone, nome: (item && item.nome) || '' });
+
+        const atributos = limparAtributos(item && item.atributos);
+        const contato = {
+            telefone,
+            nome: String((item && item.nome) || '').trim().substring(0, 120),
+            atributos
+        };
+
+        // essas colunas também existem na ficha do cliente
+        ['cnpj', 'cpf', 'socio', 'responsavel'].forEach((campo) => {
+            if (atributos[campo]) contato[campo] = atributos[campo];
+        });
+
+        limpos.push(contato);
     });
 
     if (!limpos.length) {
@@ -584,9 +797,26 @@ app.post('/api/listas', async (req, res) => {
 
     try {
         const lista = await banco.criarLista(nomeLimpo, limpos);
+
+        let resumo = { novos: 0, atualizados: 0 };
+        try {
+            resumo = await banco.salvarContatosImportados(limpos);
+        } catch (erro) {
+            console.error('Erro ao gravar os contatos importados:', erro.message);
+        }
+
         emitirEvento('lista', { id: lista.id, nome: nomeLimpo, total: lista.total });
+        emitirEvento('clientes', { importados: lista.total });
         await banco.registrarAuditoria(req.user && req.user.nome, 'lista importada', `${nomeLimpo} (${lista.total} contatos)`);
-        res.json({ success: true, id: lista.id, total: lista.total });
+
+        res.json({
+            success: true,
+            id: lista.id,
+            total: lista.total,
+            novos: resumo.novos,
+            atualizados: resumo.atualizados,
+            contatos: limpos
+        });
     } catch (error) {
         console.error('Erro ao salvar lista:', error.message);
         res.status(500).json({ success: false, message: 'Erro ao salvar a lista.' });

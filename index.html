@@ -198,7 +198,7 @@
                 <div class="section-title">
                     <div>
                         <h1>Listas</h1>
-                        <p>Importe um arquivo .txt (um contato por linha: telefone;nome) ou cole os contatos direto no campo.</p>
+                        <p>Envie o .csv (ou cole os contatos) e vincule cada coluna a um campo — igual à importação da Wati, só que os atributos são criados automáticos.</p>
                     </div>
                     <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
                 </div>
@@ -211,16 +211,38 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Contatos</label>
-                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="5511999999999;João&#10;5511888888888;Maria"></textarea>
+                            <label>1. Arquivo ou contatos colados</label>
+                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="Nome;Telefone;CNPJ;Razão_Social;AG_CONTA;CPF&#10;João;5511999999999;12.345.678/0001-90;João ME;1234-5;123.456.789-00"></textarea>
                         </div>
 
                         <div class="file-row">
                             <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
-                            <small>Formatos aceitos: .txt e .csv</small>
+                            <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
                         </div>
 
-                        <button class="btn-primary" style="margin-top: 18px" onclick="salvarLista()">Importar lista</button>
+                        <button class="btn-primary" style="margin-top: 18px" onclick="analisarLista()">Analisar colunas</button>
+
+                        <div id="lista-mapeamento" class="oculto">
+                            <div class="mapa-topo">
+                                <h3>2. Vincule as colunas</h3>
+                                <p class="mapa-ajuda">
+                                    Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as outras viram
+                                    atributos do contato na Wati (com o mesmo nome que você escolher aqui).
+                                </p>
+                            </div>
+
+                            <div id="lista-colunas" class="mapa-colunas"></div>
+
+                            <p id="lista-resumo" class="mapa-resumo"></p>
+
+                            <label class="mapa-check">
+                                <input id="lista-enviar-wati" type="checkbox" checked>
+                                Enviar os contatos para a Wati já com esses atributos
+                            </label>
+
+                            <button class="btn-primary" style="margin-top: 16px" onclick="salvarLista()">Importar lista</button>
+                            <p id="lista-progresso" class="mapa-resumo"></p>
+                        </div>
                     </div>
 
                     <div class="screen-panel">
@@ -555,6 +577,16 @@
                     <div class="info-group">
                         <label>Responsável</label>
                         <input id="ficha-responsavel" class="form-control" type="text" placeholder="Quem atendeu">
+                    </div>
+                </div>
+
+                <div class="ficha-bloco">
+                    <h3>Atributos da lista</h3>
+                    <div class="info-group">
+                        <label>Colunas extras importadas (vão como atributo para a Wati)</label>
+                        <ul id="ficha-atributos" class="ficha-atributos">
+                            <li><span>Nenhum atributo importado</span></li>
+                        </ul>
                     </div>
                 </div>
 

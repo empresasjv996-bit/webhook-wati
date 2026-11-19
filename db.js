@@ -40,6 +40,8 @@ function criarBancoPostgres() {
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cpf TEXT',
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel TEXT',
                 "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS outros_socios JSONB DEFAULT '[]'::jsonb",
+                // colunas extras mapeadas na importação de listas (viram atributos na Wati)
+                "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS atributos JSONB DEFAULT '{}'::jsonb",
                 // dono do lead (vendedor que recebeu a lista da campanha)
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS vendedor_email TEXT',
                 'ALTER TABLE clientes ADD COLUMN IF NOT EXISTS vendedor_nome TEXT',
@@ -221,7 +223,9 @@ function criarBancoPostgres() {
 
         async obterFicha(telefone) {
             const { rows } = await pool.query(
-                'SELECT nome, telefone, cnpj, socio, cpf, responsavel, outros_socios, status, mensagem FROM clientes WHERE telefone = $1',
+                `SELECT nome, telefone, cnpj, socio, cpf, responsavel, outros_socios,
+                        atributos, status, mensagem
+                   FROM clientes WHERE telefone = $1`,
                 [telefone]
             );
             return rows[0] || null;
@@ -237,6 +241,48 @@ function criarBancoPostgres() {
                 [dados.cnpj || null, dados.socio || null, dados.cpf || null, dados.responsavel || null, outros, telefone]
             );
             return resultado.rowCount > 0;
+        },
+
+        /* Importação de lista com colunas mapeadas (ex.: planilha exportada da Wati).
+           - nome/telefone entram no cadastro do cliente;
+           - cnpj/cpf/socio/responsavel também alimentam a ficha;
+           - o resto fica em clientes.atributos e é enviado como atributo na Wati. */
+        async salvarContatosImportados(contatos) {
+            let novos = 0;
+            let atualizados = 0;
+
+            for (const contato of contatos) {
+                const atributos = JSON.stringify(contato.atributos || {});
+                const { rows } = await pool.query(
+                    `INSERT INTO clientes (nome, telefone, atributos, cnpj, cpf, socio, responsavel, mensagem, status)
+                     VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, '', 'pensando')
+                     ON CONFLICT (telefone) DO UPDATE
+                        SET nome = CASE
+                                WHEN clientes.nome IS NULL OR BTRIM(clientes.nome) = '' THEN EXCLUDED.nome
+                                ELSE clientes.nome
+                            END,
+                            atributos = COALESCE(clientes.atributos, '{}'::jsonb) || EXCLUDED.atributos,
+                            cnpj = COALESCE(NULLIF(BTRIM(clientes.cnpj), ''), EXCLUDED.cnpj),
+                            cpf = COALESCE(NULLIF(BTRIM(clientes.cpf), ''), EXCLUDED.cpf),
+                            socio = COALESCE(NULLIF(BTRIM(clientes.socio), ''), EXCLUDED.socio),
+                            responsavel = COALESCE(NULLIF(BTRIM(clientes.responsavel), ''), EXCLUDED.responsavel)
+                     RETURNING (xmax = 0) AS inserido`,
+                    [
+                        contato.nome || contato.telefone,
+                        contato.telefone,
+                        atributos,
+                        contato.cnpj || null,
+                        contato.cpf || null,
+                        contato.socio || null,
+                        contato.responsavel || null
+                    ]
+                );
+
+                if (rows[0] && rows[0].inserido) novos++;
+                else atualizados++;
+            }
+
+            return { novos, atualizados };
         },
 
         async listarMensagens(telefone) {
@@ -609,6 +655,7 @@ function criarBancoMemoria() {
             cpf: null,
             responsavel: null,
             outros_socios: [],
+            atributos: {},
             vendedor_email: null,
             vendedor_nome: null,
             mensagem: '',
@@ -750,6 +797,7 @@ function criarBancoMemoria() {
                 nome: c.nome, telefone: c.telefone, cnpj: c.cnpj, socio: c.socio,
                 cpf: c.cpf, responsavel: c.responsavel,
                 outros_socios: Array.isArray(c.outros_socios) ? c.outros_socios.slice() : [],
+                atributos: c.atributos && typeof c.atributos === 'object' ? Object.assign({}, c.atributos) : {},
                 status: c.status, mensagem: c.mensagem
             };
         },
@@ -830,6 +878,43 @@ function criarBancoMemoria() {
         async finalizarAtendimento(telefone) {
             const c = clientes.get(telefone);
             if (c) c.status = 'finalizado';
+        },
+
+        async salvarContatosImportados(contatos) {
+            let novos = 0;
+            let atualizados = 0;
+
+            contatos.forEach((contato) => {
+                const atual = clientes.get(contato.telefone);
+                const atributos = Object.assign({}, (contato && contato.atributos) || {});
+
+                if (atual) {
+                    atual.atributos = Object.assign({}, atual.atributos || {}, atributos);
+                    if (!atual.nome) atual.nome = contato.nome || atual.nome;
+                    atual.cnpj = atual.cnpj || contato.cnpj || null;
+                    atual.cpf = atual.cpf || contato.cpf || null;
+                    atual.socio = atual.socio || contato.socio || null;
+                    atual.responsavel = atual.responsavel || contato.responsavel || null;
+                    atualizados++;
+                    return;
+                }
+
+                semearCliente({
+                    nome: contato.nome || contato.telefone,
+                    telefone: contato.telefone,
+                    atributos,
+                    cnpj: contato.cnpj || null,
+                    cpf: contato.cpf || null,
+                    socio: contato.socio || null,
+                    responsavel: contato.responsavel || null,
+                    mensagem: '',
+                    status: 'pensando',
+                    criado_em: new Date().toISOString()
+                });
+                novos++;
+            });
+
+            return { novos, atualizados };
         },
 
         async listarListas() {
