@@ -123,7 +123,7 @@ function irPara(view) {
     if (view === 'conversas') carregarConversas(true);
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
-    if (view === 'canais') carregarCanais();
+    if (view === 'canais') { carregarCanais(); carregarWebhook(); }
     if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); }
     if (view === 'logs') carregarLogs();
     if (view === 'auditoria') carregarAuditoria();
@@ -1049,6 +1049,113 @@ async function testarCanal(botao) {
         toast('Erro ao testar o canal.', 'erro');
     } finally {
         if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+    }
+}
+
+/* ---------------------------------------------------------
+   WEBHOOK SEGURO (token na URL do webhook)
+   --------------------------------------------------------- */
+let webhookAtual = null;
+
+function renderizarWebhook(dados) {
+    const status = $('webhook-status');
+    const campo = $('webhook-url');
+    const dica = $('webhook-dica');
+    const botao = $('webhook-toggle');
+    if (!status || !campo || !dica || !botao) return;
+
+    webhookAtual = dados || null;
+
+    if (!dados) {
+        status.textContent = 'Não foi possível carregar o estado do webhook.';
+        status.className = 'webhook-status erro';
+        campo.value = '';
+        dica.textContent = 'Atualize a página ou tente novamente em instantes.';
+        botao.disabled = true;
+        botao.textContent = 'Indisponível';
+        return;
+    }
+
+    if (dados.ativo) {
+        status.textContent = dados.viaAmbiente
+            ? 'Token exigido (definido no Environment do Render).'
+            : 'Token exigido — webhook protegido.';
+        status.className = 'webhook-status ativo';
+    } else if (dados.temSegredo) {
+        status.textContent = 'Token ainda não exigido — qualquer origem consegue chamar o webhook.';
+        status.className = 'webhook-status pendente';
+    } else {
+        status.textContent = 'Sem segredo disponível para proteger o webhook.';
+        status.className = 'webhook-status erro';
+    }
+
+    campo.value = dados.url || (dados.viaAmbiente ? 'Segredo definido no Render — a URL é /webhook?token=SEU_WEBHOOK_SECRET' : '');
+    dica.textContent = dados.aviso || '';
+
+    if (dados.viaAmbiente) {
+        botao.disabled = true;
+        botao.textContent = 'Definido no Render';
+    } else {
+        botao.disabled = false;
+        botao.textContent = dados.ativo ? 'Desativar exigência' : 'Ativar exigência do token';
+    }
+}
+
+async function carregarWebhook() {
+    try {
+        const resposta = await fetch('/api/webhook');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+        renderizarWebhook(await resposta.json());
+    } catch (erro) {
+        renderizarWebhook(null);
+    }
+}
+
+async function alternarWebhook(botao) {
+    if (!webhookAtual) return;
+
+    const ativar = !webhookAtual.ativo;
+    const textoOriginal = botao ? botao.textContent : '';
+    if (botao) { botao.disabled = true; botao.textContent = ativar ? 'Ativando...' : 'Desativando...'; }
+
+    try {
+        const resposta = await fetch('/api/webhook/ativar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ativo: ativar })
+        });
+
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+        if (!resposta.ok) throw new Error(dados.message || 'Falha ao alterar o webhook.');
+
+        renderizarWebhook(dados);
+        toast(ativar ? 'Token do webhook ativado.' : 'Token do webhook desativado.');
+    } catch (erro) {
+        toast(erro.message || 'Erro ao alterar o webhook.', 'erro');
+        if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+        carregarWebhook();
+    }
+}
+
+async function copiarWebhook() {
+    const campo = $('webhook-url');
+    const texto = campo ? String(campo.value || '').trim() : '';
+
+    if (!texto) { toast('Nenhuma URL disponível para copiar.', 'erro'); return; }
+
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(texto);
+        } else {
+            campo.select();
+            document.execCommand('copy');
+        }
+        toast('URL copiada. Cole na Wati em Settings → Webhook.');
+    } catch (erro) {
+        console.error('Erro ao copiar URL do webhook:', erro);
+        campo.select();
+        toast('Selecione a URL e copie com Ctrl+C.', 'erro');
     }
 }
 

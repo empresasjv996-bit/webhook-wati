@@ -294,6 +294,23 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .canal-ajuda { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--text-muted); font-size: 0.88rem; line-height: 1.55; }
 .canal-ajuda strong { color: #fff; }
 .canal-ajuda code { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; font-size: 0.8rem; color: #7CFFB2; word-break: break-all; }
+
+/* Webhook seguro (token na URL) */
+.webhook-painel { margin-top: 20px; display: flex; flex-direction: column; gap: 14px; }
+.webhook-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.webhook-topo h3 { font-size: 1.05rem; color: #fff; margin: 0 0 4px; }
+.webhook-acoes { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.webhook-status { font-size: 0.8rem; font-weight: 700; margin: 0; }
+.webhook-status.ativo { color: #7CFFB2; }
+.webhook-status.pendente { color: #ffd479; }
+.webhook-status.erro { color: #ff9b9b; }
+.webhook-rotulo { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.webhook-url-linha { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.webhook-url { flex: 1; min-width: 240px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: #7CFFB2; font-family: monospace; font-size: 0.8rem; }
+.webhook-url:focus { outline: none; border-color: rgba(0, 255, 128, 0.45); }
+.webhook-dica { margin: 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.55; }
+.webhook-dica strong { color: #fff; }
+
 @media (max-width: 980px) {
     .canal-dados { grid-template-columns: 1fr; }
 }

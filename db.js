@@ -558,6 +558,19 @@ function criarBancoPostgres() {
 
             const { rows: gravado } = await pool.query('SELECT valor FROM configuracoes WHERE chave = $1', [chave]);
             return gravado.length ? gravado[0].valor : valor;
+        },
+
+        async obterConfiguracao(chave) {
+            const { rows } = await pool.query('SELECT valor FROM configuracoes WHERE chave = $1', [chave]);
+            return rows.length ? rows[0].valor : null;
+        },
+
+        async definirConfiguracao(chave, valor) {
+            await pool.query(
+                `INSERT INTO configuracoes (chave, valor) VALUES ($1, $2)
+                 ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor`,
+                [chave, String(valor)]
+            );
         }
     };
 }
@@ -1063,6 +1076,14 @@ function criarBancoMemoria() {
             const valor = typeof gerarValor === 'function' ? String(gerarValor()) : String(gerarValor);
             configuracoes.set(chave, valor);
             return valor;
+        },
+
+        async obterConfiguracao(chave) {
+            return configuracoes.has(chave) ? configuracoes.get(chave) : null;
+        },
+
+        async definirConfiguracao(chave, valor) {
+            configuracoes.set(chave, String(valor));
         }
     };
 }

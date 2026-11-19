@@ -55,10 +55,32 @@ const JWT_SECRET_PROPRIO = Boolean(JWT_SECRET_ENV);
 let JWT_SECRET = JWT_SECRET_ENV;
 let jwtSegredoOrigem = JWT_SECRET_PROPRIO ? 'env' : 'pendente';
 
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''; // opcional: ?token=... no webhook
+const WEBHOOK_SECRET_ENV = process.env.WEBHOOK_SECRET || '';
+
+// Estado do webhook (carregado no boot): o segredo pode vir do Render (env) ou
+// ser gerado e guardado no banco, com um interruptor para exigir o token.
+let webhookSecretBanco = '';
+let webhookSecretAtivo = false;
+let webhookSecretOrigem = WEBHOOK_SECRET_ENV ? 'env' : 'desativado';
+
+function segredoWebhookEsperado() {
+    if (WEBHOOK_SECRET_ENV) return WEBHOOK_SECRET_ENV;
+    return webhookSecretAtivo ? webhookSecretBanco : '';
+}
+
+/* Compara em tempo constante para não vazar o segredo por diferença de tempo. */
+function segredoConfere(recebido, esperado) {
+    const a = Buffer.from(String(recebido || ''));
+    const b = Buffer.from(String(esperado || ''));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 function gerarSegredoJwt() {
     return crypto.randomBytes(48).toString('hex');
+}
+
+function gerarSegredoWebhook() {
+    return crypto.randomBytes(24).toString('hex');
 }
 
 /* O segredo do JWT precisa ser o mesmo em todos os reinícios, senão todo mundo
@@ -75,6 +97,22 @@ async function carregarSegredoJwt() {
     }
 
     return { valor: gerarSegredoJwt(), origem: 'temporario' };
+}
+
+/* Gera (uma vez) o segredo do webhook e lê o interruptor de exigência.
+   A URL com ?token=... é montada no painel (Canais → Webhook seguro). */
+async function carregarSegredoWebhook() {
+    if (WEBHOOK_SECRET_ENV) return { secret: WEBHOOK_SECRET_ENV, ativo: true, origem: 'env' };
+
+    try {
+        const secret = await banco.obterOuCriarConfiguracao('webhook_secret', gerarSegredoWebhook);
+        const flag = await banco.obterConfiguracao('webhook_secret_ativo');
+        const ativo = flag === '1';
+        return { secret, ativo, origem: ativo ? 'banco' : 'desativado' };
+    } catch (erro) {
+        console.warn('WEBHOOK: não foi possível ler/gravar o segredo no banco:', erro.message);
+        return { secret: '', ativo: false, origem: 'desativado' };
+    }
 }
 
 // Configurações da Wati (vêm do Environment do Render)
@@ -238,7 +276,9 @@ app.get('/api/health', (req, res) => {
             wati: watiConfigurada(),
             jwtSecretProprio: JWT_SECRET_PROPRIO,
             jwtSecretOrigem: jwtSegredoOrigem,
-            webhookSecret: Boolean(WEBHOOK_SECRET)
+            webhookSecret: Boolean(segredoWebhookEsperado()),
+            webhookSecretOrigem,
+            webhookSecretDisponivel: Boolean(WEBHOOK_SECRET_ENV || webhookSecretBanco)
         },
         wati: {
             host: WATI_HOST,
@@ -321,6 +361,84 @@ app.post('/api/canais/testar', async (req, res) => {
     } catch (erro) {
         console.error('Erro ao testar canal:', erro.message);
         res.status(500).json({ ok: false, message: 'Erro inesperado ao testar o canal.' });
+    }
+});
+
+// ---------------------------------------------------------
+// WEBHOOK SEGURO (token na URL)
+// O segredo é gerado e guardado no banco; o painel mostra a URL pronta para
+// colar na Wati e só depois o token passa a ser exigido.
+// ---------------------------------------------------------
+function baseUrlPublica(req) {
+    const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const host = req.get('host') || '';
+    return `${proto}://${host}`;
+}
+
+function estadoWebhook(req) {
+    const viaAmbiente = Boolean(WEBHOOK_SECRET_ENV);
+
+    return {
+        ativo: Boolean(segredoWebhookEsperado()),
+        origem: webhookSecretOrigem,
+        viaAmbiente,
+        temSegredo: Boolean(viaAmbiente || webhookSecretBanco),
+        url: webhookSecretBanco ? `${baseUrlPublica(req)}/webhook?token=${webhookSecretBanco}` : null,
+        aviso: viaAmbiente
+            ? 'O segredo vem da variável WEBHOOK_SECRET do Render. Para trocar, altere lá e atualize a URL na Wati.'
+            : 'Cole a URL na Wati e envie uma mensagem de teste: a exigência do token liga sozinha no primeiro recebimento válido.'
+    };
+}
+
+/* Quando a Wati já chama a URL com o token, trancamos o webhook sem ninguém
+   precisar clicar em nada. Antes disso, as chamadas sem token continuam aceitas
+   para não perder mensagens durante a troca da URL. */
+async function ativarWebhookAutomaticamente() {
+    if (webhookSecretAtivo || WEBHOOK_SECRET_ENV) return;
+
+    try {
+        await banco.definirConfiguracao('webhook_secret_ativo', '1');
+        webhookSecretAtivo = true;
+        webhookSecretOrigem = 'banco';
+        await banco.registrarAuditoria('sistema', 'webhook protegido', 'ativado automático no primeiro token válido');
+        console.log('WEBHOOK: primeiro token válido recebido - exigência ativada automaticamente.');
+    } catch (erro) {
+        console.warn('WEBHOOK: não foi possível ativar a exigência automaticamente:', erro.message);
+    }
+}
+
+app.get('/api/webhook', exigirAdmin, (req, res) => res.json(estadoWebhook(req)));
+
+app.post('/api/webhook/ativar', exigirAdmin, async (req, res) => {
+    if (WEBHOOK_SECRET_ENV) {
+        return res.status(400).json({
+            success: false,
+            message: 'O segredo vem do Environment do Render (WEBHOOK_SECRET). Ajuste por lá.'
+        });
+    }
+
+    if (!webhookSecretBanco) {
+        return res.status(400).json({ success: false, message: 'Segredo indisponível. Recarregue a tela de Canais.' });
+    }
+
+    const ativo = Boolean(req.body && req.body.ativo);
+
+    try {
+        await banco.definirConfiguracao('webhook_secret_ativo', ativo ? '1' : '0');
+        webhookSecretAtivo = ativo;
+        webhookSecretOrigem = ativo ? 'banco' : 'desativado';
+
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            ativo ? 'webhook protegido' : 'webhook liberado',
+            'token na URL'
+        );
+
+        console.log(ativo ? 'WEBHOOK: token agora é exigido.' : 'WEBHOOK: token voltou a ser opcional.');
+        res.json(Object.assign({ success: true }, estadoWebhook(req)));
+    } catch (erro) {
+        console.error('Erro ao configurar o webhook:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao salvar a configuração do webhook.' });
     }
 });
 
@@ -933,13 +1051,18 @@ app.delete('/api/campanhas/:id', exigirAdmin, async (req, res) => {
 // ---------------------------------------------------------
 app.post('/webhook', async (req, res) => {
     try {
-        // Se WEBHOOK_SECRET estiver configurado, exige ?token=... (ou header x-webhook-secret)
-        if (WEBHOOK_SECRET) {
-            const recebido = req.query.token || req.get('x-webhook-secret') || '';
-            if (recebido !== WEBHOOK_SECRET) {
+        // Exige ?token=... (ou header x-webhook-secret) quando o token está ativo.
+        const esperado = segredoWebhookEsperado();
+        const recebido = req.query.token || req.get('x-webhook-secret') || '';
+
+        if (esperado) {
+            if (!segredoConfere(recebido, esperado)) {
                 console.warn('Webhook recusado: segredo inválido.');
                 return res.sendStatus(401);
             }
+        } else if (webhookSecretBanco && segredoConfere(recebido, webhookSecretBanco)) {
+            // A Wati já está chamando a URL nova: protege o webhook automaticamente.
+            await ativarWebhookAutomaticamente();
         }
 
         const body = req.body || {};
@@ -987,11 +1110,22 @@ async function iniciarServidor() {
         console.warn('JWT_SECRET: variável ausente e banco indisponível - segredo temporário (sessões caem ao reiniciar).');
     }
 
-    if (WEBHOOK_SECRET) {
-        console.log('WEBHOOK_SECRET: ativo - /webhook exige ?token=... (ou header x-webhook-secret).');
+    if (WEBHOOK_SECRET_ENV) {
+        console.log('WEBHOOK: exigindo o token definido em WEBHOOK_SECRET (Render).');
     } else {
-        console.warn('WEBHOOK_SECRET: ausente - /webhook aceita qualquer origem.');
-        console.warn('           Defina no Render e cadastre ?token=SEGREDO na URL do webhook da Wati.');
+        const webhook = await carregarSegredoWebhook();
+        webhookSecretBanco = webhook.secret;
+        webhookSecretAtivo = webhook.ativo;
+        webhookSecretOrigem = webhook.origem;
+
+        if (webhook.origem === 'banco') {
+            console.log('WEBHOOK: exigindo o token gerado no painel (Canais → Webhook seguro).');
+        } else if (webhook.secret) {
+            console.warn('WEBHOOK: segredo pronto, mas ainda não exigido.');
+            console.warn('         Copie a URL em Canais → Webhook seguro para a Wati e ative a exigência.');
+        } else {
+            console.warn('WEBHOOK: sem segredo disponível - /webhook aceita qualquer origem.');
+        }
     }
 
     if (banco.modoDemo) {

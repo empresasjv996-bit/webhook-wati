@@ -265,13 +265,34 @@
                     </div>
                 </div>
 
+                <div class="screen-panel webhook-painel" id="webhook-painel">
+                    <div class="webhook-topo">
+                        <div>
+                            <h3>Webhook seguro</h3>
+                            <p class="webhook-status" id="webhook-status">Carregando...</p>
+                        </div>
+                        <div class="webhook-acoes">
+                            <button class="btn-mini" onclick="carregarWebhook()">↻ Atualizar</button>
+                            <button class="btn-primary" id="webhook-toggle" onclick="alternarWebhook(this)" disabled>Carregando...</button>
+                        </div>
+                    </div>
+
+                    <label class="webhook-rotulo" for="webhook-url">URL para cadastrar na Wati</label>
+                    <div class="webhook-url-linha">
+                        <input id="webhook-url" class="webhook-url" type="text" readonly value="Carregando..." />
+                        <button class="btn-mini" onclick="copiarWebhook()">Copiar</button>
+                    </div>
+
+                    <p class="webhook-dica" id="webhook-dica">Carregando configuração do webhook...</p>
+                </div>
+
                 <div class="screen-panel canal-ajuda-painel">
                     <h3>Como vincular o WhatsApp</h3>
                     <ol class="canal-ajuda">
                         <li>No painel da Wati abra <strong>Settings → API</strong> e copie o <strong>API Endpoint</strong> (ex.: <code>https://live-mt-server.wati.io/123456789</code>) e o <strong>Bearer token</strong>.</li>
-                        <li>No Render, em <strong>Environment</strong>, crie: <code>WATI_NUMERO</code> (o número/tenant que aparece na URL), <code>WATI_TOKEN</code> (o Bearer token), <code>JWT_SECRET</code> (chave longa aleatória) e <code>WEBHOOK_SECRET</code> (protege o webhook). Sem <code>JWT_SECRET</code>, o app gera e guarda um segredo próprio no banco; sem <code>WEBHOOK_SECRET</code>, o webhook aceita qualquer origem.</li>
+                        <li>No Render, em <strong>Environment</strong>, crie: <code>WATI_NUMERO</code> (o número/tenant que aparece na URL), <code>WATI_TOKEN</code> (o Bearer token), <code>JWT_SECRET</code> (chave longa aleatória) e <code>WEBHOOK_SECRET</code> (protege o webhook). Sem <code>JWT_SECRET</code>, o app gera e guarda um segredo próprio no banco; o webhook também pode ser protegido pelo painel, em <strong>Webhook seguro</strong>.</li>
                         <li>Salve — o Render reinicia sozinho — e volte aqui para clicar em <strong>Testar conexão</strong>.</li>
-                        <li>Na Wati, cadastre o webhook apontando para <code>https://SEU-APP.onrender.com/webhook?token=SEU_WEBHOOK_SECRET</code>.</li>
+                        <li>Na Wati, cadastre o webhook apontando para a URL mostrada em <strong>Webhook seguro</strong> (já vem com <code>?token=...</code>). Depois clique em <strong>Ativar exigência do token</strong>.</li>
                     </ol>
                 </div>
             </section>

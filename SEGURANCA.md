@@ -37,19 +37,37 @@ Definir ou trocar o `JWT_SECRET` **desloga todos os usuários uma única vez**
 
 ## WEBHOOK_SECRET
 
-Com a variável definida, todo `POST /webhook` precisa chegar com o segredo —
-`?token=SEGREDO` na URL ou o header `x-webhook-secret`. Passo a passo:
+Há dois caminhos (o primeiro tem prioridade se a variável existir):
 
-1. Gere um segredo (mesmo comando acima).
-2. No Render, crie `WEBHOOK_SECRET` com esse valor e salve.
-3. Na Wati, edite o webhook para
-   `https://webhook-wati.onrender.com/webhook?token=SEGREDO`.
-4. Envie uma mensagem de teste para o WhatsApp conectado e confira em
-   **Logs** se aparece `Mensagem salva -> ...`.
+1. **`WEBHOOK_SECRET` no Render** — o valor é usado direto e o token passa a ser
+   exigido em todo `POST /webhook`.
+2. **Sem a variável** — o app gera um segredo aleatório, guarda na tabela
+   `configuracoes` e mostra a URL pronta em **Canais → Webhook seguro**. Enquanto
+   ninguém usa essa URL, o webhook continua aceitando chamadas sem token (para
+   não perder mensagens). No primeiro recebimento com token válido a exigência
+   liga sozinha; o botão do painel permite ligar/desligar na mão.
 
-> ⚠️ Se definir `WEBHOOK_SECRET` **antes** de atualizar a URL na Wati, as
-> mensagens recebidas passam a ser recusadas com `401` (`Webhook recusado:
-> segredo inválido.`). Faça na ordem acima (2 → 3) para não perder mensagens.
+Passo a passo (caminho 2, o mais simples):
+
+1. Abra **Canais** no painel admin e copie a URL de *Webhook seguro*
+   (`https://webhook-wati.onrender.com/webhook?token=...`).
+2. Na Wati, cadastre o webhook com essa URL.
+3. Envie uma mensagem de teste para o WhatsApp conectado: o webhook responde
+   `200`, a mensagem aparece em **Logs** e a exigência do token é ativada
+   automaticamente (aparece `ativo` no painel e em `webhookSecret` no health).
+
+Passo a passo (caminho 1, com env var):
+
+1. Gere um segredo (comando acima) e crie `WEBHOOK_SECRET` no Render.
+2. Cadastre na Wati `https://webhook-wati.onrender.com/webhook?token=SEGREDO`.
+3. Envie uma mensagem de teste e confira os **Logs**.
+
+> ⚠️ Se a env var `WEBHOOK_SECRET` estiver definida sem a URL da Wati já
+> atualizada, as mensagens recebidas são recusadas com `401` (`Webhook recusado:
+> segredo inválido.`). Use o caminho 2 para migrar sem risco.
+
+O envio aceita o token na query (`?token=...`) ou no header
+`x-webhook-secret`, e compara em tempo constante (`crypto.timingSafeEqual`).
 
 ## Conferindo
 
