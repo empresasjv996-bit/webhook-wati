@@ -97,6 +97,22 @@ function criarBancoPostgres() {
                 )`,
                 'CREATE INDEX IF NOT EXISTS idx_envios_campanha ON campanha_envios (campanha_id)',
                 'CREATE INDEX IF NOT EXISTS idx_envios_pendentes ON campanha_envios (status)',
+                // tudo o que a Wati manda pelo webhook (mensagem, campanha, contato...)
+                `CREATE TABLE IF NOT EXISTS eventos_wati (
+                    id SERIAL PRIMARY KEY,
+                    tipo TEXT NOT NULL,
+                    telefone TEXT,
+                    nome TEXT,
+                    campanha TEXT,
+                    texto TEXT,
+                    status TEXT,
+                    whatsapp_message_id TEXT,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+                'CREATE INDEX IF NOT EXISTS idx_eventos_wati_criado ON eventos_wati (criado_em DESC)',
+                'CREATE INDEX IF NOT EXISTS idx_eventos_wati_tipo ON eventos_wati (tipo)',
+                'CREATE INDEX IF NOT EXISTS idx_eventos_wati_telefone ON eventos_wati (telefone)',
                 // destino da campanha (vendedor que recebe os leads)
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_email TEXT',
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT',
@@ -314,6 +330,107 @@ function criarBancoPostgres() {
                  SET mensagem = $3, nome = $1, criado_em = NOW(), status = 'pensando'`,
                 [nome, telefone, mensagem]
             );
+        },
+
+        /* ---------------- EVENTOS DA WATI (webhook) ----------------
+           Guarda qualquer coisa que a Wati mande: mensagem recebida/enviada,
+           status de campanha (sent/delivered/read/failed) e contato criado.
+           O payload cru fica no JSONB para servir de diagnóstico. */
+        async registrarEventoWati(evento) {
+            const dados = evento || {};
+
+            try {
+                const { rows } = await pool.query(
+                    `INSERT INTO eventos_wati (tipo, telefone, nome, campanha, texto, status, whatsapp_message_id, payload)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                     RETURNING id, criado_em`,
+                    [
+                        String(dados.tipo || 'desconhecido').substring(0, 60),
+                        dados.telefone || null,
+                        dados.nome ? String(dados.nome).substring(0, 120) : null,
+                        dados.campanha ? String(dados.campanha).substring(0, 160) : null,
+                        dados.texto ? String(dados.texto).substring(0, 2000) : null,
+                        dados.status ? String(dados.status).substring(0, 60) : null,
+                        dados.whatsappMessageId ? String(dados.whatsappMessageId).substring(0, 120) : null,
+                        JSON.stringify(dados.payload || {})
+                    ]
+                );
+                return rows[0] || null;
+            } catch (erro) {
+                console.error('Erro ao salvar evento da Wati:', erro.message);
+                return null;
+            }
+        },
+
+        async listarEventosWati({ limite, tipos }) {
+            const valores = [];
+            let filtro = '';
+
+            if (Array.isArray(tipos) && tipos.length) {
+                valores.push(tipos);
+                filtro = `WHERE tipo = ANY($${valores.length})`;
+            }
+
+            valores.push(limite);
+
+            const { rows } = await pool.query(
+                `SELECT id, tipo, telefone, nome, campanha, texto, status, whatsapp_message_id, criado_em
+                   FROM eventos_wati ${filtro}
+                  ORDER BY id DESC
+                  LIMIT $${valores.length}`,
+                valores
+            );
+            return rows;
+        },
+
+        async ultimoEventoWati() {
+            try {
+                const { rows } = await pool.query(
+                    'SELECT id, tipo, telefone, nome, campanha, criado_em FROM eventos_wati ORDER BY id DESC LIMIT 1'
+                );
+                return rows[0] || null;
+            } catch (erro) {
+                return null;
+            }
+        },
+
+        async contarEventosWatiHoje() {
+            try {
+                const { rows } = await pool.query(
+                    'SELECT COUNT(*)::int AS total FROM eventos_wati WHERE criado_em >= CURRENT_DATE'
+                );
+                return rows[0].total;
+            } catch (erro) {
+                return 0;
+            }
+        },
+
+        /* Contato que nasceu/foi atualizado na Wati. Cria o cliente no painel
+           se ainda não existir e mescla os atributos, sem mexer no status. */
+        async registrarContatoWati({ telefone, nome, atributos }) {
+            const numero = String(telefone || '').replace(/\D/g, '');
+            if (!numero) return false;
+
+            const nomeLimpo = String(nome || '').trim().substring(0, 120) || numero;
+            const extras = atributos && typeof atributos === 'object' ? atributos : {};
+
+            try {
+                await pool.query(
+                    `INSERT INTO clientes (nome, telefone, mensagem, status, atributos)
+                     VALUES ($1, $2, '', 'pensando', $3::jsonb)
+                     ON CONFLICT (telefone) DO UPDATE
+                        SET nome = CASE
+                                WHEN COALESCE(BTRIM(clientes.nome), '') = '' THEN EXCLUDED.nome
+                                ELSE clientes.nome
+                            END,
+                            atributos = COALESCE(clientes.atributos, '{}'::jsonb) || EXCLUDED.atributos`,
+                    [nomeLimpo, numero, JSON.stringify(extras)]
+                );
+                return true;
+            } catch (erro) {
+                console.error('Erro ao registrar contato da Wati:', erro.message);
+                return false;
+            }
         },
 
         async atualizarStatus(telefone, status) {
@@ -636,6 +753,7 @@ function criarBancoMemoria() {
     const campanhas = [];
     const envios = [];
     const auditoria = [];
+    const eventosWati = [];
     const configuracoes = new Map();
     let mensagemId = 1;
     let listaId = 1;
@@ -643,6 +761,7 @@ function criarBancoMemoria() {
     let campanhaId = 1;
     let envioId = 1;
     let auditoriaId = 1;
+    let eventoWatiId = 1;
 
     function minutosAtras(minutos) {
         return new Date(Date.now() - minutos * 60 * 1000).toISOString();
@@ -671,6 +790,21 @@ function criarBancoMemoria() {
             direcao,
             texto,
             criado_em: minutosAtras(minutos)
+        });
+    }
+
+    function semearEventoWati(dados) {
+        eventosWati.push({
+            id: eventoWatiId++,
+            tipo: dados.tipo || 'message',
+            telefone: dados.telefone || null,
+            nome: dados.nome || null,
+            campanha: dados.campanha || null,
+            texto: dados.texto || null,
+            status: dados.status || null,
+            whatsapp_message_id: dados.whatsappMessageId || null,
+            payload: dados.payload || {},
+            criado_em: minutosAtras(dados.minutos || 5)
         });
     }
 
@@ -725,6 +859,24 @@ function criarBancoMemoria() {
             { telefone: '5521987776655', nome: 'Maria Oliveira' }
         ],
         criado_em: minutosAtras(60)
+    });
+
+    // Atividade de exemplo da Wati (webhook)
+    semearEventoWati({
+        tipo: 'message', telefone: '5511998887766', nome: 'Carlos Mendes',
+        texto: 'Boa tarde! Qual o valor do plano?', status: 'received',
+        minutos: 12, payload: { eventType: 'message', waId: '5511998887766', owner: false }
+    });
+    semearEventoWati({
+        tipo: 'sent', telefone: '5521987776655', nome: 'Maria Oliveira',
+        campanha: 'Promoção Novembro', texto: 'Oi, quero fechar o plano de vocês.',
+        status: 'sent', minutos: 40,
+        payload: { eventType: 'sent', waId: '5521987776655', campaignName: 'Promoção Novembro' }
+    });
+    semearEventoWati({
+        tipo: 'delivered', telefone: '5521987776655', nome: 'Maria Oliveira',
+        campanha: 'Promoção Novembro', status: 'delivered', minutos: 39,
+        payload: { eventType: 'delivered', waId: '5521987776655', campaignName: 'Promoção Novembro' }
     });
 
     return {
@@ -1117,6 +1269,80 @@ function criarBancoMemoria() {
 
             const restantes = envios.filter((e) => e.campanha_id === campanha.id && (e.status === 'pendente' || e.status === 'enviando'));
             if (!restantes.length) campanha.status = 'concluida';
+        },
+
+        /* ---------------- EVENTOS DA WATI (webhook) ---------------- */
+        async registrarEventoWati(evento) {
+            const dados = evento || {};
+            const registro = {
+                id: eventoWatiId++,
+                tipo: String(dados.tipo || 'desconhecido').substring(0, 60),
+                telefone: dados.telefone || null,
+                nome: dados.nome || null,
+                campanha: dados.campanha || null,
+                texto: dados.texto ? String(dados.texto).substring(0, 2000) : null,
+                status: dados.status || null,
+                whatsapp_message_id: dados.whatsappMessageId || null,
+                payload: dados.payload || {},
+                criado_em: new Date().toISOString()
+            };
+
+            eventosWati.push(registro);
+            return { id: registro.id, criado_em: registro.criado_em };
+        },
+
+        async listarEventosWati({ limite, tipos }) {
+            const filtrar = Array.isArray(tipos) && tipos.length;
+            return eventosWati
+                .filter((e) => !filtrar || tipos.includes(e.tipo))
+                .slice()
+                .sort((a, b) => b.id - a.id)
+                .slice(0, limite || 200)
+                .map((e) => ({
+                    id: e.id, tipo: e.tipo, telefone: e.telefone, nome: e.nome,
+                    campanha: e.campanha, texto: e.texto, status: e.status,
+                    whatsapp_message_id: e.whatsapp_message_id, criado_em: e.criado_em
+                }));
+        },
+
+        async ultimoEventoWati() {
+            if (!eventosWati.length) return null;
+            const ultimo = eventosWati.slice().sort((a, b) => b.id - a.id)[0];
+            return {
+                id: ultimo.id, tipo: ultimo.tipo, telefone: ultimo.telefone,
+                nome: ultimo.nome, campanha: ultimo.campanha, criado_em: ultimo.criado_em
+            };
+        },
+
+        async contarEventosWatiHoje() {
+            const hoje = new Date().toDateString();
+            return eventosWati.filter((e) => new Date(e.criado_em).toDateString() === hoje).length;
+        },
+
+        async registrarContatoWati({ telefone, nome, atributos }) {
+            const numero = String(telefone || '').replace(/\D/g, '');
+            if (!numero) return false;
+
+            const atual = clientes.get(numero);
+            const extras = atributos && typeof atributos === 'object' ? atributos : {};
+
+            if (atual) {
+                clientes.set(numero, Object.assign({}, atual, {
+                    nome: atual.nome || String(nome || '').trim() || numero,
+                    atributos: Object.assign({}, atual.atributos || {}, extras)
+                }));
+                return true;
+            }
+
+            semearCliente({
+                nome: String(nome || '').trim() || numero,
+                telefone: numero,
+                atributos: Object.assign({}, extras),
+                mensagem: '',
+                status: 'pensando',
+                criado_em: new Date().toISOString()
+            });
+            return true;
         },
 
         /* ---------------- LOGS / AUDITORIA ---------------- */

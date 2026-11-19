@@ -95,11 +95,15 @@ function toast(mensagem, tipo) {
 function irPara(view) {
     const titulos = {
         campanhas: 'Campanhas',
+        wati: 'Atividade Wati',
         canais: 'Canais',
         logs: 'Logs',
         auditoria: 'Auditoria',
         usuarios: 'Usuários'
     };
+
+    // Ao trocar de tela, para a atualização automática da Atividade Wati
+    pararAtividadeWati();
 
     document.querySelectorAll('.view').forEach((secao) => secao.classList.add('oculto'));
 
@@ -125,6 +129,7 @@ function irPara(view) {
     if (view === 'listas') carregarListas();
     if (view === 'canais') { carregarCanais(); carregarWebhook(); }
     if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); }
+    if (view === 'wati') iniciarAtividadeWati();
     if (view === 'logs') carregarLogs();
     if (view === 'auditoria') carregarAuditoria();
     if (view === 'usuarios') carregarUsuarios();
@@ -191,6 +196,9 @@ async function carregarDashboard() {
 
         const totalCampanhas = $('total-campanhas');
         if (totalCampanhas) totalCampanhas.textContent = (dados.campanhasAtivas || 0) + ' em andamento';
+
+        const totalEventosWati = $('total-eventos-wati');
+        if (totalEventosWati) totalEventosWati.textContent = (dados.eventosWatiHoje || 0) + ' evento(s) hoje';
     } catch (erro) {
         console.error('Erro ao carregar o painel:', erro);
     }
@@ -1313,6 +1321,15 @@ function conectarSSE() {
         if (painel && !painel.classList.contains('oculto')) carregarTabelaClientes();
         carregarDashboard();
     });
+
+    // Qualquer evento novo da Wati recarrega a tela Atividade Wati
+    sse.addEventListener('wati', () => {
+        const painel = $('view-wati');
+        if (painel && !painel.classList.contains('oculto')) carregarAtividadeWati();
+
+        const inicio = $('view-inicio');
+        if (inicio && !inicio.classList.contains('oculto')) carregarDashboard();
+    });
 }
 
 function iniciarPainel() {
@@ -1420,6 +1437,7 @@ function renderizarWebhook(dados) {
     const campo = $('webhook-url');
     const dica = $('webhook-dica');
     const botao = $('webhook-toggle');
+    const atividade = $('webhook-atividade');
     if (!status || !campo || !dica || !botao) return;
 
     webhookAtual = dados || null;
@@ -1429,6 +1447,7 @@ function renderizarWebhook(dados) {
         status.className = 'webhook-status erro';
         campo.value = '';
         dica.textContent = 'Atualize a página ou tente novamente em instantes.';
+        if (atividade) atividade.textContent = '';
         botao.disabled = true;
         botao.textContent = 'Indisponível';
         return;
@@ -1449,6 +1468,16 @@ function renderizarWebhook(dados) {
 
     campo.value = dados.url || (dados.viaAmbiente ? 'Segredo definido no Render — a URL é /webhook?token=SEU_WEBHOOK_SECRET' : '');
     dica.textContent = dados.aviso || '';
+
+    if (atividade) {
+        if (dados.ultimoEvento) {
+            atividade.textContent = `Último evento recebido: ${dados.ultimoEvento.tipo}` +
+                ` · ${formatarData(dados.ultimoEvento.criado_em)}` +
+                (dados.eventosHoje ? ` · ${dados.eventosHoje} evento(s) hoje` : '');
+        } else {
+            atividade.textContent = 'Nenhum evento recebido ainda — confira se a URL acima está cadastrada como webhook na Wati.';
+        }
+    }
 
     if (dados.viaAmbiente) {
         botao.disabled = true;
@@ -1846,6 +1875,98 @@ async function carregarAuditoria() {
             </tr>`).join('');
     } catch (erro) {
         corpo.innerHTML = '<tr><td colspan="4" class="vazio">Erro ao carregar a auditoria.</td></tr>';
+    }
+}
+
+/* =========================================================
+   PARTE 13.B - ATIVIDADE WATI
+   ========================================================= */
+
+let filtroEventosWati = '';
+let timerAtividadeWati = null;
+
+const ROTULOS_EVENTO_WATI = {
+    message: { texto: 'Mensagem', classe: 'msg' },
+    sent: { texto: 'Enviada', classe: 'enviada' },
+    delivered: { texto: 'Entregue', classe: 'entregue' },
+    read: { texto: 'Lida', classe: 'lida' },
+    failed: { texto: 'Falhou', classe: 'falha' },
+    replied: { texto: 'Respondeu', classe: 'resposta' },
+    received: { texto: 'Recebida', classe: 'msg' },
+    contact_created: { texto: 'Contato criado', classe: 'contato' },
+    contact_updated: { texto: 'Contato atualizado', classe: 'contato' },
+    tag_updated: { texto: 'Etiqueta', classe: 'contato' }
+};
+
+function rotuloEventoWati(tipo) {
+    const chave = String(tipo || '').toLowerCase();
+    return ROTULOS_EVENTO_WATI[chave] || { texto: chave || 'evento', classe: 'outro' };
+}
+
+/* Depois da chegada via SSE, conferimos a lista a cada 15s: assim eventos
+   que não geram notificação (ex.: campanha em andamento) também aparecem. */
+function iniciarAtividadeWati() {
+    carregarAtividadeWati();
+    pararAtividadeWati();
+    timerAtividadeWati = setInterval(() => carregarAtividadeWati(), 15000);
+}
+
+function pararAtividadeWati() {
+    if (timerAtividadeWati) {
+        clearInterval(timerAtividadeWati);
+        timerAtividadeWati = null;
+    }
+}
+
+async function carregarAtividadeWati(filtro) {
+    if (filtro !== undefined) filtroEventosWati = filtro;
+
+    const corpo = $('tabela-wati');
+    if (!corpo) return;
+
+    const parametros = new URLSearchParams({ limite: 200 });
+    if (filtroEventosWati) parametros.set('filtro', filtroEventosWati);
+
+    try {
+        const resposta = await fetch('/api/wati/eventos?' + parametros.toString());
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const eventos = await resposta.json();
+        const resumo = $('wati-resumo');
+
+        if (!Array.isArray(eventos) || !eventos.length) {
+            if (resumo) resumo.textContent = 'Nenhum evento ainda';
+            corpo.innerHTML = '<tr><td colspan="5" class="vazio">Nada recebido da Wati ainda. Confira em Canais se o webhook está cadastrado na Wati apontando para a URL segura.</td></tr>';
+            return;
+        }
+
+        if (resumo) {
+            resumo.textContent = `${eventos.length} evento${eventos.length > 1 ? 's' : ''}` +
+                (filtroEventosWati ? ` · ${filtroEventosWati}` : '');
+        }
+
+        corpo.innerHTML = eventos.map((evento) => {
+            const rotulo = rotuloEventoWati(evento.tipo);
+
+            const contato = evento.nome
+                ? `${escaparHtml(evento.nome)}<br><small>${escaparHtml(formatarTelefone(evento.telefone))}</small>`
+                : escaparHtml(formatarTelefone(evento.telefone));
+
+            const detalhe = evento.texto
+                ? escaparHtml(String(evento.texto).substring(0, 140))
+                : escaparHtml(evento.status || (evento.whatsapp_message_id ? 'id ' + evento.whatsapp_message_id : '—'));
+
+            return `
+                <tr>
+                    <td>${escaparHtml(formatarData(evento.criado_em))}</td>
+                    <td><span class="wati-badge ${rotulo.classe}">${escaparHtml(rotulo.texto)}</span></td>
+                    <td>${contato}</td>
+                    <td>${escaparHtml(evento.campanha || '—')}</td>
+                    <td>${detalhe}</td>
+                </tr>`;
+        }).join('');
+    } catch (erro) {
+        corpo.innerHTML = '<tr><td colspan="5" class="vazio">Erro ao carregar a atividade da Wati.</td></tr>';
     }
 }
 

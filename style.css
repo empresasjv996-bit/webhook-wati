@@ -320,6 +320,21 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .webhook-url:focus { outline: none; border-color: rgba(0, 255, 128, 0.45); }
 .webhook-dica { margin: 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.55; }
 .webhook-dica strong { color: #fff; }
+.webhook-atividade { margin: 0; font-size: 0.8rem; font-weight: 600; color: #7CFFB2; }
+.webhook-atividade:empty { display: none; }
+
+/* Atividade Wati (eventos do webhook) */
+.wati-resumo { font-size: 0.76rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0.03em; }
+.wati-badge { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2px; border: 1px solid transparent; white-space: nowrap; }
+.wati-badge.msg { background: rgba(0, 255, 128, 0.1); color: var(--green); border-color: rgba(0, 255, 128, 0.25); }
+.wati-badge.enviada { background: rgba(124, 255, 178, 0.08); color: #7CFFB2; border-color: rgba(124, 255, 178, 0.2); }
+.wati-badge.entregue { background: rgba(88, 166, 255, 0.1); color: #58a6ff; border-color: rgba(88, 166, 255, 0.25); }
+.wati-badge.lida { background: rgba(140, 120, 255, 0.12); color: #b3a6ff; border-color: rgba(140, 120, 255, 0.25); }
+.wati-badge.falha { background: rgba(255, 68, 68, 0.12); color: #ff6b6b; border-color: rgba(255, 68, 68, 0.28); }
+.wati-badge.resposta { background: rgba(255, 193, 7, 0.12); color: #ffc107; border-color: rgba(255, 193, 7, 0.25); }
+.wati-badge.contato { background: rgba(0, 200, 255, 0.1); color: #5fd8ff; border-color: rgba(0, 200, 255, 0.25); }
+.wati-badge.outro { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); border-color: rgba(255, 255, 255, 0.1); }
+#tabela-wati td small { color: var(--text-muted); font-size: 0.72rem; }
 
 @media (max-width: 980px) {
     .canal-dados { grid-template-columns: 1fr; }

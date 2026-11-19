@@ -26,6 +26,7 @@
                 <button data-view="clientes" onclick="mostrarClientes()">Clientes</button>
                 <button data-view="listas" onclick="mostrarListas()">Listas</button>
                 <button data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
+                <button data-view="wati" onclick="irPara('wati')">Atividade Wati</button>
                 <button data-view="canais" onclick="irPara('canais')">Canais</button>
                 <button data-view="logs" onclick="irPara('logs')">Logs</button>
                 <button data-view="auditoria" onclick="irPara('auditoria')">Auditoria</button>
@@ -101,6 +102,13 @@
                         <div class="card-data">
                             <h3>Campanhas</h3>
                             <p id="total-campanhas">0 em andamento</p>
+                        </div>
+                    </div>
+                    <div class="card" onclick="irPara('wati')">
+                        <div class="card-icon">⚡</div>
+                        <div class="card-data">
+                            <h3>Atividade Wati</h3>
+                            <p id="total-eventos-wati">0 evento(s) hoje</p>
                         </div>
                     </div>
                     <div class="card" onclick="irPara('canais')">
@@ -306,6 +314,7 @@
                     </div>
 
                     <p class="webhook-dica" id="webhook-dica">Carregando configuração do webhook...</p>
+                    <p class="webhook-atividade" id="webhook-atividade"></p>
                 </div>
 
                 <div class="screen-panel canal-ajuda-painel">
@@ -315,6 +324,7 @@
                         <li>No Render, em <strong>Environment</strong>, crie: <code>WATI_NUMERO</code> (o número/tenant que aparece na URL), <code>WATI_TOKEN</code> (o Bearer token), <code>JWT_SECRET</code> (chave longa aleatória) e <code>WEBHOOK_SECRET</code> (protege o webhook). Sem <code>JWT_SECRET</code>, o app gera e guarda um segredo próprio no banco; o webhook também pode ser protegido pelo painel, em <strong>Webhook seguro</strong>.</li>
                         <li>Salve — o Render reinicia sozinho — e volte aqui para clicar em <strong>Testar conexão</strong>.</li>
                         <li>Na Wati, cadastre o webhook apontando para a URL mostrada em <strong>Webhook seguro</strong> (já vem com <code>?token=...</code>). Depois clique em <strong>Ativar exigência do token</strong>.</li>
+                        <li>Teste pelo painel da Wati: cada mensagem, contato e mudança de status de campanha aparece em <strong>Atividade Wati</strong>. Se a lista ficar vazia, o webhook não está chegando — confira a URL e o token.</li>
                     </ol>
                 </div>
             </section>
@@ -384,6 +394,43 @@
                         <div id="campanhas-lista" class="campanhas-lista">
                             <p class="vazio">Carregando campanhas...</p>
                         </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ATIVIDADE WATI -->
+            <section class="view oculto" id="view-wati">
+                <div class="section-title">
+                    <div>
+                        <h1>Atividade Wati</h1>
+                        <p>Tudo o que chega da Wati: mensagens, status das campanhas e contatos criados ou atualizados.</p>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <span class="wati-resumo" id="wati-resumo">—</span>
+                        <button class="btn-mini" onclick="carregarAtividadeWati('')">Tudo</button>
+                        <button class="btn-mini" onclick="carregarAtividadeWati('mensagens')">Mensagens</button>
+                        <button class="btn-mini" onclick="carregarAtividadeWati('campanhas')">Campanhas</button>
+                        <button class="btn-mini" onclick="carregarAtividadeWati('contatos')">Contatos</button>
+                        <button class="btn-mini" onclick="carregarAtividadeWati()">↻ Atualizar</button>
+                    </div>
+                </div>
+
+                <div class="screen-panel">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Quando</th>
+                                    <th>Evento</th>
+                                    <th>Contato</th>
+                                    <th>Campanha</th>
+                                    <th>Detalhe</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-wati">
+                                <tr><td colspan="5" class="vazio">Carregando atividade da Wati...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>

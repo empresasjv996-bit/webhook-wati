@@ -590,6 +590,42 @@ function estadoWebhook(req) {
     };
 }
 
+/* Estado do webhook + última atividade recebida (mostra no painel se a Wati
+   está realmente chamando a URL). */
+async function estadoWebhookComAtividade(req) {
+    const estado = estadoWebhook(req);
+
+    try {
+        estado.ultimoEvento = await banco.ultimoEventoWati();
+        estado.eventosHoje = await banco.contarEventosWatiHoje();
+    } catch (erro) {
+        estado.ultimoEvento = null;
+        estado.eventosHoje = 0;
+    }
+
+    return estado;
+}
+
+/* Filtros da tela "Atividade Wati" (agrupam os eventType da Wati). */
+const FILTROS_EVENTOS_WATI = {
+    mensagens: ['message'],
+    campanhas: ['sent', 'delivered', 'read', 'failed', 'replied'],
+    contatos: ['contact_created', 'contact_updated', 'tag_updated']
+};
+
+app.get('/api/wati/eventos', async (req, res) => {
+    const limite = Math.min(parseInt(req.query.limite, 10) || 200, 500);
+    const filtro = String(req.query.filtro || '');
+    const tipos = FILTROS_EVENTOS_WATI[filtro] || null;
+
+    try {
+        res.json(await banco.listarEventosWati({ limite, tipos }));
+    } catch (erro) {
+        console.error('Erro ao listar eventos da Wati:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao carregar a atividade da Wati.' });
+    }
+});
+
 /* Quando a Wati já chama a URL com o token, trancamos o webhook sem ninguém
    precisar clicar em nada. Antes disso, as chamadas sem token continuam aceitas
    para não perder mensagens durante a troca da URL. */
@@ -607,7 +643,9 @@ async function ativarWebhookAutomaticamente() {
     }
 }
 
-app.get('/api/webhook', exigirAdmin, (req, res) => res.json(estadoWebhook(req)));
+app.get('/api/webhook', exigirAdmin, async (req, res) => {
+    res.json(await estadoWebhookComAtividade(req));
+});
 
 app.post('/api/webhook/ativar', exigirAdmin, async (req, res) => {
     if (WEBHOOK_SECRET_ENV) {
@@ -635,7 +673,7 @@ app.post('/api/webhook/ativar', exigirAdmin, async (req, res) => {
         );
 
         console.log(ativo ? 'WEBHOOK: token agora é exigido.' : 'WEBHOOK: token voltou a ser opcional.');
-        res.json(Object.assign({ success: true }, estadoWebhook(req)));
+        res.json(Object.assign({ success: true }, await estadoWebhookComAtividade(req)));
     } catch (erro) {
         console.error('Erro ao configurar o webhook:', erro.message);
         res.status(500).json({ success: false, message: 'Erro ao salvar a configuração do webhook.' });
@@ -694,7 +732,16 @@ app.get('/api/clientes', async (req, res) => {
 // RESUMO DO PAINEL (cards + desempenho da equipe)
 app.get('/api/dashboard', async (req, res) => {
     try {
-        res.json(await banco.resumoDashboard());
+        const resumo = await banco.resumoDashboard();
+
+        // Atividade recebida da Wati (webhook) aparece também no card do Início
+        try {
+            resumo.eventosWatiHoje = await banco.contarEventosWatiHoje();
+        } catch (erro) {
+            resumo.eventosWatiHoje = 0;
+        }
+
+        res.json(resumo);
     } catch (error) {
         console.error('Erro no dashboard:', error.message);
         res.status(500).json({ error: 'Erro' });
@@ -1278,43 +1325,229 @@ app.delete('/api/campanhas/:id', exigirAdmin, async (req, res) => {
 
 // ---------------------------------------------------------
 // WEBHOOK DA WATI
+// Tudo o que a Wati manda é gravado em eventos_wati e aparece no painel
+// (Atividade Wati). Mensagens também alimentam as conversas e contatos
+// criados/atualizados na Wati entram na base de clientes.
 // ---------------------------------------------------------
-app.post('/webhook', async (req, res) => {
-    try {
-        // Exige ?token=... (ou header x-webhook-secret) quando o token está ativo.
-        const esperado = segredoWebhookEsperado();
-        const recebido = req.query.token || req.get('x-webhook-secret') || '';
 
-        if (esperado) {
-            if (!segredoConfere(recebido, esperado)) {
-                console.warn('Webhook recusado: segredo inválido.');
-                return res.sendStatus(401);
-            }
-        } else if (webhookSecretBanco && segredoConfere(recebido, webhookSecretBanco)) {
-            // A Wati já está chamando a URL nova: protege o webhook automaticamente.
-            await ativarWebhookAutomaticamente();
+/* A Wati usa um formato por tipo de evento e às vezes aninha os dados.
+   Em vez de exigir um formato fixo, procuramos as chaves conhecidas em
+   qualquer nível do JSON. */
+function valorAninhado(origem, chaves, profundidade) {
+    const nivel = profundidade || 0;
+    if (!origem || typeof origem !== 'object' || nivel > 4) return null;
+
+    for (const chave of chaves) {
+        const valor = origem[chave];
+        if (valor === undefined || valor === null) continue;
+        if (typeof valor === 'object') continue;
+        const texto = String(valor).trim();
+        if (texto) return texto;
+    }
+
+    for (const valor of Object.values(origem)) {
+        if (valor && typeof valor === 'object') {
+            const achado = valorAninhado(valor, chaves, nivel + 1);
+            if (achado) return achado;
         }
+    }
 
-        const body = req.body || {};
+    return null;
+}
 
-        if (body.eventType === 'message' && body.text) {
-            const telefone = body.waId || 'desconhecido';
-            const nome = body.senderName || 'Cliente Novo';
-            const mensagem = body.text;
+/* Igual ao anterior, mas devolve objetos (ex.: atributos do contato).
+   Listas no formato [{ name, value }] viram um mapa simples. */
+function objetoAninhado(origem, chaves, profundidade) {
+    const nivel = profundidade || 0;
+    if (!origem || typeof origem !== 'object' || nivel > 4) return null;
+
+    for (const chave of chaves) {
+        const valor = origem[chave];
+        if (!valor || typeof valor !== 'object') continue;
+
+        if (!Array.isArray(valor)) return valor;
+
+        if (valor.length && typeof valor[0] === 'object') {
+            const mapa = {};
+            valor.forEach((item) => {
+                if (item && item.name !== undefined) mapa[item.name] = item.value;
+            });
+            if (Object.keys(mapa).length) return mapa;
+        }
+    }
+
+    for (const valor of Object.values(origem)) {
+        if (valor && typeof valor === 'object') {
+            const achado = objetoAninhado(valor, chaves, nivel + 1);
+            if (achado) return achado;
+        }
+    }
+
+    return null;
+}
+
+/* waId chega como "5511999999999", "5511999999999@c.us" ou número puro. */
+function telefoneDoEvento(valor) {
+    if (!valor) return null;
+    const digitos = String(valor).split('@')[0].replace(/\D/g, '');
+    return digitos.length >= 8 ? digitos.substring(0, 20) : null;
+}
+
+function atributosDoEvento(payload) {
+    const bruto = objetoAninhado(payload, ['customParams', 'custom_params', 'attributes', 'atributos']);
+    return bruto ? limparAtributos(bruto) : {};
+}
+
+/* A Wati mudou os nomes dos eventos (v1 -> v2, ex.: templateMessageSent_v2).
+   Agrupamos tudo nos mesmos tipos para o painel e os filtros continuarem
+   simples. */
+const APELIDOS_EVENTO_WATI = {
+    sessionmessagesent: 'sent',
+    sessionmessagesent_v2: 'sent',
+    templatemessagesent: 'sent',
+    templatemessagesent_v2: 'sent',
+    sentmessagedelivered: 'delivered',
+    sentmessagedelivered_v2: 'delivered',
+    sentmessageread: 'read',
+    sentmessageread_v2: 'read',
+    sentmessagereplied: 'replied',
+    sentmessagereplied_v2: 'replied',
+    sessionmessagefailed: 'failed',
+    templatemessagefailed: 'failed',
+    newcontactmessagereceived: 'contact_created',
+    newcontactmessagereceived_v2: 'contact_created'
+};
+
+function normalizarTipoEventoWati(tipo) {
+    const chave = String(tipo || '').toLowerCase();
+    return APELIDOS_EVENTO_WATI[chave] || chave;
+}
+
+function interpretarEventoWati(payload) {
+    const tipo = normalizarTipoEventoWati(
+        valorAninhado(payload, ['eventType', 'event_type']) ||
+        valorAninhado(payload, ['type']) ||
+        'desconhecido'
+    ).substring(0, 60);
+
+    const dono = valorAninhado(payload, ['owner']);
+
+    return {
+        tipo,
+        telefone: telefoneDoEvento(valorAninhado(payload, ['waId', 'wa_id', 'phoneNumber', 'phone_number', 'telefone'])),
+        nome: valorAninhado(payload, ['senderName', 'sender_name', 'fullName', 'full_name', 'name']),
+        campanha: valorAninhado(payload, ['campaignName', 'campaign_name', 'campaignTitle', 'broadcastName', 'templateName']),
+        texto: valorAninhado(payload, ['text', 'body', 'caption', 'messageText']),
+        status: valorAninhado(payload, ['statusString', 'status', 'messageStatus']),
+        whatsappMessageId: valorAninhado(payload, ['whatsappMessageId', 'whatsapp_message_id', 'messageId', 'message_id']),
+        atributos: atributosDoEvento(payload),
+        enviadaPeloNegocio: String(dono).toLowerCase() === 'true'
+    };
+}
+async function processarEventoWati(payload) {
+    const evento = interpretarEventoWati(payload);
+
+    const registro = await banco.registrarEventoWati({
+        tipo: evento.tipo,
+        telefone: evento.telefone,
+        nome: evento.nome,
+        campanha: evento.campanha,
+        texto: evento.texto,
+        status: evento.status,
+        whatsappMessageId: evento.whatsappMessageId,
+        payload
+    });
+
+    const ehMensagem = evento.tipo === 'message';
+    const ehContato = evento.tipo === 'contact_created' || evento.tipo === 'contact_updated';
+
+    if (ehMensagem && evento.telefone) {
+        if (evento.enviadaPeloNegocio) {
+            // Enviada pela Wati (caixa de atendimento ou campanha): entra no
+            // histórico, mas não muda o nome/status do cliente.
+            await banco.registrarContatoWati({ telefone: evento.telefone });
+
+            if (evento.texto) {
+                await banco.registrarMensagem(evento.telefone, 'enviada', evento.texto);
+                await banco.atualizarUltimaMensagem(evento.telefone, evento.texto);
+            }
+
+            emitirEvento('mensagem', {
+                telefone: evento.telefone,
+                direcao: 'enviada',
+                texto: evento.texto || '',
+                nome: evento.nome || null
+            });
+        } else {
+            const nome = evento.nome || 'Cliente Novo';
+            const mensagem = evento.texto || '(mídia recebida)';
 
             // Se o cliente voltar a falar, o status volta para 'pensando' (reabre o atendimento)
-            await banco.registrarRecebida({ nome, telefone, mensagem });
-            await banco.registrarMensagem(telefone, 'recebida', mensagem);
+            await banco.registrarRecebida({ nome, telefone: evento.telefone, mensagem });
+            await banco.registrarMensagem(evento.telefone, 'recebida', mensagem);
 
-            console.log(`Mensagem salva -> ${nome} (${telefone}): ${mensagem}`);
-            emitirEvento('mensagem', { telefone, direcao: 'recebida', texto: mensagem, nome });
+            emitirEvento('mensagem', { telefone: evento.telefone, direcao: 'recebida', texto: mensagem, nome });
         }
-
-        res.sendStatus(200);
-    } catch (error) {
-        console.error('Erro no webhook:', error);
-        res.sendStatus(500);
+    } else if (ehContato && evento.telefone) {
+        // Contato criado/importado dentro da Wati também aparece no painel.
+        await banco.registrarContatoWati({
+            telefone: evento.telefone,
+            nome: evento.nome,
+            atributos: evento.atributos
+        });
+        emitirEvento('clientes', { telefone: evento.telefone });
     }
+
+    console.log(
+        `WATI (${evento.tipo}) ${evento.telefone || 'sem telefone'}` +
+        (evento.campanha ? ` | campanha: ${evento.campanha}` : '') +
+        (evento.texto ? ` | ${String(evento.texto).substring(0, 80)}` : '')
+    );
+
+    emitirEvento('wati', {
+        id: registro && registro.id,
+        tipo: evento.tipo,
+        telefone: evento.telefone,
+        campanha: evento.campanha
+    });
+
+    return registro;
+}
+
+app.post('/webhook', async (req, res) => {
+    // Exige ?token=... (ou header x-webhook-secret) quando o token está ativo.
+    const esperado = segredoWebhookEsperado();
+    const recebido = req.query.token || req.get('x-webhook-secret') || '';
+
+    if (esperado) {
+        if (!segredoConfere(recebido, esperado)) {
+            console.warn('Webhook recusado: segredo inválido.');
+            return res.sendStatus(401);
+        }
+    } else if (webhookSecretBanco && segredoConfere(recebido, webhookSecretBanco)) {
+        // A Wati já está chamando a URL nova: protege o webhook automaticamente.
+        await ativarWebhookAutomaticamente();
+    }
+
+    // Alguns envios da Wati chegam como lista de eventos.
+    const bruto = req.body;
+    const eventos = Array.isArray(bruto) ? bruto : [bruto];
+    let recebidos = 0;
+
+    for (const payload of eventos) {
+        if (!payload || typeof payload !== 'object') continue;
+        recebidos++;
+
+        try {
+            await processarEventoWati(payload);
+        } catch (erro) {
+            // Um evento com problema não pode derrubar os outros.
+            console.error('Erro ao processar evento da Wati:', erro.message);
+        }
+    }
+
+    // Responder 200 sempre: fora do 2xx a Wati reenvia o mesmo evento várias vezes.
+    res.json({ success: true, recebidos });
 });
 
 // ---------------------------------------------------------
