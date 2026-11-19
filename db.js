@@ -105,6 +105,13 @@ function criarBancoPostgres() {
                     detalhe TEXT,
                     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )`,
+                // configurações que precisam sobreviver aos reinícios do Render
+                // (ex.: segredo do JWT quando JWT_SECRET não está no Environment)
+                `CREATE TABLE IF NOT EXISTS configuracoes (
+                    chave TEXT PRIMARY KEY,
+                    valor TEXT NOT NULL,
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
                 // envios que ficaram presos em "enviando" (restart no meio do processo)
                 "UPDATE campanha_envios SET status = 'pendente' WHERE status = 'enviando'"
             ];
@@ -534,6 +541,23 @@ function criarBancoPostgres() {
                 [limite]
             );
             return rows;
+        },
+
+        /* Cofre chave/valor: devolve o valor existente ou grava o novo uma única
+           vez. O INSERT ... ON CONFLICT evita que duas instâncias subindo juntas
+           criem segredos diferentes - quem perder a corrida relê o valor vencedor. */
+        async obterOuCriarConfiguracao(chave, gerarValor) {
+            const { rows } = await pool.query('SELECT valor FROM configuracoes WHERE chave = $1', [chave]);
+            if (rows.length) return rows[0].valor;
+
+            const valor = typeof gerarValor === 'function' ? String(gerarValor()) : String(gerarValor);
+            await pool.query(
+                'INSERT INTO configuracoes (chave, valor) VALUES ($1, $2) ON CONFLICT (chave) DO NOTHING',
+                [chave, valor]
+            );
+
+            const { rows: gravado } = await pool.query('SELECT valor FROM configuracoes WHERE chave = $1', [chave]);
+            return gravado.length ? gravado[0].valor : valor;
         }
     };
 }
@@ -553,6 +577,7 @@ function criarBancoMemoria() {
     const campanhas = [];
     const envios = [];
     const auditoria = [];
+    const configuracoes = new Map();
     let mensagemId = 1;
     let listaId = 1;
     let usuarioId = 4;
@@ -1030,6 +1055,14 @@ function criarBancoMemoria() {
                 .slice()
                 .sort((a, b) => b.id - a.id)
                 .slice(0, limite);
+        },
+
+        async obterOuCriarConfiguracao(chave, gerarValor) {
+            if (configuracoes.has(chave)) return configuracoes.get(chave);
+
+            const valor = typeof gerarValor === 'function' ? String(gerarValor()) : String(gerarValor);
+            configuracoes.set(chave, valor);
+            return valor;
         }
     };
 }

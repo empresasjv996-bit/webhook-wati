@@ -8,6 +8,7 @@
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const banco = require('./db');
@@ -47,9 +48,34 @@ const PORT = process.env.PORT || 3000;
 // ---------------------------------------------------------
 // SEGURANÇA / CONFIGURAÇÃO (Environment do Render)
 // ---------------------------------------------------------
-const JWT_SECRET = process.env.JWT_SECRET || 'sua_chave_secreta_super_segura_123!@#';
-const JWT_SECRET_PROPRIO = Boolean(process.env.JWT_SECRET);
+const JWT_SECRET_ENV = process.env.JWT_SECRET || '';
+const JWT_SECRET_PROPRIO = Boolean(JWT_SECRET_ENV);
+
+// Preenchidos no boot (iniciarServidor): env > segredo persistido no banco > temporário.
+let JWT_SECRET = JWT_SECRET_ENV;
+let jwtSegredoOrigem = JWT_SECRET_PROPRIO ? 'env' : 'pendente';
+
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''; // opcional: ?token=... no webhook
+
+function gerarSegredoJwt() {
+    return crypto.randomBytes(48).toString('hex');
+}
+
+/* O segredo do JWT precisa ser o mesmo em todos os reinícios, senão todo mundo
+   é deslogado. Preferência: JWT_SECRET do Render (fica fora do banco) e, se ele
+   não existir, um segredo aleatório guardado na tabela configuracoes. */
+async function carregarSegredoJwt() {
+    if (JWT_SECRET_PROPRIO) return { valor: JWT_SECRET_ENV, origem: 'env' };
+
+    try {
+        const salvo = await banco.obterOuCriarConfiguracao('jwt_secret', gerarSegredoJwt);
+        if (salvo) return { valor: salvo, origem: 'banco' };
+    } catch (erro) {
+        console.warn('JWT: não foi possível ler/gravar o segredo no banco:', erro.message);
+    }
+
+    return { valor: gerarSegredoJwt(), origem: 'temporario' };
+}
 
 // Configurações da Wati (vêm do Environment do Render)
 const WATI_TOKEN = process.env.WATI_TOKEN;
@@ -106,23 +132,9 @@ app.get('/api/eventos', (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ESTRUTURA DO BANCO (cria o que falta, sem apagar nada)
+// ESTRUTURA DO BANCO E SEGREDO DO JWT
+// Roda em iniciarServidor() (fim do arquivo), antes de abrir a porta.
 // ---------------------------------------------------------
-banco.prepararBanco()
-    .then(() => {
-        if (banco.modoDemo) {
-            console.log('');
-            console.log('==================================================');
-            console.log(' MODO DEMO LOCAL - banco em memória');
-            console.log(' Dados de exemplo já carregados.');
-            console.log(' Painel: http://localhost:' + PORT + '/login');
-            console.log(' admin@qgcteam.com / 123456');
-            console.log(' colaborador@qgcteam.com / 123456');
-            console.log('==================================================');
-            console.log('');
-        }
-    })
-    .catch((erro) => console.error('Erro ao preparar o banco:', erro.message));
 
 // ---------------------------------------------------------
 // AUTENTICAÇÃO
@@ -224,6 +236,7 @@ app.get('/api/health', (req, res) => {
         configurado: {
             wati: watiConfigurada(),
             jwtSecretProprio: JWT_SECRET_PROPRIO,
+            jwtSecretOrigem: jwtSegredoOrigem,
             webhookSecret: Boolean(WEBHOOK_SECRET)
         },
         wati: {
@@ -950,7 +963,55 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+// ---------------------------------------------------------
+// INICIALIZAÇÃO (banco -> segredo do JWT -> porta)
+// ---------------------------------------------------------
+async function iniciarServidor() {
+    try {
+        await banco.prepararBanco();
+    } catch (erro) {
+        console.error('Erro ao preparar o banco:', erro.message);
+    }
+
+    const segredo = await carregarSegredoJwt();
+    JWT_SECRET = segredo.valor;
+    jwtSegredoOrigem = segredo.origem;
+
+    if (segredo.origem === 'env') {
+        console.log('JWT_SECRET: usando a variável de ambiente.');
+    } else if (segredo.origem === 'banco') {
+        console.warn('JWT_SECRET: variável de ambiente ausente - usando o segredo persistido no banco.');
+        console.warn('           Recomendado: defina JWT_SECRET no Render para manter o segredo fora do banco.');
+    } else {
+        console.warn('JWT_SECRET: variável ausente e banco indisponível - segredo temporário (sessões caem ao reiniciar).');
+    }
+
+    if (WEBHOOK_SECRET) {
+        console.log('WEBHOOK_SECRET: ativo - /webhook exige ?token=... (ou header x-webhook-secret).');
+    } else {
+        console.warn('WEBHOOK_SECRET: ausente - /webhook aceita qualquer origem.');
+        console.warn('           Defina no Render e cadastre ?token=SEGREDO na URL do webhook da Wati.');
+    }
+
+    if (banco.modoDemo) {
+        console.log('');
+        console.log('==================================================');
+        console.log(' MODO DEMO LOCAL - banco em memória');
+        console.log(' Dados de exemplo já carregados.');
+        console.log(' Painel: http://localhost:' + PORT + '/login');
+        console.log(' admin@qgcteam.com / 123456');
+        console.log(' colaborador@qgcteam.com / 123456');
+        console.log('==================================================');
+        console.log('');
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+    });
+}
+
+iniciarServidor().catch((erro) => {
+    console.error('Falha ao iniciar o servidor:', erro.message);
+    process.exitCode = 1;
 });
 
