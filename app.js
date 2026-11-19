@@ -665,12 +665,12 @@ async function copiarFicha() {
 const CAMPOS_LISTA = [
     { chave: 'telefone', rotulo: 'Telefone (obrigatório)' },
     { chave: 'nome', rotulo: 'Nome' },
-    { chave: 'cnpj', rotulo: 'CNPJ' },
-    { chave: 'cpf', rotulo: 'CPF' },
-    { chave: 'razao_social', rotulo: 'Razão social' },
-    { chave: 'ag_conta', rotulo: 'Agência / Conta' },
-    { chave: 'socio', rotulo: 'Sócio' },
-    { chave: 'responsavel', rotulo: 'Responsável' }
+    { chave: 'cnpj', rotulo: 'CNPJ → cnpj' },
+    { chave: 'cpf', rotulo: 'CPF → cpf' },
+    { chave: 'razao_social', rotulo: 'Razão social → razao_social' },
+    { chave: 'ag_conta', rotulo: 'Agência / Conta → ag_conta' },
+    { chave: 'socio', rotulo: 'Sócio → socio' },
+    { chave: 'responsavel', rotulo: 'Responsável → responsavel' }
 ];
 
 const MAPA_MEMORIA_CHAVE = 'qgc-mapa-lista';
