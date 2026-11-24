@@ -22,17 +22,41 @@
             
             <div class="top-nav" id="menu">
                 <button class="active" data-view="inicio" onclick="irPara('inicio')">Início</button>
-                <button data-view="conversas" onclick="irParaConversas()">Conversas</button>
-                <button data-view="clientes" onclick="mostrarClientes()">Clientes</button>
-                <button data-view="listas" onclick="mostrarListas()">Listas</button>
-                <button data-view="validar" onclick="irPara('validar')">Validar listas</button>
-                <button data-view="listasuja" onclick="irPara('listasuja')">Lista Suja</button>
-                <button data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
-                <button data-view="wati" onclick="irPara('wati')">Atividade Wati</button>
-                <button data-view="canais" onclick="irPara('canais')">Canais</button>
-                <button data-view="logs" onclick="irPara('logs')">Logs</button>
-                <button data-view="auditoria" onclick="irPara('auditoria')">Auditoria</button>
-                <button data-view="usuarios" onclick="irPara('usuarios')">Usuários</button>
+
+                <div class="nav-grupo" data-grupo="puxadores">
+                    <button class="nav-grupo-btn" type="button" data-grupo="puxadores" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('puxadores')">
+                        Puxadores <span class="nav-seta" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-submenu" role="menu">
+                        <button type="button" data-view="conversas" onclick="irParaConversas()">Conversas</button>
+                        <button type="button" data-view="clientes" onclick="mostrarClientes()">Clientes</button>
+                    </div>
+                </div>
+
+                <div class="nav-grupo" data-grupo="envio">
+                    <button class="nav-grupo-btn" type="button" data-grupo="envio" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('envio')">
+                        Envio <span class="nav-seta" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-submenu" role="menu">
+                        <button type="button" data-view="listas" onclick="mostrarListas()">Listas</button>
+                        <button type="button" data-view="validar" onclick="irPara('validar')">Validar listas</button>
+                        <button type="button" data-view="listasuja" onclick="irPara('listasuja')">Lista Suja</button>
+                        <button type="button" data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
+                        <button type="button" data-view="wati" onclick="irPara('wati')">Atividade Wati</button>
+                        <button type="button" data-view="canais" onclick="irPara('canais')">Canais</button>
+                    </div>
+                </div>
+
+                <div class="nav-grupo" data-grupo="auditoria">
+                    <button class="nav-grupo-btn" type="button" data-grupo="auditoria" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('auditoria')">
+                        Auditoria <span class="nav-seta" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="nav-submenu" role="menu">
+                        <button type="button" data-view="logs" onclick="irPara('logs')">Logs</button>
+                        <button type="button" data-view="auditoria" onclick="irPara('auditoria')">Auditoria</button>
+                        <button type="button" data-view="usuarios" onclick="irPara('usuarios')">Usuários</button>
+                    </div>
+                </div>
             </div>
 
             <div class="top-actions">

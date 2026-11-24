@@ -138,6 +138,12 @@ function irPara(view) {
         botao.classList.toggle('active', botao.dataset.view === view);
     });
 
+    // destaca o grupo do menu que contém a tela atual e fecha os submenus
+    document.querySelectorAll('.nav-grupo').forEach((grupo) => {
+        grupo.classList.toggle('nav-grupo-ativo', !!grupo.querySelector('button.active'));
+    });
+    fecharGruposNav();
+
     if (view === 'inicio') carregarDashboard();
     if (view === 'conversas') carregarConversas(true);
     if (view === 'clientes') carregarTabelaClientes();
@@ -157,6 +163,38 @@ function irParaConversas() { irPara('conversas'); }
 function mostrarClientes() { irPara('clientes'); }
 function mostrarListas() { irPara('listas'); }
 function mostrarInicio() { irPara('inicio'); }
+
+/* --- menu agrupado (Início · Puxadores · Envio · Auditoria) --- */
+function alternarGrupoNav(nome) {
+    const alvo = document.querySelector('.nav-grupo[data-grupo="' + nome + '"]');
+    const estavaAberto = !!(alvo && alvo.classList.contains('aberto'));
+
+    fecharGruposNav();
+
+    if (alvo && !estavaAberto) {
+        alvo.classList.add('aberto');
+        const gatilho = alvo.querySelector('.nav-grupo-btn');
+        if (gatilho) gatilho.setAttribute('aria-expanded', 'true');
+    }
+}
+
+function fecharGruposNav() {
+    document.querySelectorAll('.nav-grupo.aberto').forEach((grupo) => {
+        grupo.classList.remove('aberto');
+        const gatilho = grupo.querySelector('.nav-grupo-btn');
+        if (gatilho) gatilho.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function ligarMenuAgrupado() {
+    document.addEventListener('click', (evento) => {
+        if (!evento.target.closest('.nav-grupo')) fecharGruposNav();
+    });
+
+    document.addEventListener('keydown', (evento) => {
+        if (evento.key === 'Escape') fecharGruposNav();
+    });
+}
 
 /* ---------------------------------------------------------
    USUÁRIO LOGADO / SAIR
@@ -2240,6 +2278,7 @@ function iniciarPainel() {
     carregarUsuario();
     carregarDashboard();
     atualizarBotoesAudio();
+    ligarMenuAgrupado();
     conectarSSE();
 
     const campoMensagem = $('message');
