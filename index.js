@@ -14,6 +14,7 @@ const cookieParser = require('cookie-parser');
 const banco = require('./db');
 const { gerarHash, verificarSenha } = require('./senha');
 const { analisarListaTelefones } = require('./telefone');
+const { validarCnpj, formatarCnpj, normalizarEmpresa } = require('./cnpj');
 
 const app = express();
 app.use(express.json());
@@ -1357,6 +1358,171 @@ app.post('/api/telefones/verificar', async (req, res) => {
     }
 
     const { resultados, resumo } = analisarListaTelefones(telefones, dddPadrao);
+    res.json({ success: true, resumo, resultados });
+});
+
+/* ---------------------------------------------------------
+   CONSULTA DE CNPJ (dados públicos da empresa)
+   Fonte: BrasilAPI (fallback: Minha Receita) — gratuitas, sem
+   login e sem token. A resposta traz só o que a Receita
+   publica da EMPRESA: o CPF do sócio é descartado na
+   normalização (cnpj.js). O painel guarda apenas o registro
+   na auditoria, com o CNPJ consultado.
+   --------------------------------------------------------- */
+const CACHE_CNPJ = new Map();
+const CACHE_CNPJ_TTL = 24 * 60 * 60 * 1000;
+
+const FONTES_CNPJ = [
+    { nome: 'BrasilAPI', url: (cnpj) => `https://brasilapi.com.br/api/cnpj/v1/${cnpj}` },
+    { nome: 'Minha Receita', url: (cnpj) => `https://minhareceita.org/${cnpj}` }
+];
+
+/* Baixa o JSON da fonte pública. Devolve null no 404 (CNPJ fora da base). */
+async function baixarJsonCnpj(url) {
+    const controle = new AbortController();
+    const limite = setTimeout(() => controle.abort(), 12000);
+
+    try {
+        const resposta = await fetch(url, {
+            headers: { Accept: 'application/json', 'User-Agent': 'QGC-TEAM-painel' },
+            signal: controle.signal
+        });
+
+        if (resposta.status === 404) return null;
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        return await resposta.json();
+    } finally {
+        clearTimeout(limite);
+    }
+}
+
+/* Consulta com cache em memória de 24h (a base da Receita muda pouco). */
+async function consultarCnpjPublico(cnpj) {
+    const emCache = CACHE_CNPJ.get(cnpj);
+    if (emCache && Date.now() - emCache.quando < CACHE_CNPJ_TTL) {
+        return Object.assign({ fonte: emCache.fonte, cache: true }, emCache.empresa);
+    }
+
+    const falhas = [];
+
+    for (const fonte of FONTES_CNPJ) {
+        try {
+            const dados = await baixarJsonCnpj(fonte.url(cnpj));
+            if (!dados) return { status: 'nao_encontrado' };
+
+            const empresa = normalizarEmpresa(dados);
+            if (!empresa.razaoSocial) throw new Error('resposta sem razão social');
+
+            CACHE_CNPJ.set(cnpj, { quando: Date.now(), fonte: fonte.nome, empresa });
+            return Object.assign({ fonte: fonte.nome }, empresa);
+        } catch (erro) {
+            falhas.push(fonte.nome + ': ' + erro.message);
+            console.error('Consulta de CNPJ falhou em ' + fonte.nome + ':', erro.message);
+        }
+    }
+
+    throw new Error('Serviço público indisponível (' + falhas.join(' | ') + ').');
+}
+
+app.post('/api/cnpj/consultar', exigirAdmin, async (req, res) => {
+    const corpo = req.body || {};
+    const entradas = Array.isArray(corpo.cnpjs)
+        ? corpo.cnpjs
+        : String(corpo.cnpjs || corpo.cnpj || '').split(/[\s,;]+/);
+
+    const pedidos = [];
+    const vistos = new Set();
+
+    entradas
+        .map((item) => String(item == null ? '' : item).trim())
+        .filter(Boolean)
+        .forEach((item) => {
+            const { cnpj } = validarCnpj(item);
+            const chave = cnpj || item;
+            if (vistos.has(chave)) return;
+
+            vistos.add(chave);
+            pedidos.push(item);
+        });
+
+    if (!pedidos.length) {
+        return res.status(400).json({ success: false, message: 'Envie pelo menos um CNPJ.' });
+    }
+    if (pedidos.length > 20) {
+        return res.status(400).json({ success: false, message: 'Máximo de 20 CNPJs por consulta.' });
+    }
+
+    const resultados = [];
+
+    for (const bruto of pedidos) {
+        const checagem = validarCnpj(bruto);
+
+        if (!checagem.valido) {
+            resultados.push({
+                original: bruto,
+                cnpj: checagem.cnpj,
+                status: 'invalido',
+                message: checagem.motivo
+            });
+            continue;
+        }
+
+        try {
+            const empresa = await consultarCnpjPublico(checagem.cnpj);
+
+            if (empresa.status === 'nao_encontrado') {
+                resultados.push({
+                    original: bruto,
+                    cnpj: checagem.cnpj,
+                    cnpjFormatado: formatarCnpj(checagem.cnpj),
+                    status: 'nao_encontrado',
+                    message: 'CNPJ não encontrado na base pública.'
+                });
+                continue;
+            }
+
+            resultados.push(Object.assign({ original: bruto, status: 'ok' }, empresa));
+        } catch (erro) {
+            resultados.push({
+                original: bruto,
+                cnpj: checagem.cnpj,
+                cnpjFormatado: formatarCnpj(checagem.cnpj),
+                status: 'erro',
+                message: erro.message
+            });
+        }
+    }
+
+    const resumo = { total: resultados.length, ok: 0, comTelefone: 0, naoEncontrados: 0, invalidos: 0, erros: 0 };
+
+    resultados.forEach((item) => {
+        if (item.status === 'ok') {
+            resumo.ok += 1;
+            if (Array.isArray(item.telefones) && item.telefones.length) resumo.comTelefone += 1;
+        } else if (item.status === 'nao_encontrado') {
+            resumo.naoEncontrados += 1;
+        } else if (item.status === 'invalido') {
+            resumo.invalidos += 1;
+        } else {
+            resumo.erros += 1;
+        }
+    });
+
+    const encontrados = resultados
+        .filter((item) => item.status === 'ok')
+        .map((item) => item.cnpjFormatado || formatarCnpj(item.cnpj));
+
+    try {
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            'consulta cnpj',
+            encontrados.length ? encontrados.join(', ') : pedidos.join(', ')
+        );
+    } catch (erro) {
+        console.error('Erro ao registrar auditoria da consulta de CNPJ:', erro.message);
+    }
+
     res.json({ success: true, resumo, resultados });
 });
 

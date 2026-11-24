@@ -492,7 +492,7 @@
                 <div class="section-title">
                     <div>
                         <h1>Validar listas</h1>
-                        <p>Corrige e padroniza telefones no formato da Wati (55 + DDD + número). Regras de formato: DDD oficial, 9º dígito, celular/fixo — não consulta nenhum serviço externo.</p>
+                        <p>Corrige e padroniza telefones no formato da Wati (55 + DDD + número). Regras de formato: DDD oficial, 9º dígito, celular/fixo. A consulta de CNPJ usa a base pública da Receita e traz só os dados da empresa.</p>
                     </div>
                     <button class="btn-mini" onclick="limparValidacaoListas()">🧹 Limpar</button>
                 </div>
@@ -565,6 +565,46 @@
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <div class="screen-panel" style="margin-top: 18px;">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">2. Consultar CNPJ (dados públicos)</h3>
+                    <p class="mapa-ajuda">
+                        Consulta a base pública da Receita (BrasilAPI / Minha Receita): razão social, nome fantasia,
+                        situação, CNAE, endereço e <strong>telefone e e-mail da empresa</strong>. Não traz CPF de sócio
+                        nem dados de pessoa física e não usa login, token ou créditos de terceiros.
+                    </p>
+
+                    <div class="form-group">
+                        <label>CNPJ (um por linha, até 20 por consulta)</label>
+                        <textarea id="cnpj-texto" class="form-control lista-texto" placeholder="26.526.968/0001-40&#10;11.222.333/0001-81"></textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                        <button class="btn-primary" type="button" onclick="consultarCnpjsValidacao()">Consultar CNPJ</button>
+                        <button class="btn-mini" type="button" onclick="baixarCnpjValidacao()">⬇ Baixar .csv</button>
+                        <small>Fonte pública e gratuita. Os dígitos verificadores são conferidos antes da consulta.</small>
+                    </div>
+
+                    <p id="cnpj-progresso" class="mapa-resumo"></p>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>CNPJ</th>
+                                    <th>Empresa</th>
+                                    <th>Situação</th>
+                                    <th>Telefone</th>
+                                    <th>E-mail</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-cnpj">
+                                <tr><td colspan="6" class="vazio">Cole um CNPJ e clique em “Consultar CNPJ”.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>

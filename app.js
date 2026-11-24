@@ -1453,6 +1453,225 @@ function carregarArquivoValidacao(input) {
     leitor.readAsText(arquivo, 'UTF-8');
 }
 
+/* ---------------------------------------------------------
+   CONSULTA DE CNPJ (dados públicos da empresa)
+   Puxa razão social, situação, endereço, telefone e e-mail da
+   empresa na base pública da Receita (BrasilAPI/Minha Receita).
+   O servidor descarta o CPF do sócio: o painel recebe só o que
+   é da empresa. Nada é gravado no banco.
+   --------------------------------------------------------- */
+let consultaCnpj = [];
+
+/* Chave de comparação do telefone: ignora máscara e o DDI 55. */
+function chaveTelefoneValidacao(valor) {
+    const digitos = apenasNumeros(valor);
+
+    return (digitos.length === 12 || digitos.length === 13) && digitos.startsWith('55')
+        ? digitos.slice(2)
+        : digitos;
+}
+
+/* Acrescenta números na caixa de validação sem repetir o que já está lá. */
+function adicionarTelefonesValidacao(watis) {
+    const caixa = $('validar-texto');
+    if (!caixa) return 0;
+
+    const atuais = String(caixa.value || '').split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean);
+    const existentes = new Set(atuais.map((linha) => chaveTelefoneValidacao(telefoneDaLinhaValidacao(linha))));
+
+    const novos = [];
+    (watis || []).forEach((wati) => {
+        const chave = chaveTelefoneValidacao(wati);
+        if (!chave || existentes.has(chave)) return;
+
+        existentes.add(chave);
+        novos.push(wati);
+    });
+
+    if (!novos.length) return 0;
+
+    caixa.value = atuais.concat(novos).join('\n');
+    return novos.length;
+}
+
+async function consultarCnpjsValidacao() {
+    const caixa = $('cnpj-texto');
+    const progresso = $('cnpj-progresso');
+    const botao = document.querySelector('button[onclick="consultarCnpjsValidacao()"]');
+
+    const linhas = String(caixa ? caixa.value : '')
+        .split(/[\r\n,;]+/)
+        .map((linha) => linha.trim())
+        .filter(Boolean);
+
+    if (!linhas.length) { toast('Cole pelo menos um CNPJ para consultar.', 'erro'); return; }
+
+    const unicos = Array.from(new Set(linhas.map((linha) => apenasNumeros(linha)).filter(Boolean)));
+    if (!unicos.length) { toast('Nenhum CNPJ digitado.', 'erro'); return; }
+    if (unicos.length > 20) {
+        toast('Consulte no máximo 20 CNPJs por vez (você colou ' + unicos.length + ').', 'erro');
+        return;
+    }
+
+    if (botao) botao.disabled = true;
+    if (progresso) progresso.textContent = 'Consultando ' + unicos.length + ' CNPJ(s) na base pública...';
+
+    try {
+        const resposta = await fetch('/api/cnpj/consultar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cnpjs: unicos })
+        });
+
+        const retorno = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
+
+        consultaCnpj = retorno.resultados || [];
+        renderizarCnpjValidacao();
+
+        const resumo = retorno.resumo || {};
+        const partes = [(resumo.ok || 0) + ' empresa(s) encontrada(s)'];
+        if (resumo.comTelefone) partes.push(resumo.comTelefone + ' com telefone');
+
+        const problemas = (resumo.naoEncontrados || 0) + (resumo.invalidos || 0) + (resumo.erros || 0);
+        if (problemas) partes.push(problemas + ' sem retorno');
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '.';
+        toast(partes.join(' · '), problemas ? 'erro' : undefined);
+    } catch (erro) {
+        if (progresso) progresso.textContent = erro.message || 'Não foi possível consultar os CNPJs.';
+        toast(erro.message || 'Não foi possível consultar os CNPJs.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
+function renderizarCnpjValidacao() {
+    const corpo = $('tabela-cnpj');
+    if (!corpo) return;
+
+    if (!consultaCnpj.length) {
+        corpo.innerHTML = '<tr><td colspan="6" class="vazio">Cole um CNPJ e clique em “Consultar CNPJ”.</td></tr>';
+        return;
+    }
+
+    corpo.innerHTML = consultaCnpj.map((item, indice) => {
+        if (item.status !== 'ok') {
+            const etiqueta = item.status === 'invalido'
+                ? 'CNPJ inválido'
+                : (item.status === 'nao_encontrado' ? 'não encontrado' : 'falha na consulta');
+
+            return '<tr>' +
+                '<td>' + escaparHtml(item.original || item.cnpj || '-') + '</td>' +
+                '<td colspan="4"><span class="status-badge status-nao-quis">' + etiqueta + '</span> ' +
+                    escaparHtml(item.message || '') + '</td>' +
+                '<td>-</td>' +
+                '</tr>';
+        }
+
+        const telefones = item.telefones || [];
+        const celulasTelefone = telefones.length
+            ? telefones.map((telefone, posicao) => (telefone.wati
+                ? '<button class="btn-mini" type="button" onclick="usarTelefoneCnpj(' + indice + ', ' + posicao + ')">↪ ' +
+                    escaparHtml(telefone.formatado) + '</button>'
+                : '<small>' + escaparHtml(telefone.formatado || telefone.numero) + ' (formato não reconhecido)</small>'
+            )).join('<br>')
+            : '<small>sem telefone publicado</small>';
+
+        const detalhes = [
+            item.endereco || '',
+            item.cnaeDescricao ? 'CNAE ' + item.cnae + ' — ' + item.cnaeDescricao : ''
+        ].filter(Boolean).map((texto) => '<br><small>' + escaparHtml(texto) + '</small>').join('');
+
+        const temTelefone = telefones.some((telefone) => telefone.wati);
+
+        return '<tr>' +
+            '<td>' + escaparHtml(item.cnpjFormatado || item.cnpj || '-') +
+                (item.fonte ? '<br><small>' + escaparHtml(item.fonte) + (item.cache ? ' · cache' : '') + '</small>' : '') +
+                '</td>' +
+            '<td><strong>' + escaparHtml(item.razaoSocial || '-') + '</strong>' +
+                (item.nomeFantasia ? '<br><small>' + escaparHtml(item.nomeFantasia) + '</small>' : '') +
+                detalhes + '</td>' +
+            '<td>' + escaparHtml(item.situacao || '-') +
+                (item.dataSituacao ? '<br><small>' + escaparHtml(item.dataSituacao) + '</small>' : '') + '</td>' +
+            '<td>' + celulasTelefone + '</td>' +
+            '<td>' + (item.email ? escaparHtml(item.email) : '-') + '</td>' +
+            '<td>' + (temTelefone
+                ? '<button class="btn-mini" type="button" onclick="usarTodosTelefonesCnpj(' + indice + ')">↪ Todos</button>'
+                : '-') + '</td>' +
+            '</tr>';
+    }).join('');
+}
+
+function usarTelefoneCnpj(indice, posicao) {
+    const empresa = consultaCnpj[indice];
+    const telefone = empresa && empresa.telefones ? empresa.telefones[posicao] : null;
+
+    if (!telefone || !telefone.wati) { toast('Telefone da empresa não reconhecido como número do Brasil.', 'erro'); return; }
+
+    const adicionados = adicionarTelefonesValidacao([telefone.wati]);
+    if (!adicionados) { toast('Esse telefone já está na lista.', 'erro'); return; }
+
+    const progresso = $('validar-progresso');
+    if (progresso) progresso.textContent = '1 telefone da empresa adicionado. Clique em "Validar números".';
+
+    toast('+' + telefone.formatado + ' na lista de validação.');
+}
+
+function usarTodosTelefonesCnpj(indice) {
+    const empresa = consultaCnpj[indice];
+    const watis = ((empresa && empresa.telefones) || [])
+        .map((telefone) => telefone.wati)
+        .filter(Boolean);
+
+    const adicionados = adicionarTelefonesValidacao(watis);
+    if (!adicionados) { toast('Nenhum telefone novo para adicionar.', 'erro'); return; }
+
+    const progresso = $('validar-progresso');
+    if (progresso) progresso.textContent = adicionados + ' telefone(s) da empresa adicionado(s). Clique em "Validar números".';
+
+    toast(adicionados + ' telefone(s) da empresa adicionado(s).');
+}
+
+/* Baixa as empresas consultadas em .csv (só campos da empresa). */
+function baixarCnpjValidacao() {
+    const empresas = consultaCnpj.filter((item) => item.status === 'ok');
+    if (!empresas.length) { toast('Consulte pelo menos um CNPJ antes de baixar.', 'erro'); return; }
+
+    const linhas = ['cnpj;razao_social;nome_fantasia;situacao;cnae;endereco;telefones;email'];
+
+    empresas.forEach((item) => {
+        const telefones = (item.telefones || [])
+            .map((telefone) => telefone.wati || telefone.numero)
+            .join(' ');
+
+        linhas.push([
+            item.cnpjFormatado || item.cnpj,
+            item.razaoSocial,
+            item.nomeFantasia,
+            item.situacao,
+            (item.cnae + ' ' + item.cnaeDescricao).trim(),
+            item.endereco,
+            telefones,
+            item.email
+        ].map((valor) => String(valor == null ? '' : valor).replace(/;/g, ',')).join(';'));
+    });
+
+    const blob = new Blob(['\uFEFF' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+    link.href = url;
+    link.download = 'cnpj-' + carimbo + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast(empresas.length + ' empresa(s) no .csv.');
+}
+
 function cartaoValidacao(valor, rotulo, classe) {
     return '<div class="validar-card ' + (classe || '') + '"><strong>' + valor + '</strong><span>' + rotulo + '</span></div>';
 }
@@ -1652,6 +1871,15 @@ function limparValidacaoListas() {
 
     const progresso = $('validar-progresso');
     if (progresso) progresso.textContent = '';
+
+    const cnpjTexto = $('cnpj-texto');
+    if (cnpjTexto) cnpjTexto.value = '';
+
+    const cnpjProgresso = $('cnpj-progresso');
+    if (cnpjProgresso) cnpjProgresso.textContent = '';
+
+    consultaCnpj = [];
+    renderizarCnpjValidacao();
 
     validacaoLista = { resultados: [], resumo: null };
     renderizarValidacaoLista();
