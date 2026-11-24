@@ -1,5 +1,5 @@
 /* =========================================================
-   QGC TEAM - Servidor Express
+   QGC TEAM by JV - Servidor Express
    ---------------------------------------------------------
    Rotas: login (JWT em cookie), painel admin, colaborador,
    clientes, ficha, mensagens, listas, webhook da Wati e

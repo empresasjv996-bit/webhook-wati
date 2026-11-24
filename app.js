@@ -1,5 +1,5 @@
 /* =========================================================
-   QGC TEAM - Painel Administrativo
+   QGC TEAM by JV - Painel Administrativo
    Funções ativas: Conversas, Clientes, Listas, Ficha,
    tempo real (SSE), som, notificações e pesquisa.
    ========================================================= */
@@ -627,7 +627,7 @@ async function copiarFicha() {
     const textoEl = (id) => (($(id) || {}).textContent || '').trim();
 
     const linhas = [
-        'FICHA - QGC TEAM',
+        'FICHA - QGC TEAM by JV',
         'Empresa: ' + (textoEl('ficha-empresa') || '-'),
         'CNPJ: ' + (valor('ficha-cnpj') || '-'),
         'Sócio Mestre: ' + (valor('ficha-socio') || '-'),

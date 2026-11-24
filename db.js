@@ -1,5 +1,5 @@
 /* =========================================================
-   QGC TEAM - Camada de dados
+   QGC TEAM by JV - Camada de dados
    ---------------------------------------------------------
    - Em produção (Render) usa o Postgres do DATABASE_URL.
    - Sem DATABASE_URL válida, cai automaticamente no modo demo

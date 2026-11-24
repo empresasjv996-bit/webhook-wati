@@ -44,8 +44,9 @@ header.top {
     background: var(--bg-glass); backdrop-filter: blur(24px); border: 1px solid var(--border);
     border-radius: 20px; padding: 10px 25px; display: flex; justify-content: space-between; align-items: center;
 }
-.logo { display: flex; align-items: center; gap: 10px; font-size: 1.2rem; font-weight: 800; }
+.logo { display: flex; align-items: center; gap: 10px; font-size: 1.2rem; font-weight: 800; white-space: nowrap; }
 .logo span { color: var(--green); text-shadow: 0 0 12px var(--green-glow); }
+.logo small { font-size: 0.62em; font-weight: 700; letter-spacing: 0; opacity: 0.85; margin-left: 2px; }
 .logo-img { height: 28px; border-radius: 6px; }
 
 .status { color: var(--green); font-size: 0.75rem; font-weight: 800; background: rgba(0,255,128,0.08); padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(0,255,128,0.2); display: flex; align-items: center; gap: 8px; }

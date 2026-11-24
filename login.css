@@ -60,8 +60,9 @@ body {
 
 .logo-img { height: 50px; border-radius: 8px; margin-bottom: 5px; }
 
-.logo h1 { font-size: 1.8rem; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+.logo h1 { font-size: 1.8rem; font-weight: 800; color: #fff; letter-spacing: -0.5px; white-space: nowrap; }
 .logo h1 span { color: var(--green); text-shadow: 0 0 15px var(--green-glow); }
+.logo h1 small { font-size: 0.58em; font-weight: 700; letter-spacing: 0; opacity: 0.85; margin-left: 2px; }
 
 .subtitle {
     text-align: center;

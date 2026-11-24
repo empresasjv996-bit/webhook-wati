@@ -1,5 +1,5 @@
 /* =========================================================
-   QGC TEAM - Senhas
+   QGC TEAM by JV - Senhas
    ---------------------------------------------------------
    Hash com scrypt (nativo do Node, sem dependência extra).
    Formato salvo no banco:  scrypt$<salt>$<hash>

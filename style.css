@@ -63,8 +63,9 @@ header.top {
     box-shadow: 0 10px 40px rgba(0,0,0,0.6);
 }
 
-.logo { display: flex; align-items: center; gap: 10px; font-size: 1.3rem; font-weight: 800; letter-spacing: -0.5px; }
+.logo { display: flex; align-items: center; gap: 10px; font-size: 1.3rem; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; }
 .logo span { color: var(--green); text-shadow: 0 0 12px var(--green-glow); }
+.logo small { font-size: 0.62em; font-weight: 700; letter-spacing: 0; opacity: 0.85; margin-left: 2px; }
 .logo-img { height: 32px; border-radius: 6px; }
 
 .top-nav { display: flex; gap: 4px; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.03); }
