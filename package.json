@@ -6,7 +6,11 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test-templates.js && node test-listas-variaveis.js",
+    "test": "node test-templates.js && node test-listas-variaveis.js && node test-telefone.js",
+    "test:deepseek": "node test-deepseek.js",
+    "verificar": "node verificar-numeros.js",
+    "capturar": "node capturar-api.js",
+    "mapear": "node mapear-tela.js",
     "test:e2e": "node test-listas-variaveis-e2e.js",
     "postinstall": "prisma skills sync || exit 0"
   },
