@@ -54,6 +54,13 @@ function criarBancoPostgres() {
                     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )`,
                 'CREATE INDEX IF NOT EXISTS idx_mensagens_telefone ON mensagens (telefone)',
+                // autor da mensagem (quem enviou pelo painel/campanha) e origem
+                'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS autor_email TEXT',
+                'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS autor_nome TEXT',
+                'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS campanha_id INTEGER',
+                'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS origem TEXT',
+                'CREATE INDEX IF NOT EXISTS idx_mensagens_autor ON mensagens (autor_email)',
+                'CREATE INDEX IF NOT EXISTS idx_mensagens_campanha ON mensagens (campanha_id)',
                 `CREATE TABLE IF NOT EXISTS listas (
                     id SERIAL PRIMARY KEY,
                     nome TEXT NOT NULL,
@@ -127,6 +134,9 @@ function criarBancoPostgres() {
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_nome TEXT',
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_idioma TEXT',
                 "ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_parametros JSONB NOT NULL DEFAULT '[]'::jsonb",
+                // quem criou a campanha (aparece como autor das mensagens disparadas)
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS criado_por_email TEXT',
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS criado_por_nome TEXT',
                 // valores já resolvidos por contato (template) + texto final do envio
                 "ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS parametros JSONB NOT NULL DEFAULT '[]'::jsonb",
                 'ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS mensagem TEXT',
@@ -187,12 +197,11 @@ function criarBancoPostgres() {
                 filtros.push(`(nome ILIKE $${valores.length} OR telefone ILIKE $${valores.length})`);
             }
 
-            // Vendedor logado: "meus" mostra só os leads dele; sem o filtro ele
-            // também vê os leads sem dono (que ainda não vieram de campanha).
+            // Vendedor logado só enxerga os leads que estão na carteira dele.
+            // (O painel admin não envia vendedorEmail e continua vendo tudo.)
             if (vendedorEmail) {
                 valores.push(vendedorEmail);
-                if (somenteMeus) filtros.push(`LOWER(vendedor_email) = LOWER($${valores.length})`);
-                else filtros.push(`(vendedor_email IS NULL OR LOWER(vendedor_email) = LOWER($${valores.length}))`);
+                filtros.push(`LOWER(vendedor_email) = LOWER($${valores.length})`);
             }
 
             valores.push(limite);
@@ -254,8 +263,17 @@ function criarBancoPostgres() {
         async obterFicha(telefone) {
             const { rows } = await pool.query(
                 `SELECT nome, telefone, cnpj, socio, cpf, responsavel, outros_socios,
-                        atributos, status, mensagem
+                        atributos, status, mensagem, vendedor_email, vendedor_nome
                    FROM clientes WHERE telefone = $1`,
+                [telefone]
+            );
+            return rows[0] || null;
+        },
+
+        /* Dono atual do lead (usado para isolar o acesso dos colaboradores). */
+        async obterDonoCliente(telefone) {
+            const { rows } = await pool.query(
+                'SELECT vendedor_email, vendedor_nome FROM clientes WHERE telefone = $1',
                 [telefone]
             );
             return rows[0] || null;
@@ -317,17 +335,29 @@ function criarBancoPostgres() {
 
         async listarMensagens(telefone) {
             const { rows } = await pool.query(
-                'SELECT id, direcao, texto, criado_em FROM mensagens WHERE telefone = $1 ORDER BY criado_em ASC, id ASC LIMIT 300',
+                `SELECT id, direcao, texto, autor_email, autor_nome, campanha_id, origem, criado_em
+                   FROM mensagens WHERE telefone = $1
+                  ORDER BY criado_em ASC, id ASC LIMIT 300`,
                 [telefone]
             );
             return rows;
         },
 
-        async registrarMensagem(telefone, direcao, texto) {
+        async registrarMensagem(telefone, direcao, texto, extras) {
+            const dados = extras || {};
             try {
                 await pool.query(
-                    'INSERT INTO mensagens (telefone, direcao, texto) VALUES ($1, $2, $3)',
-                    [telefone, direcao, texto]
+                    `INSERT INTO mensagens (telefone, direcao, texto, autor_email, autor_nome, campanha_id, origem)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [
+                        telefone,
+                        direcao,
+                        texto,
+                        dados.autorEmail || null,
+                        dados.autorNome || null,
+                        dados.campanhaId || null,
+                        dados.origem || null
+                    ]
                 );
             } catch (erro) { console.error('Erro ao salvar mensagem:', erro.message); }
         },
@@ -548,7 +578,8 @@ function criarBancoPostgres() {
         /* ---------------- CAMPANHAS ---------------- */
         async criarCampanha({
             nome, listaId, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome,
-            canal, templateNome, templateIdioma, templateParametros
+            canal, templateNome, templateIdioma, templateParametros,
+            criadoPorEmail, criadoPorNome
         }) {
             const cliente = await pool.connect();
             try {
@@ -557,15 +588,17 @@ function criarBancoPostgres() {
                 const { rows } = await cliente.query(
                     `INSERT INTO campanhas (nome, lista_id, mensagem, canal, template_nome, template_idioma,
                                             template_parametros, intervalo_ms, total, status,
-                                            vendedor_email, vendedor_nome, proximo_envio_em)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'ativa', $10, $11, NOW())
+                                            vendedor_email, vendedor_nome, criado_por_email, criado_por_nome,
+                                            proximo_envio_em)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'ativa', $10, $11, $12, $13, NOW())
                      RETURNING id`,
                     [
                         nome, listaId || null, mensagem,
                         canal === 'template' ? 'template' : 'texto',
                         templateNome || null, templateIdioma || null,
                         JSON.stringify(Array.isArray(templateParametros) ? templateParametros : []),
-                        intervaloMs, contatos.length, vendedorEmail || null, vendedorNome || null
+                        intervaloMs, contatos.length, vendedorEmail || null, vendedorNome || null,
+                        criadoPorEmail || null, criadoPorNome || null
                     ]
                 );
                 const id = rows[0].id;
@@ -655,7 +688,8 @@ function criarBancoPostgres() {
                         e.mensagem AS envio_mensagem, e.parametros AS envio_parametros,
                         c.id AS campanha_id, c.nome AS campanha, c.mensagem,
                         c.canal, c.template_nome, c.template_idioma,
-                        c.vendedor_email, c.vendedor_nome
+                        c.vendedor_email, c.vendedor_nome,
+                        c.criado_por_email, c.criado_por_nome
                    FROM campanha_envios e
                    JOIN campanhas c ON c.id = e.campanha_id
                   WHERE e.status = 'pendente'
@@ -720,6 +754,134 @@ function criarBancoPostgres() {
                 valores
             );
             return rows;
+        },
+
+        /* ---------------- CONVERSAS: BACKUP E LIMPEZA ---------------- */
+        async exportarConversas() {
+            const mensagens = await pool.query(
+                `SELECT m.id, m.telefone, c.nome, m.direcao, m.texto,
+                        m.autor_email, m.autor_nome, m.campanha_id, m.origem, m.criado_em
+                   FROM mensagens m
+                   LEFT JOIN clientes c ON c.telefone = m.telefone
+                  ORDER BY m.id ASC`
+            );
+
+            const clientes = await pool.query(
+                `SELECT telefone, nome, status, mensagem, vendedor_email, vendedor_nome
+                   FROM clientes
+                  ORDER BY telefone ASC`
+            );
+
+            return {
+                gerado_em: new Date().toISOString(),
+                mensagens: mensagens.rows,
+                clientes: clientes.rows
+            };
+        },
+
+        async contarConversas() {
+            const mensagens = await pool.query('SELECT COUNT(*)::int AS total FROM mensagens');
+            const eventos = await pool.query(
+                "SELECT COUNT(*)::int AS total FROM eventos_wati WHERE tipo = 'message' OR texto IS NOT NULL"
+            );
+            const clientes = await pool.query("SELECT COUNT(*)::int AS total FROM clientes WHERE COALESCE(mensagem, '') <> ''");
+
+            return {
+                mensagens: mensagens.rows[0].total,
+                eventosMensagem: eventos.rows[0].total,
+                clientesComPrevia: clientes.rows[0].total
+            };
+        },
+
+        /* Apaga o histórico das conversas. Mantém clientes, fichas, campanhas e auditoria. */
+        async limparConversas({ incluirEventosWati = true } = {}) {
+            const cliente = await pool.connect();
+            try {
+                await cliente.query('BEGIN');
+
+                const removidas = await cliente.query('DELETE FROM mensagens');
+                const atualizados = await cliente.query(
+                    "UPDATE clientes SET mensagem = '' WHERE COALESCE(mensagem, '') <> ''"
+                );
+
+                let eventos = { rowCount: 0 };
+                if (incluirEventosWati) {
+                    eventos = await cliente.query(
+                        "DELETE FROM eventos_wati WHERE tipo = 'message' OR texto IS NOT NULL"
+                    );
+                }
+
+                await cliente.query('COMMIT');
+
+                return {
+                    mensagensRemovidas: removidas.rowCount,
+                    clientesAtualizados: atualizados.rowCount,
+                    eventosRemovidos: eventos.rowCount
+                };
+            } catch (erro) {
+                await cliente.query('ROLLBACK');
+                throw erro;
+            } finally {
+                cliente.release();
+            }
+        },
+
+        /* Contagens usadas pelo botão "Limpar tudo" do painel. */
+        async contarDados() {
+            const { rows: clientes } = await pool.query('SELECT COUNT(*)::int AS total FROM clientes');
+            const { rows: comPrevia } = await pool.query(
+                "SELECT COUNT(*)::int AS total FROM clientes WHERE COALESCE(mensagem, '') <> ''"
+            );
+            const { rows: listas } = await pool.query('SELECT COUNT(*)::int AS total FROM listas');
+            const { rows: campanhas } = await pool.query('SELECT COUNT(*)::int AS total FROM campanhas');
+            const { rows: mensagens } = await pool.query('SELECT COUNT(*)::int AS total FROM mensagens');
+            const { rows: eventos } = await pool.query(
+                "SELECT COUNT(*)::int AS total FROM eventos_wati WHERE tipo = 'message' OR texto IS NOT NULL"
+            );
+
+            return {
+                clientes: clientes[0].total,
+                clientesComPrevia: comPrevia[0].total,
+                listas: listas[0].total,
+                campanhas: campanhas[0].total,
+                mensagens: mensagens[0].total,
+                eventosMensagem: eventos[0].total
+            };
+        },
+
+        /* Reset dos dados de teste: apaga clientes (com as fichas), todo o
+           histórico de conversas e as listas importadas. Campanhas, usuários,
+           canais e auditoria são preservados. */
+        async limparDados({ incluirEventosWati = true } = {}) {
+            const cliente = await pool.connect();
+            try {
+                await cliente.query('BEGIN');
+
+                const mensagens = await cliente.query('DELETE FROM mensagens');
+                const clientes = await cliente.query('DELETE FROM clientes');
+                const listas = await cliente.query('DELETE FROM listas');
+
+                let eventos = { rowCount: 0 };
+                if (incluirEventosWati) {
+                    eventos = await cliente.query(
+                        "DELETE FROM eventos_wati WHERE tipo = 'message' OR texto IS NOT NULL"
+                    );
+                }
+
+                await cliente.query('COMMIT');
+
+                return {
+                    mensagensRemovidas: mensagens.rowCount,
+                    clientesRemovidos: clientes.rowCount,
+                    listasRemovidas: listas.rowCount,
+                    eventosRemovidos: eventos.rowCount
+                };
+            } catch (erro) {
+                await cliente.query('ROLLBACK');
+                throw erro;
+            } finally {
+                cliente.release();
+            }
         },
 
         async registrarAuditoria(ator, acao, detalhe) {
@@ -935,10 +1097,7 @@ function criarBancoMemoria() {
 
             if (vendedorEmail) {
                 const alvo = String(vendedorEmail).toLowerCase();
-                itens = itens.filter((c) => {
-                    const dono = String(c.vendedor_email || '').toLowerCase();
-                    return somenteMeus ? dono === alvo : (!dono || dono === alvo);
-                });
+                itens = itens.filter((c) => String(c.vendedor_email || '').toLowerCase() === alvo);
             }
 
             itens.sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em));
@@ -985,8 +1144,15 @@ function criarBancoMemoria() {
                 cpf: c.cpf, responsavel: c.responsavel,
                 outros_socios: Array.isArray(c.outros_socios) ? c.outros_socios.slice() : [],
                 atributos: c.atributos && typeof c.atributos === 'object' ? Object.assign({}, c.atributos) : {},
-                status: c.status, mensagem: c.mensagem
+                status: c.status, mensagem: c.mensagem,
+                vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null
             };
+        },
+
+        async obterDonoCliente(telefone) {
+            const c = clientes.get(telefone);
+            if (!c) return null;
+            return { vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null };
         },
 
         async salvarFicha(telefone, dados) {
@@ -1007,15 +1173,25 @@ function criarBancoMemoria() {
                 .filter((m) => m.telefone === telefone)
                 .sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em) || a.id - b.id)
                 .slice(-300)
-                .map((m) => ({ id: m.id, direcao: m.direcao, texto: m.texto, criado_em: m.criado_em }));
+                .map((m) => ({
+                    id: m.id, direcao: m.direcao, texto: m.texto,
+                    autor_email: m.autor_email || null, autor_nome: m.autor_nome || null,
+                    campanha_id: m.campanha_id || null, origem: m.origem || null,
+                    criado_em: m.criado_em
+                }));
         },
 
-        async registrarMensagem(telefone, direcao, texto) {
+        async registrarMensagem(telefone, direcao, texto, extras) {
+            const dados = extras || {};
             mensagens.push({
                 id: mensagemId++,
                 telefone,
                 direcao,
                 texto,
+                autor_email: dados.autorEmail || null,
+                autor_nome: dados.autorNome || null,
+                campanha_id: dados.campanhaId || null,
+                origem: dados.origem || null,
                 criado_em: new Date().toISOString()
             });
         },
@@ -1180,7 +1356,8 @@ function criarBancoMemoria() {
         /* ---------------- CAMPANHAS ---------------- */
         async criarCampanha({
             nome, listaId: idLista, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome,
-            canal, templateNome, templateIdioma, templateParametros
+            canal, templateNome, templateIdioma, templateParametros,
+            criadoPorEmail, criadoPorNome
         }) {
             const id = campanhaId++;
             campanhas.push({
@@ -1195,6 +1372,8 @@ function criarBancoMemoria() {
                 intervalo_ms: intervaloMs,
                 vendedor_email: vendedorEmail || null,
                 vendedor_nome: vendedorNome || null,
+                criado_por_email: criadoPorEmail || null,
+                criado_por_nome: criadoPorNome || null,
                 status: 'ativa',
                 total: contatos.length,
                 enviados: 0,
@@ -1290,7 +1469,9 @@ function criarBancoMemoria() {
                 template_nome: campanha.template_nome || null,
                 template_idioma: campanha.template_idioma || null,
                 vendedor_email: campanha.vendedor_email || null,
-                vendedor_nome: campanha.vendedor_nome || null
+                vendedor_nome: campanha.vendedor_nome || null,
+                criado_por_email: campanha.criado_por_email || null,
+                criado_por_nome: campanha.criado_por_nome || null
             };
         },
 
@@ -1411,6 +1592,99 @@ function criarBancoMemoria() {
                         nome: cliente ? cliente.nome : null
                     };
                 });
+        },
+
+        /* ---------------- CONVERSAS: BACKUP E LIMPEZA ---------------- */
+        async exportarConversas() {
+            return {
+                gerado_em: new Date().toISOString(),
+                mensagens: mensagens.map((m) => {
+                    const cliente = clientes.get(m.telefone);
+                    return {
+                        id: m.id, telefone: m.telefone, nome: cliente ? cliente.nome : null,
+                        direcao: m.direcao, texto: m.texto,
+                        autor_email: m.autor_email || null, autor_nome: m.autor_nome || null,
+                        campanha_id: m.campanha_id || null, origem: m.origem || null,
+                        criado_em: m.criado_em
+                    };
+                }),
+                clientes: Array.from(clientes.values()).map((c) => ({
+                    telefone: c.telefone, nome: c.nome, status: c.status, mensagem: c.mensagem,
+                    vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null
+                }))
+            };
+        },
+
+        async contarConversas() {
+            let clientesComPrevia = 0;
+            clientes.forEach((c) => { if (String(c.mensagem || '') !== '') clientesComPrevia += 1; });
+            return {
+                mensagens: mensagens.length,
+                eventosMensagem: eventosWati.filter((e) => e.tipo === 'message' || String(e.texto || '') !== '').length,
+                clientesComPrevia
+            };
+        },
+
+        async limparConversas({ incluirEventosWati = true } = {}) {
+            const removidas = mensagens.length;
+            mensagens.length = 0;
+
+            let clientesAtualizados = 0;
+            clientes.forEach((c) => {
+                if (String(c.mensagem || '') !== '') {
+                    c.mensagem = '';
+                    clientesAtualizados += 1;
+                }
+            });
+
+            let eventosRemovidos = 0;
+            if (incluirEventosWati) {
+                for (let i = eventosWati.length - 1; i >= 0; i--) {
+                    if (eventosWati[i].tipo === 'message' || String(eventosWati[i].texto || '') !== '') {
+                        eventosWati.splice(i, 1);
+                        eventosRemovidos += 1;
+                    }
+                }
+            }
+
+            return { mensagensRemovidas: removidas, clientesAtualizados, eventosRemovidos };
+        },
+
+        async contarDados() {
+            let clientesComPrevia = 0;
+            clientes.forEach((c) => { if (String(c.mensagem || '') !== '') clientesComPrevia += 1; });
+
+            return {
+                clientes: clientes.size,
+                clientesComPrevia,
+                listas: listas.length,
+                campanhas: campanhas.length,
+                mensagens: mensagens.length,
+                eventosMensagem: eventosWati.filter((e) => e.tipo === 'message' || String(e.texto || '') !== '').length
+            };
+        },
+
+        async limparDados({ incluirEventosWati = true } = {}) {
+            const mensagensRemovidas = mensagens.length;
+            mensagens.length = 0;
+
+            const clientesRemovidos = clientes.size;
+            clientes.clear();
+
+            const listasRemovidas = listas.length;
+            listas.length = 0;
+
+            let eventosRemovidos = 0;
+            if (incluirEventosWati) {
+                for (let i = eventosWati.length - 1; i >= 0; i--) {
+                    if (eventosWati[i].tipo === 'message' || String(eventosWati[i].texto || '') !== '') {
+                        eventosWati.splice(i, 1);
+                        eventosRemovidos += 1;
+                    }
+                }
+            }
+
+            return { mensagensRemovidas, clientesRemovidos, listasRemovidas, eventosRemovidos };
         },
 
         async registrarAuditoria(ator, acao, detalhe) {

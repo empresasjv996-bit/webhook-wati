@@ -135,7 +135,12 @@
                         <h1>Conversas</h1>
                         <p>Atendimentos em tempo real — abra o contato e responda pelo WhatsApp.</p>
                     </div>
-                    <button class="btn-mini" onclick="carregarConversas()">↻ Atualizar</button>
+                    <div class="chat-actions">
+                        <button class="btn-mini" onclick="baixarBackupConversas()" title="Baixar todas as conversas em JSON">⬇ Backup</button>
+                        <button class="btn-mini danger" onclick="limparConversasDoPainel()" title="Apagar o histórico de todas as conversas">🧹 Limpar histórico</button>
+                        <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
+                        <button class="btn-mini" onclick="carregarConversas()">↻ Atualizar</button>
+                    </div>
                 </div>
 
                 <div class="conversas-layout">
@@ -208,7 +213,10 @@
                         <h1>Listas</h1>
                         <p>Envie o .csv (ou cole os contatos). Colunas <code>{{1}}</code>, <code>{{2}}</code>… já entram como variáveis do template — na campanha elas são ligadas sozinhas.</p>
                     </div>
-                    <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
+                    <div class="chat-actions">
+                        <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
+                        <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
+                    </div>
                 </div>
 
                 <div class="listas-grid">
@@ -250,6 +258,8 @@
                             <div id="lista-colunas" class="mapa-colunas"></div>
 
                             <p id="lista-resumo" class="mapa-resumo"></p>
+
+                            <button class="btn-mini" type="button" onclick="verificarNumerosLista()">✓ Verificar e completar números</button>
 
                             <label class="mapa-check">
                                 <input id="lista-enviar-wati" type="checkbox" checked>
@@ -665,6 +675,10 @@
                     <div class="info-group">
                         <label>Responsável</label>
                         <input id="ficha-responsavel" class="form-control" type="text" placeholder="Quem atendeu">
+                    </div>
+                    <div class="info-group">
+                        <label>Vendedor responsável (dono do lead)</label>
+                        <p id="ficha-vendedor">-</p>
                     </div>
                 </div>
 

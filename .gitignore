@@ -3,4 +3,13 @@ node_modules
 server.log
 server.err.log
 *.log
+backups/
+
+# Segredos e capturas locais (tokens, cookies, dumps)
+.token.txt
+admin.cookies
+admin-login.json
+admin-resposta.json
+logs-prod.json
+status-prod.json
 

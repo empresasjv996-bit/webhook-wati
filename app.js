@@ -61,6 +61,19 @@ function formatarData(valor) {
     return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+/* Quem enviou: painel, campanha ou Wati (mensagens antigas não têm autor). */
+function rotuloAutor(mensagem) {
+    if (!mensagem || mensagem.direcao !== 'enviada') return '';
+
+    const origem = String(mensagem.origem || '').toLowerCase();
+    const autor = String(mensagem.autor_nome || '').trim();
+
+    if (origem === 'campanha') return autor ? 'Campanha · ' + autor : 'Campanha';
+    if (autor) return autor;
+    if (origem === 'wati') return 'Wati';
+    return 'Painel';
+}
+
 function iniciais(nome) {
     const limpo = String(nome || '?').trim();
     const partes = limpo.split(/\s+/).filter(Boolean);
@@ -165,6 +178,158 @@ async function sair() {
 }
 
 /* ---------------------------------------------------------
+   BACKUP E LIMPEZA DO HISTÓRICO DE CONVERSAS (admin)
+   --------------------------------------------------------- */
+async function baixarBackupConversas() {
+    try {
+        const resposta = await fetch('/api/conversas/exportar');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const texto = await resposta.text();
+        let total = 0;
+        try {
+            const dados = JSON.parse(texto);
+            total = Array.isArray(dados.mensagens) ? dados.mensagens.length : 0;
+        } catch (erro) { total = 0; }
+
+        const carimbo = new Date().toISOString().replace(/[:.]/g, '-');
+        const blob = new Blob([texto], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'conversas-' + carimbo + '.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+        toast('Backup baixado: ' + total + ' mensagem(ns).');
+    } catch (erro) {
+        console.error('Erro ao baixar o backup:', erro);
+        toast('Não foi possível gerar o backup das conversas.', 'erro');
+    }
+}
+
+async function limparConversasDoPainel() {
+    let resumo = null;
+    try {
+        const resposta = await fetch('/api/conversas/status');
+        if (resposta.ok) resumo = await resposta.json();
+    } catch (erro) { resumo = null; }
+
+    const total = resumo && Number(resumo.mensagens) ? Number(resumo.mensagens) : 0;
+
+    if (resumo && total === 0 && Number(resumo.eventosMensagem || 0) === 0) {
+        toast('Não há conversas para limpar.');
+        return;
+    }
+
+    const aviso = 'Isso vai apagar o histórico de TODAS as conversas'
+        + (total ? ' (' + total + ' mensagem(ns))' : '')
+        + '.\n\nOs textos de mensagens da Atividade Wati também serão apagados.'
+        + '\nClientes, fichas, campanhas e auditoria serão mantidos.\n\nDeseja continuar?';
+
+    if (!confirm(aviso)) return;
+
+    const digitado = prompt('Digite LIMPAR (em maiúsculas) para confirmar a exclusão do histórico:');
+    if (String(digitado || '').trim().toUpperCase() !== 'LIMPAR') {
+        toast('Limpeza cancelada.');
+        return;
+    }
+
+    try {
+        const resposta = await fetch('/api/conversas/limpar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmar: 'LIMPAR', incluirEventosWati: true })
+        });
+
+        const dados = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível limpar as conversas.', 'erro');
+            return;
+        }
+
+        toast('Histórico limpo: ' + (dados.mensagensRemovidas || 0) + ' mensagem(ns) removida(s).');
+        clienteAtivo = null;
+        fichaTelefone = null;
+        fecharFicha();
+        limparChat();
+        carregarConversas();
+        carregarDashboard();
+    } catch (erro) {
+        console.error('Erro ao limpar conversas:', erro);
+        toast('Erro de conexão ao limpar as conversas.', 'erro');
+    }
+}
+
+/* Reset completo dos dados de teste: clientes (com fichas), conversas e listas. */
+async function limparDadosDoPainel() {
+    let resumo = null;
+    try {
+        const resposta = await fetch('/api/dados/status');
+        if (resposta.ok) resumo = await resposta.json();
+    } catch (erro) { resumo = null; }
+
+    const clientes = resumo ? Number(resumo.clientes || 0) : 0;
+    const mensagens = resumo ? Number(resumo.mensagens || 0) : 0;
+    const listas = resumo ? Number(resumo.listas || 0) : 0;
+
+    if (resumo && clientes === 0 && mensagens === 0 && listas === 0) {
+        toast('Não há clientes, conversas ou listas para limpar.');
+        return;
+    }
+
+    const aviso = 'Isso vai apagar DEFINITIVAMENTE:\n'
+        + '• ' + clientes + ' cliente(s), com as fichas de atendimento\n'
+        + '• ' + mensagens + ' mensagem(ns) e as prévias das conversas\n'
+        + '• ' + listas + ' lista(s) importada(s)\n'
+        + '• os textos de mensagens da Atividade Wati\n\n'
+        + 'Campanhas, usuários, canais e auditoria serão mantidos.\n\n'
+        + 'Deseja continuar?';
+
+    if (!confirm(aviso)) return;
+
+    const digitado = prompt('Digite LIMPAR TUDO (em maiúsculas) para confirmar:');
+    if (String(digitado || '').trim().toUpperCase() !== 'LIMPAR TUDO') {
+        toast('Limpeza cancelada.');
+        return;
+    }
+
+    try {
+        const resposta = await fetch('/api/dados/limpar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmar: 'LIMPAR TUDO', incluirEventosWati: true })
+        });
+
+        const dados = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !dados.success) {
+            toast(dados.message || 'Não foi possível limpar os dados.', 'erro');
+            return;
+        }
+
+        toast('Dados limpos: ' + (dados.clientesRemovidos || 0) + ' cliente(s), '
+            + (dados.mensagensRemovidas || 0) + ' mensagem(ns) e '
+            + (dados.listasRemovidas || 0) + ' lista(s).');
+
+        clienteAtivo = null;
+        fichaTelefone = null;
+        clientesCache = [];
+        fecharFicha();
+        limparChat();
+        carregarConversas();
+        carregarDashboard();
+        if (typeof carregarTabelaClientes === 'function') carregarTabelaClientes();
+        if (typeof carregarListas === 'function') carregarListas();
+        if (typeof carregarCampanhas === 'function') carregarCampanhas();
+    } catch (erro) {
+        console.error('Erro ao limpar os dados:', erro);
+        toast('Erro de conexão ao limpar os dados.', 'erro');
+    }
+}
+
+/* ---------------------------------------------------------
    DASHBOARD (cards + desempenho da equipe)
    --------------------------------------------------------- */
 async function carregarDashboard() {
@@ -247,6 +412,7 @@ async function carregarConversas(manterSelecao) {
                 <div class="contact-info">
                     <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
                     <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
+                    <small class="contact-owner">👤 ${escaparHtml(cliente.vendedor_nome || cliente.vendedor_email || 'Sem vendedor')}</small>
                 </div>
                 <div class="contact-meta">
                     <span class="mini-badge ${STATUS_CLASSE[cliente.status] || ''}">${escaparHtml(STATUS_LABEL[cliente.status] || cliente.status || '-')}</span>
@@ -319,7 +485,8 @@ async function carregarMensagens(telefone) {
         mensagens.forEach((msg) => {
             const bolha = document.createElement('div');
             bolha.className = 'message ' + (msg.direcao === 'enviada' ? 'sent' : 'received');
-            bolha.innerHTML = '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(formatarData(msg.criado_em)) + '</span>';
+            const legenda = [rotuloAutor(msg), formatarData(msg.criado_em)].filter(Boolean).join(' · ');
+            bolha.innerHTML = '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(legenda) + '</span>';
             area.appendChild(bolha);
         });
 
@@ -330,7 +497,7 @@ async function carregarMensagens(telefone) {
     }
 }
 
-function adicionarMensagemNaTela(direcao, texto) {
+function adicionarMensagemNaTela(direcao, texto, autor) {
     const area = $('messages');
     if (!area) return;
 
@@ -339,7 +506,8 @@ function adicionarMensagemNaTela(direcao, texto) {
 
     const bolha = document.createElement('div');
     bolha.className = 'message ' + (direcao === 'enviada' ? 'sent' : 'received');
-    bolha.innerHTML = '<p>' + escaparHtml(texto) + '</p><span>' + escaparHtml(formatarData(new Date().toISOString())) + '</span>';
+    const legenda = [autor || '', formatarData(new Date().toISOString())].filter(Boolean).join(' · ');
+    bolha.innerHTML = '<p>' + escaparHtml(texto) + '</p><span>' + escaparHtml(legenda) + '</span>';
     area.appendChild(bolha);
     area.scrollTop = area.scrollHeight;
 }
@@ -366,7 +534,7 @@ async function enviarMensagem() {
 
         if (resposta.ok && dados.success) {
             input.value = '';
-            adicionarMensagemNaTela('enviada', texto);
+            adicionarMensagemNaTela('enviada', texto, 'Você');
         } else {
             toast(dados.message || 'A Wati recusou o envio.', 'erro');
         }
@@ -554,6 +722,11 @@ async function carregarFicha(telefone) {
         preencherCampo('ficha-socio', ficha.socio);
         preencherCampo('ficha-cpf', ficha.cpf);
         preencherCampo('ficha-responsavel', ficha.responsavel);
+
+        const vendedor = $('ficha-vendedor');
+        if (vendedor) {
+            vendedor.textContent = ficha.vendedor_nome || ficha.vendedor_email || 'Sem vendedor';
+        }
 
         const outros = Array.isArray(ficha.outros_socios) ? ficha.outros_socios : [];
         const linhas = outros.map((item) => {
@@ -1083,6 +1256,62 @@ function atualizarResumoLista() {
         (contatos.length ? '' : ' — escolha a coluna do telefone.');
 }
 
+/* Confere os telefones mapeados na API (/api/telefones/verificar) e troca a
+   célula pelo número completo: 55 + DDD + número (com o 9º dígito quando é
+   celular antigo). Inválidos ficam como estão e só entram na contagem. */
+async function verificarNumerosLista() {
+    if (!tabelaLista) { toast('Clique em "Analisar colunas" antes de verificar.', 'erro'); return; }
+
+    const indice = tabelaLista.mapa.indexOf('telefone');
+    if (indice < 0) { toast('Escolha a coluna do telefone antes de verificar.', 'erro'); return; }
+
+    const telefones = tabelaLista.linhas.map((linha) => apenasNumeros(linha[indice]));
+    if (!telefones.some(Boolean)) { toast('Nenhum telefone para verificar.', 'erro'); return; }
+
+    const botao = document.querySelector('button[onclick="verificarNumerosLista()"]');
+    if (botao) botao.disabled = true;
+
+    const progresso = $('lista-progresso');
+    if (progresso) progresso.textContent = 'Verificando ' + telefones.length + ' telefone(s)...';
+
+    try {
+        const resposta = await fetch('/api/telefones/verificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefones })
+        });
+
+        const retorno = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
+
+        let completados = 0;
+        (retorno.resultados || []).forEach((item, posicao) => {
+            if (!item.valido) return;
+            if (item.status === 'completado') completados += 1;
+            if (tabelaLista.linhas[posicao]) tabelaLista.linhas[posicao][indice] = item.wati;
+        });
+
+        const resumo = retorno.resumo || {};
+        const validos = (resumo.total || 0) - (resumo.invalidos || 0);
+
+        atualizarResumoLista();
+
+        const partes = [
+            'Números verificados: ' + validos + ' válido(s)',
+            completados + ' completado(s) com 9º dígito/DDI',
+            (resumo.invalidos || 0) + ' inválido(s)'
+        ];
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '.';
+        toast(partes.join(' · '), resumo.invalidos ? 'erro' : undefined);
+    } catch (erro) {
+        if (progresso) progresso.textContent = erro.message || 'Não foi possível verificar os números.';
+        toast(erro.message || 'Não foi possível verificar os números.', 'erro');
+    } finally {
+        if (botao) botao.disabled = false;
+    }
+}
+
 async function salvarLista() {
     const campoNome = $('lista-nome');
     const nome = (campoNome ? campoNome.value : '').trim();
@@ -1403,6 +1632,16 @@ function conectarSSE() {
     sse.addEventListener('campanha', () => {
         const painel = $('view-campanhas');
         if (painel && !painel.classList.contains('oculto')) carregarCampanhas();
+        carregarDashboard();
+    });
+
+    // Histórico apagado por outro administrador
+    sse.addEventListener('conversas', () => {
+        clienteAtivo = null;
+        fichaTelefone = null;
+        fecharFicha();
+        limparChat();
+        carregarConversas();
         carregarDashboard();
     });
 

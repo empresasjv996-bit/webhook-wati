@@ -39,37 +39,37 @@
             
             <aside class="sidebar">
                 <div class="filters">
-                    <button class="active" data-filtro="aguardando">Aguardando</button>
-                    <button data-filtro="meus">Meus</button>
+                    <button class="active" data-filtro="ativos">Aguardando</button>
+                    <button data-filtro="todos">Todos</button>
                     <button data-filtro="finalizados">Finalizados</button>
                 </div>
                 
                 <div class="search-box">
-                    <input type="text" placeholder="Pesquisar contato...">
+                    <input id="busca-contatos" type="text" placeholder="Pesquisar contato...">
                 </div>
 
-                <div class="contact-list">
+                <div class="contact-list" id="lista-contatos">
                     <!-- Contatos via JS -->
                 </div>
             </aside>
 
             <section class="chat-area">
                 <div class="chat-header">
-                    <div class="avatar">?</div>
+                    <div class="avatar" id="chat-avatar">?</div>
                     <div>
-                        <h2>Nenhum cliente</h2>
-                        <p>Selecione um contato</p>
+                        <h2 id="chat-nome">Nenhum cliente</h2>
+                        <p id="chat-telefone">Selecione um contato</p>
                     </div>
                     <button class="btn-finalizar" onclick="finalizarAtendimento()">Finalizar Atendimento</button>
                 </div>
 
-                <div class="messages">
+                <div class="messages" id="mensagens">
                     <!-- Mensagens via JS -->
                 </div>
 
                 <div class="input-area">
                     <input type="text" id="input-mensagem" placeholder="Digite sua mensagem...">
-                    <button onclick="enviarMensagem()">➤</button>
+                    <button onclick="enviarMensagem()" title="Enviar" aria-label="Enviar">&#10148;</button>
                 </div>
             </section>
 
@@ -91,173 +91,15 @@
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px;">Clique para atualizar o status:</p>
                 
                 <div class="status-options">
-                    <button class="status-btn vendido" onclick="mudarStatus('vendido')">Vendido (Contato Futuro)</button>
-                    <button class="status-btn pensando active" onclick="mudarStatus('pensando')">Pensando</button>
-                    <button class="status-btn nao-quis" onclick="mudarStatus('nao-quis')">Não Quis</button>
+                    <button class="status-btn vendido" data-status="vendido" onclick="mudarStatus('vendido')">Vendido (Contato Futuro)</button>
+                    <button class="status-btn pensando active" data-status="pensando" onclick="mudarStatus('pensando')">Pensando</button>
+                    <button class="status-btn nao-quis" data-status="nao-quis" onclick="mudarStatus('nao-quis')">Não Quis</button>
                 </div>
             </aside>
 
         </main>
     </div>
 
-    <script>
-        let clienteAtivo = null;
-        let filtroAtual = 'aguardando';
-
-        async function carregarUsuario() {
-            try {
-                const res = await fetch('/api/me');
-                const data = await res.json();
-                document.getElementById('nome-atendente').textContent = data.nome;
-                document.getElementById('avatar-atendente').textContent = data.nome.charAt(0).toUpperCase();
-            } catch (e) { console.error(e); }
-        }
-
-        async function carregarClientes(filtro) {
-            if (filtro) filtroAtual = filtro;
-
-            try {
-                const parametros = new URLSearchParams();
-                parametros.set('status', filtroAtual === 'finalizados' ? 'finalizado' : 'ativos');
-                if (filtroAtual === 'meus') parametros.set('meus', '1');
-
-                const response = await fetch('/api/clientes?' + parametros.toString());
-                const clientes = await response.json();
-                const contactList = document.querySelector('.contact-list');
-                
-                contactList.innerHTML = ''; 
-
-                if (!Array.isArray(clientes) || clientes.length === 0) {
-                    const vazio = filtroAtual === 'meus'
-                        ? 'Nenhum lead direcionado para você.'
-                        : 'Nenhum cliente aguardando.';
-                    contactList.innerHTML = `<p style="padding:20px; color:var(--text-muted); text-align:center;">${vazio}</p>`;
-                    return;
-                }
-
-                clientes.forEach((cliente, index) => {
-                    const iniciais = (cliente.nome || '?').substring(0, 2).toUpperCase();
-                    const isAtivo = index === 0 ? 'active' : '';
-                    const dono = cliente.vendedor_nome
-                        ? `<span class="owner">${cliente.vendedor_nome}</span>`
-                        : '<span class="owner livre">Livre</span>';
-                    
-                    const html = `
-                        <div class="contact-item ${isAtivo}" onclick="abrirCliente(this, '${cliente.nome}', '${cliente.telefone}', '${cliente.mensagem}')">
-                            <div class="avatar">${iniciais}</div>
-                            <div class="contact-info">
-                                <h4>${cliente.nome}</h4>
-                                <p>${cliente.mensagem || 'Sem mensagem'}</p>
-                            </div>
-                            ${dono}
-                        </div>
-                    `;
-                    contactList.innerHTML += html;
-                });
-
-                if (clientes.length > 0) {
-                    const primeiroItem = document.querySelector('.contact-item');
-                    abrirCliente(primeiroItem, clientes[0].nome, clientes[0].telefone, clientes[0].mensagem);
-                } else {
-                    document.querySelector('.chat-header h2').textContent = "Nenhum cliente";
-                    document.querySelector('.chat-header p').textContent = "Selecione um contato";
-                    document.getElementById('ficha-nome').textContent = "-";
-                    document.getElementById('ficha-telefone').textContent = "-";
-                    document.querySelector('.messages').innerHTML = '';
-                    clienteAtivo = null;
-                }
-
-            } catch (error) { console.error('Erro ao carregar clientes:', error); }
-        }
-
-        function abrirCliente(element, nome, telefone, mensagem) {
-            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
-            if(element) element.classList.add('active');
-
-            clienteAtivo = { nome, telefone };
-
-            document.querySelector('.chat-header h2').textContent = nome;
-            document.querySelector('.chat-header p').textContent = `Telefone: ${telefone}`;
-            document.getElementById('ficha-nome').textContent = nome;
-            document.getElementById('ficha-telefone').textContent = telefone;
-
-            const chat = document.querySelector('.messages');
-            chat.innerHTML = `
-                <div class="message received">
-                    <p>${mensagem || 'Nenhuma mensagem recebida.'}</p>
-                    <span>Agora</span>
-                </div>
-            `;
-        }
-
-        async function mudarStatus(statusValue) {
-            if (!clienteAtivo) return;
-            const buttons = document.querySelectorAll('.status-btn');
-            buttons.forEach(btn => btn.classList.remove('active'));
-            document.querySelector(`.status-btn.${statusValue}`).classList.add('active');
-
-            try {
-                await fetch('/api/status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ telefone: clienteAtivo.telefone, status: statusValue })
-                });
-            } catch (error) { console.error('Erro ao salvar:', error); }
-        }
-
-        async function enviarMensagem() {
-            const input = document.getElementById('input-mensagem');
-            const texto = input.value.trim();
-            if (!texto || !clienteAtivo) return;
-
-            const chat = document.querySelector('.messages');
-            chat.innerHTML += `
-                <div class="message sent" style="align-self: flex-end; background: rgba(0, 255, 128, 0.15); border: 1px solid rgba(0, 255, 128, 0.3); margin-top:10px;">
-                    <p>${texto}</p>
-                    <span>Agora</span>
-                </div>
-            `;
-            input.value = '';
-
-            try {
-                await fetch('/api/enviar-mensagem', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ telefone: clienteAtivo.telefone, mensagem: texto })
-                });
-            } catch (error) { console.error('Erro ao enviar:', error); }
-        }
-
-        async function finalizarAtendimento() {
-            if (!clienteAtivo) return;
-            if(confirm(`Finalizar o atendimento de ${clienteAtivo.nome}?`)) {
-                try {
-                    await fetch('/api/finalizar', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ telefone: clienteAtivo.telefone })
-                    });
-                    carregarClientes(); 
-                } catch (error) { console.error('Erro ao finalizar:', error); }
-            }
-        }
-
-        document.getElementById('input-mensagem').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') enviarMensagem();
-        });
-
-        document.querySelectorAll('.filters button').forEach((botao) => {
-            botao.addEventListener('click', () => {
-                document.querySelectorAll('.filters button').forEach((b) => b.classList.remove('active'));
-                botao.classList.add('active');
-                carregarClientes(botao.dataset.filtro);
-            });
-        });
-
-        window.onload = () => {
-            carregarUsuario();
-            carregarClientes('aguardando');
-        };
-    </script>
+    <script src="colaborador.js"></script>
 </body>
 </html>

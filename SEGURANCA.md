@@ -82,6 +82,64 @@ Invoke-RestMethod https://webhook-wati.onrender.com/api/health |
 try { Invoke-WebRequest -Method Post -Uri 'https://webhook-wati.onrender.com/webhook' -Body '{}' -ContentType 'application/json' -UseBasicParsing } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
+## Isolamento dos colaboradores
+
+- Cada lead pertence ao vendedor gravado em `clientes.vendedor_email`, que é
+  preenchido quando a campanha é disparada para aquele vendedor
+  (`/api/campanhas` → worker → `atribuirVendedor`).
+- O colaborador só lista e abre leads cujo `vendedor_email` seja o e-mail da
+  sessão. A regra vale no servidor: `/api/clientes`, ficha, mensagens, status,
+  envio e finalização respondem `403` para leads de outra pessoa.
+- O administrador continua vendo tudo. Dashboard, logs, campanhas, listas,
+  canais, auditoria, usuários e o SSE (`/api/eventos`) são exclusivos do admin.
+- Leads sem dono (importados direto em Listas, antes de uma campanha) ficam
+  visíveis apenas para o admin.
+- Se uma campanha posterior enviar para o mesmo telefone com outro vendedor,
+  o dono passa a ser o vendedor da campanha mais recente.
+
+## Limpeza do histórico de conversas
+
+No painel admin, em **Conversas**, use **⬇ Backup** antes de
+**🧹 Limpar histórico**. A limpeza:
+
+- apaga `mensagens`;
+- limpa `clientes.mensagem` (a prévia na lista);
+- apaga os textos em `eventos_wati` (Atividade Wati);
+- mantém clientes, fichas, campanhas, usuários e auditoria.
+
+Também é possível rodar localmente com o `DATABASE_URL` real:
+
+```powershell
+node scripts/backup-limpar-conversas.js                  # só backup
+node scripts/backup-limpar-conversas.js --confirmar=LIMPAR
+```
+
+O script grava o backup em `backups/` antes de apagar e se recusa a rodar no
+modo demo (sem `DATABASE_URL` válida).
+
+## Reset dos dados de teste (clientes + conversas + listas)
+
+Em **Conversas**, o botão **🧨 Limpar tudo** faz o reset completo dos dados de
+teste de uma só vez (somente administrador):
+
+- apaga todos os `clientes` (as fichas ficam dentro do próprio cliente);
+- apaga `mensagens` e limpa as prévias das conversas;
+- apaga todas as `listas` importadas;
+- apaga os textos de mensagens da Atividade Wati;
+- mantém campanhas, usuários, canais, configurações e a auditoria.
+
+A rota exige confirmação digitada (`confirmar: "LIMPAR TUDO"`):
+
+```http
+GET  /api/dados/status   -> { clientes, listas, campanhas, mensagens, ... }
+POST /api/dados/limpar   { "confirmar": "LIMPAR TUDO", "incluirEventosWati": true }
+```
+
+A limpeza grava um registro em **Auditoria** e avisa os painéis abertos pelo
+SSE. Use **⬇ Backup** antes: o backup atual baixa apenas as conversas, então
+clientes e listas precisam ser exportados separadamente se forem necessários
+depois.
+
 ## Senhas dos usuários
 
 As contas criadas no primeiro boot usam `123456` (`admin@qgcteam.com`,

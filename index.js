@@ -13,6 +13,7 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const banco = require('./db');
 const { gerarHash, verificarSenha } = require('./senha');
+const { analisarListaTelefones } = require('./telefone');
 
 const app = express();
 app.use(express.json());
@@ -174,7 +175,7 @@ function emitirEvento(tipo, dados) {
     });
 }
 
-app.get('/api/eventos', (req, res) => {
+app.get('/api/eventos', exigirAdmin, (req, res) => {
     res.set({
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -283,6 +284,43 @@ function exigirAdmin(req, res, next) {
         return res.status(403).json({ success: false, message: 'Apenas administradores podem fazer isso.' });
     }
     next();
+}
+
+/* ---------------------------------------------------------
+   ISOLAMENTO DOS COLABORADORES
+   Cada lead pertence ao vendedor_email gravado na campanha.
+   O admin acessa tudo; o colaborador somente os leads dele.
+   --------------------------------------------------------- */
+function ehAdmin(req) {
+    return Boolean(req.user && req.user.role === 'admin');
+}
+
+async function verificarDonoDoCliente(req, telefone) {
+    if (ehAdmin(req)) return { ok: true, admin: true, dono: null };
+
+    if (!req.user || !telefone) return { ok: false, motivo: 'sem_sessao' };
+
+    const dono = await banco.obterDonoCliente(telefone);
+    if (!dono) return { ok: false, motivo: 'nao_encontrado' };
+
+    const emailDono = String(dono.vendedor_email || '').trim().toLowerCase();
+    const emailUsuario = String(req.user.email || '').trim().toLowerCase();
+
+    if (!emailDono || !emailUsuario || emailDono !== emailUsuario) {
+        return { ok: false, motivo: 'sem_permissao', dono };
+    }
+
+    return { ok: true, admin: false, dono };
+}
+
+function responderAcessoNegado(res, verificacao) {
+    if (verificacao.motivo === 'nao_encontrado') {
+        return res.status(404).json({ success: false, message: 'Cliente não encontrado.' });
+    }
+    return res.status(403).json({
+        success: false,
+        message: 'Este contato não está na sua carteira. Fale com o administrador.'
+    });
 }
 
 // ---------------------------------------------------------
@@ -908,7 +946,7 @@ app.get('/api/wati/templates', exigirAdmin, async (req, res) => {
     }
 });
 
-app.get('/api/canais', (req, res) => {
+app.get('/api/canais', exigirAdmin, (req, res) => {
     res.json([
         {
             id: 'wati',
@@ -925,7 +963,7 @@ app.get('/api/canais', (req, res) => {
     ]);
 });
 
-app.post('/api/canais/testar', async (req, res) => {
+app.post('/api/canais/testar', exigirAdmin, async (req, res) => {
     try {
         const resultado = await testarWati();
         res.status(resultado.ok ? 200 : 502).json(resultado);
@@ -1035,7 +1073,7 @@ const FILTROS_EVENTOS_WATI = {
     contatos: ['contact_created', 'contact_updated', 'tag_updated']
 };
 
-app.get('/api/wati/eventos', async (req, res) => {
+app.get('/api/wati/eventos', exigirAdmin, async (req, res) => {
     const limite = Math.min(parseInt(req.query.limite, 10) || 200, 500);
     const filtro = String(req.query.filtro || '');
     const tipos = FILTROS_EVENTOS_WATI[filtro] || null;
@@ -1114,6 +1152,9 @@ app.post('/api/status', async (req, res) => {
     }
 
     try {
+        const acesso = await verificarDonoDoCliente(req, telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
         await banco.atualizarStatus(telefone, status);
         emitirEvento('status', { telefone, status });
         await banco.registrarAuditoria(req.user && req.user.nome, 'status alterado', `${telefone} -> ${status}`);
@@ -1124,7 +1165,7 @@ app.post('/api/status', async (req, res) => {
     }
 });
 
-app.get('/api/status', async (req, res) => {
+app.get('/api/status', exigirAdmin, async (req, res) => {
     try {
         res.json(await banco.contarPorStatus());
     } catch (error) {
@@ -1139,8 +1180,11 @@ app.get('/api/clientes', async (req, res) => {
     const limite = Math.min(parseInt(req.query.limite, 10) || 50, 200);
     const somenteMeus = req.query.meus === '1';
 
-    // Vendedor logado só enxerga os leads dele e os que ainda não têm dono.
-    const vendedorEmail = req.user && req.user.role !== 'admin' ? req.user.email : null;
+    // Colaborador: sempre restrito à própria carteira (ignora ?meus=).
+    // Admin: vê tudo, mas pode filtrar por ?vendedor=email.
+    const vendedorEmail = ehAdmin(req)
+        ? (String(req.query.vendedor || '').trim() || null)
+        : String(req.user.email || '').trim();
 
     try {
         const clientes = await banco.listarClientes({ status, busca, limite, vendedorEmail, somenteMeus });
@@ -1152,7 +1196,7 @@ app.get('/api/clientes', async (req, res) => {
 });
 
 // RESUMO DO PAINEL (cards + desempenho da equipe)
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', exigirAdmin, async (req, res) => {
     try {
         const resumo = await banco.resumoDashboard();
 
@@ -1173,6 +1217,9 @@ app.get('/api/dashboard', async (req, res) => {
 // FICHA DO CLIENTE
 app.get('/api/clientes/:telefone/ficha', async (req, res) => {
     try {
+        const acesso = await verificarDonoDoCliente(req, req.params.telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
         const ficha = await banco.obterFicha(req.params.telefone);
         if (!ficha) return res.status(404).json({ error: 'Cliente não encontrado' });
         res.json(ficha);
@@ -1187,6 +1234,9 @@ app.post('/api/clientes/:telefone/ficha', async (req, res) => {
     const { cnpj, socio, cpf, responsavel, outros_socios } = req.body || {};
 
     try {
+        const acesso = await verificarDonoDoCliente(req, telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
         const salvou = await banco.salvarFicha(telefone, {
             cnpj,
             socio,
@@ -1208,6 +1258,9 @@ app.post('/api/clientes/:telefone/ficha', async (req, res) => {
 // HISTÓRICO DE MENSAGENS DA CONVERSA
 app.get('/api/clientes/:telefone/mensagens', async (req, res) => {
     try {
+        const acesso = await verificarDonoDoCliente(req, req.params.telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
         res.json(await banco.listarMensagens(req.params.telefone));
     } catch (error) {
         console.error('Erro ao buscar mensagens:', error.message);
@@ -1216,7 +1269,7 @@ app.get('/api/clientes/:telefone/mensagens', async (req, res) => {
 });
 
 // LISTAS (importação de .txt / colagem de contatos)
-app.get('/api/listas', async (req, res) => {
+app.get('/api/listas', exigirAdmin, async (req, res) => {
     try {
         res.json(await banco.listarListas());
     } catch (error) {
@@ -1227,7 +1280,7 @@ app.get('/api/listas', async (req, res) => {
 
 /* Atributos disponíveis na lista (para ligar cada variável do template
    a uma coluna importada, ex.: {{1}} -> atributo "1" ou "nome"). */
-app.get('/api/listas/:id/atributos', async (req, res) => {
+app.get('/api/listas/:id/atributos', exigirAdmin, async (req, res) => {
     try {
         const contatos = await banco.obterContatosLista(req.params.id);
         const contagem = new Map();
@@ -1290,7 +1343,24 @@ app.get('/api/listas/:id/atributos', async (req, res) => {
     }
 });
 
-app.post('/api/listas', async (req, res) => {
+/* Telefones de uma lista: confere DDD/formato e completa o 9º dígito e o DDI.
+   Body: { telefones: ["1198765432", ...], dddPadrao: "11" (opcional) }
+   Não consulta serviço externo — validação de formato (ANATEL). */
+app.post('/api/telefones/verificar', async (req, res) => {
+    const { telefones, dddPadrao } = req.body || {};
+
+    if (!Array.isArray(telefones) || !telefones.length) {
+        return res.status(400).json({ success: false, message: 'Envie a lista de telefones.' });
+    }
+    if (telefones.length > 5000) {
+        return res.status(400).json({ success: false, message: 'Máximo de 5000 telefones por vez.' });
+    }
+
+    const { resultados, resumo } = analisarListaTelefones(telefones, dddPadrao);
+    res.json({ success: true, resumo, resultados });
+});
+
+app.post('/api/listas', exigirAdmin, async (req, res) => {
     const { nome, contatos } = req.body || {};
 
     if (!nome || !String(nome).trim()) {
@@ -1367,7 +1437,7 @@ app.post('/api/listas', async (req, res) => {
     }
 });
 
-app.delete('/api/listas/:id', async (req, res) => {
+app.delete('/api/listas/:id', exigirAdmin, async (req, res) => {
     try {
         await banco.excluirLista(req.params.id);
         emitirEvento('lista', { id: req.params.id, removida: true });
@@ -1421,6 +1491,15 @@ app.post('/api/enviar-mensagem', async (req, res) => {
 
     const texto = String(mensagem).trim();
     const ator = req.user && req.user.nome;
+
+    try {
+        const acesso = await verificarDonoDoCliente(req, telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+    } catch (erro) {
+        console.error('Erro ao validar o dono do contato:', erro.message);
+        return res.status(500).json({ success: false, message: 'Erro ao validar o contato.' });
+    }
+
     const resultado = await enviarViaWati(telefone, texto);
 
     if (!resultado.ok) {
@@ -1431,7 +1510,11 @@ app.post('/api/enviar-mensagem', async (req, res) => {
 
     try {
         await banco.atualizarUltimaMensagem(telefone, `Você: ${texto}`);
-        await banco.registrarMensagem(telefone, 'enviada', texto);
+        await banco.registrarMensagem(telefone, 'enviada', texto, {
+            autorEmail: req.user && req.user.email,
+            autorNome: req.user && req.user.nome,
+            origem: 'painel'
+        });
         emitirEvento('mensagem', { telefone, direcao: 'enviada', texto });
         await banco.registrarAuditoria(ator, 'mensagem enviada', telefone);
     } catch (erro) {
@@ -1449,6 +1532,9 @@ app.post('/api/finalizar', async (req, res) => {
     if (!telefone) return res.status(400).json({ success: false, message: 'Informe o telefone.' });
 
     try {
+        const acesso = await verificarDonoDoCliente(req, telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
         await banco.finalizarAtendimento(telefone);
         emitirEvento('status', { telefone, status: 'finalizado' });
         await banco.registrarAuditoria(req.user && req.user.nome, 'atendimento finalizado', telefone);
@@ -1574,7 +1660,7 @@ app.delete('/api/usuarios/:id', exigirAdmin, async (req, res) => {
 // ---------------------------------------------------------
 // LOGS (histórico de mensagens) E AUDITORIA (ações do painel)
 // ---------------------------------------------------------
-app.get('/api/logs', async (req, res) => {
+app.get('/api/logs', exigirAdmin, async (req, res) => {
     const limite = Math.min(parseInt(req.query.limite, 10) || 100, 500);
     const direcao = String(req.query.direcao || '');
 
@@ -1583,6 +1669,102 @@ app.get('/api/logs', async (req, res) => {
     } catch (erro) {
         console.error('Erro ao listar logs:', erro.message);
         res.status(500).json({ success: false, message: 'Erro ao carregar os logs.' });
+    }
+});
+
+// ---------------------------------------------------------
+// CONVERSAS: BACKUP E LIMPEZA (somente administrador)
+// ---------------------------------------------------------
+app.get('/api/conversas/exportar', exigirAdmin, async (req, res) => {
+    try {
+        const backup = await banco.exportarConversas();
+        const carimbo = new Date().toISOString().replace(/[:.]/g, '-');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="conversas-${carimbo}.json"`);
+        res.send(JSON.stringify(backup, null, 2));
+    } catch (erro) {
+        console.error('Erro ao exportar conversas:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao gerar o backup das conversas.' });
+    }
+});
+
+app.get('/api/conversas/status', exigirAdmin, async (req, res) => {
+    try {
+        res.json(await banco.contarConversas());
+    } catch (erro) {
+        console.error('Erro ao contar conversas:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao contar as conversas.' });
+    }
+});
+
+app.post('/api/conversas/limpar', exigirAdmin, async (req, res) => {
+    const corpo = req.body || {};
+    if (String(corpo.confirmar || '').toUpperCase() !== 'LIMPAR') {
+        return res.status(400).json({ success: false, message: 'Confirmação inválida.' });
+    }
+
+    const incluirEventosWati = corpo.incluirEventosWati !== false;
+
+    try {
+        const resultado = await banco.limparConversas({ incluirEventosWati });
+
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            'conversas limpas',
+            `${resultado.mensagensRemovidas} mensagem(ns), ${resultado.clientesAtualizados} prévia(s)`
+                + (incluirEventosWati ? `, ${resultado.eventosRemovidos} evento(s) da Wati` : '')
+        );
+
+        emitirEvento('conversas', resultado);
+        emitirEvento('status', { limpeza: true });
+
+        res.json(Object.assign({ success: true }, resultado));
+    } catch (erro) {
+        console.error('Erro ao limpar conversas:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao limpar as conversas.' });
+    }
+});
+
+// ---------------------------------------------------------
+// RESET DOS DADOS DE TESTE (clientes + conversas + listas)
+// ---------------------------------------------------------
+app.get('/api/dados/status', exigirAdmin, async (req, res) => {
+    try {
+        res.json(await banco.contarDados());
+    } catch (erro) {
+        console.error('Erro ao contar dados:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao contar os dados.' });
+    }
+});
+
+app.post('/api/dados/limpar', exigirAdmin, async (req, res) => {
+    const corpo = req.body || {};
+    if (String(corpo.confirmar || '').toUpperCase() !== 'LIMPAR TUDO') {
+        return res.status(400).json({ success: false, message: 'Confirmação inválida. Digite LIMPAR TUDO.' });
+    }
+
+    const incluirEventosWati = corpo.incluirEventosWati !== false;
+
+    try {
+        const resultado = await banco.limparDados({ incluirEventosWati });
+
+        await banco.registrarAuditoria(
+            req.user && req.user.nome,
+            'dados de teste limpos',
+            `${resultado.clientesRemovidos} cliente(s), ${resultado.mensagensRemovidas} mensagem(ns), `
+                + `${resultado.listasRemovidas} lista(s)`
+                + (incluirEventosWati ? `, ${resultado.eventosRemovidos} evento(s) da Wati` : '')
+        );
+
+        emitirEvento('conversas', resultado);
+        emitirEvento('clientes', { limpeza: true });
+        emitirEvento('lista', { limpeza: true });
+        emitirEvento('status', { limpeza: true });
+
+        res.json(Object.assign({ success: true }, resultado));
+    } catch (erro) {
+        console.error('Erro ao limpar dados:', erro.message);
+        res.status(500).json({ success: false, message: 'Erro ao limpar os dados.' });
     }
 });
 
@@ -1643,10 +1825,9 @@ async function processarCampanhas() {
             await banco.concluirEnvio(item.envio_id, item.campanha_id, resultado.ok, resultado.message);
 
             if (resultado.ok) {
-                await banco.registrarMensagem(item.telefone, 'enviada', textoFinal);
-                await banco.atualizarUltimaMensagem(item.telefone, `Você: ${textoFinal}`);
-
-                // Direciona o lead para o vendedor escolhido na campanha
+                // Direciona o lead para o vendedor escolhido na campanha ANTES de
+                // gravar a mensagem: assim o colaborador já enxerga a conversa
+                // quando o painel receber o evento em tempo real.
                 if (item.vendedor_email) {
                     try {
                         await banco.atribuirVendedor({
@@ -1663,6 +1844,14 @@ async function processarCampanhas() {
                         console.error('Erro ao direcionar o lead:', erro.message);
                     }
                 }
+
+                await banco.registrarMensagem(item.telefone, 'enviada', textoFinal, {
+                    autorEmail: item.criado_por_email || item.vendedor_email || null,
+                    autorNome: item.criado_por_nome || item.vendedor_nome || null,
+                    campanhaId: item.campanha_id,
+                    origem: 'campanha'
+                });
+                await banco.atualizarUltimaMensagem(item.telefone, `Você: ${textoFinal}`);
 
                 emitirEvento('mensagem', { telefone: item.telefone, direcao: 'enviada', texto: textoFinal });
             } else {
@@ -1685,7 +1874,7 @@ async function processarCampanhas() {
 
 setInterval(processarCampanhas, 4000).unref();
 
-app.get('/api/campanhas', async (req, res) => {
+app.get('/api/campanhas', exigirAdmin, async (req, res) => {
     try {
         res.json(await banco.listarCampanhas());
     } catch (erro) {
@@ -1912,7 +2101,9 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             canal: canalEscolhido,
             templateNome: templateEscolhido ? templateEscolhido.nome : null,
             templateIdioma: templateEscolhido ? templateEscolhido.idioma : null,
-            templateParametros
+            templateParametros,
+            criadoPorEmail: req.user && req.user.email,
+            criadoPorNome: req.user && req.user.nome
         });
 
         emitirEvento('campanha', { id: campanha.id, criada: true, total: campanha.total });
@@ -2166,7 +2357,7 @@ async function processarEventoWati(payload) {
             await banco.registrarContatoWati({ telefone: evento.telefone });
 
             if (evento.texto) {
-                await banco.registrarMensagem(evento.telefone, 'enviada', evento.texto);
+                await banco.registrarMensagem(evento.telefone, 'enviada', evento.texto, { origem: 'wati' });
                 await banco.atualizarUltimaMensagem(evento.telefone, evento.texto);
             }
 
@@ -2182,7 +2373,7 @@ async function processarEventoWati(payload) {
 
             // Se o cliente voltar a falar, o status volta para 'pensando' (reabre o atendimento)
             await banco.registrarRecebida({ nome, telefone: evento.telefone, mensagem });
-            await banco.registrarMensagem(evento.telefone, 'recebida', mensagem);
+            await banco.registrarMensagem(evento.telefone, 'recebida', mensagem, { origem: 'wati' });
 
             emitirEvento('mensagem', { telefone: evento.telefone, direcao: 'recebida', texto: mensagem, nome });
         }
