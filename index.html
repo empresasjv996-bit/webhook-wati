@@ -206,7 +206,7 @@
                 <div class="section-title">
                     <div>
                         <h1>Listas</h1>
-                        <p>Envie o .csv (ou cole os contatos) e vincule cada coluna a um campo — igual à importação da Wati, só que os atributos são criados automáticos.</p>
+                        <p>Envie o .csv (ou cole os contatos). Colunas <code>{{1}}</code>, <code>{{2}}</code>… já entram como variáveis do template — na campanha elas são ligadas sozinhas.</p>
                     </div>
                     <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
                 </div>
@@ -220,11 +220,18 @@
 
                         <div class="form-group">
                             <label>1. Arquivo ou contatos colados</label>
-                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="Nome;Telefone;CNPJ;Razão_Social;AG_CONTA;CPF&#10;João;5511999999999;12.345.678/0001-90;João ME;1234-5;123.456.789-00"></textarea>
+                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="telefone;{{1}};{{2}}&#10;5511999999999;João da Silva;12.345.678/0001-90&#10;5511888888888;Maria Souza;98.765.432/0001-10"></textarea>
+                            <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
+                                <strong>Formato:</strong> 1ª linha = cabeçalho · <code>telefone</code> obrigatório ·
+                                <code>{{1}}</code>, <code>{{2}}</code>… = variáveis do template ·
+                                outras colunas = atributos (<code>nome</code>, <code>cnpj</code>, <code>razao_social</code>…).
+                                Separador <code>;</code>, <code>,</code> ou Tab · arquivo UTF-8.
+                            </small>
                         </div>
 
                         <div class="file-row">
                             <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
+                            <button class="btn-mini" type="button" onclick="baixarModeloLista()">⬇ Baixar modelo .csv</button>
                             <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
                         </div>
 
@@ -234,8 +241,9 @@
                             <div class="mapa-topo">
                                 <h3>2. Vincule as colunas</h3>
                                 <p class="mapa-ajuda">
-                                    Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as outras viram
-                                    atributos do contato na Wati (com o mesmo nome que você escolher aqui).
+                                    Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as colunas
+                                    <strong>Variável do template</strong> viram <code>{{1}}</code>, <code>{{2}}</code>… na campanha.
+                                    As demais viram atributos do contato na Wati.
                                 </p>
                             </div>
 
@@ -391,7 +399,8 @@
                                 <label>Variáveis do template</label>
                                 <div id="campanha-parametros" class="template-parametros"></div>
                                 <small style="color: var(--text-muted); font-size: 0.72rem; display: block; margin-top: 6px;">
-                                    Escolha de onde vem cada variável: um atributo importado na lista ou um valor fixo.
+                                    Escolha de onde vem cada variável: uma coluna <code>{{n}}</code> da lista (ligada sozinha),
+                                    um atributo importado ou um valor fixo.
                                 </small>
                             </div>
                         </div>

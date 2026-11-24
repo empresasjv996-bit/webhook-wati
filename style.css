@@ -350,6 +350,7 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 
 .lista-texto { min-height: 150px; resize: vertical; line-height: 1.5; }
 .file-row { display: flex; flex-direction: column; gap: 6px; }
+.file-row .btn-mini { align-self: flex-start; }
 .file-row input[type="file"] {
     width: 100%; background: var(--bg-body); border: 1px dashed rgba(0, 255, 128, 0.25); border-radius: 12px;
     padding: 10px 12px; color: var(--text-muted); font-size: 0.78rem; cursor: pointer; font-family: var(--font);
@@ -373,6 +374,7 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 }
 .mapa-linha .form-control { padding: 9px 12px; font-size: 0.8rem; }
 .mapa-custom { grid-column: 1 / -1; }
+.mapa-variavel { border-color: rgba(0, 255, 128, 0.35); }
 .mapa-resumo { color: var(--text-muted); font-size: 0.76rem; line-height: 1.5; margin-top: 12px; }
 .mapa-resumo strong { color: #fff; }
 .mapa-check {

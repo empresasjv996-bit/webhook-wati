@@ -1231,6 +1231,7 @@ app.get('/api/listas/:id/atributos', async (req, res) => {
     try {
         const contatos = await banco.obterContatosLista(req.params.id);
         const contagem = new Map();
+        const contagemVariaveis = new Map();
         let comNome = 0;
 
         contatos.forEach((contato) => {
@@ -1241,23 +1242,48 @@ app.get('/api/listas/:id/atributos', async (req, res) => {
                 if (!String(atributos[chave] == null ? '' : atributos[chave]).trim()) return;
                 contagem.set(chave, (contagem.get(chave) || 0) + 1);
             });
+
+            // Colunas {{1}}, {{2}}... importadas no formato "lista por variáveis".
+            const variaveis = (contato && contato.variaveis) || {};
+            Object.keys(variaveis).forEach((chave) => {
+                if (!String(variaveis[chave] == null ? '' : variaveis[chave]).trim()) return;
+                contagemVariaveis.set(chave, (contagemVariaveis.get(chave) || 0) + 1);
+            });
         });
 
         const atributos = [];
+        const adicionados = new Set();
 
         if (comNome) {
             atributos.push({ nome: 'nome', comValor: comNome, semValor: contatos.length - comNome, tipo: 'campo' });
+            adicionados.add('nome');
         }
 
         atributos.push({ nome: 'telefone', comValor: contatos.length, semValor: 0, tipo: 'campo' });
+        adicionados.add('telefone');
+
+        // Variáveis primeiro: é o que a campanha usa por padrão.
+        Array.from(contagemVariaveis.entries())
+            .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR', { numeric: true }) || b[1] - a[1])
+            .forEach(([nome, comValor]) => {
+                if (adicionados.has(nome)) return;
+                adicionados.add(nome);
+                atributos.push({ nome, comValor, semValor: contatos.length - comValor, tipo: 'variavel' });
+            });
 
         Array.from(contagem.entries())
             .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
             .forEach(([nome, comValor]) => {
+                if (adicionados.has(nome)) return;
+                adicionados.add(nome);
                 atributos.push({ nome, comValor, semValor: contatos.length - comValor, tipo: 'atributo' });
             });
 
-        res.json({ total: contatos.length, atributos });
+        res.json({
+            total: contatos.length,
+            formato: contagemVariaveis.size ? 'variaveis' : 'atributos',
+            atributos
+        });
     } catch (error) {
         console.error('Erro ao listar atributos da lista:', error.message);
         res.status(500).json({ success: false, message: 'Erro ao ler os atributos da lista.' });
@@ -1283,11 +1309,21 @@ app.post('/api/listas', async (req, res) => {
         vistos.add(telefone);
 
         const atributos = limparAtributos(item && item.atributos);
+
+        // Formato "lista por variáveis": { "1": "João", "2": "12.345..." }.
+        // Fica separado dos atributos porque só a campanha usa esses valores.
+        const variaveis = limparAtributos(item && item.variaveis);
+
         const contato = {
             telefone,
             nome: String((item && item.nome) || '').trim().substring(0, 120),
             atributos
         };
+
+        if (Object.keys(variaveis).length) {
+            contato.variaveis = variaveis;
+            if (!contato.nome && variaveis.nome) contato.nome = variaveis.nome.substring(0, 120);
+        }
 
         // essas colunas também existem na ficha do cliente
         ['cnpj', 'cpf', 'socio', 'responsavel'].forEach((campo) => {
@@ -1663,9 +1699,22 @@ function valorDoContato(contato, referencia) {
     const chave = normalizarAtributo(referencia);
     if (!chave) return '';
 
-    if (chave === 'nome' || chave === 'name') return String((contato && contato.nome) || '').trim();
+    if (chave === 'nome' || chave === 'name') {
+        const nome = String((contato && contato.nome) || '').trim();
+        if (nome) return nome;
+    }
     if (chave === 'telefone' || chave === 'phone' || chave === 'numero') {
-        return String((contato && contato.telefone) || '').trim();
+        const telefone = String((contato && contato.telefone) || '').trim();
+        if (telefone) return telefone;
+    }
+
+    // Colunas {{1}}, {{2}}... importadas no formato "lista por variáveis".
+    const variaveis = (contato && contato.variaveis) || {};
+    if (variaveis[chave] != null && String(variaveis[chave]).trim()) return String(variaveis[chave]).trim();
+
+    const variavelAchada = Object.keys(variaveis).find((nome) => normalizarAtributo(nome) === chave);
+    if (variavelAchada && String(variaveis[variavelAchada] == null ? '' : variaveis[variavelAchada]).trim()) {
+        return String(variaveis[variavelAchada]).trim();
     }
 
     const atributos = (contato && contato.atributos) || {};
@@ -2268,6 +2317,7 @@ if (require.main === module) {
 module.exports = {
     extrairVariaveisTemplate,
     normalizarTemplateWati,
-    renderizarMensagemTemplate
+    renderizarMensagemTemplate,
+    valorDoContato
 };
 

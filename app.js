@@ -696,6 +696,22 @@ function normalizarChave(texto) {
         .substring(0, 40);
 }
 
+/* Variável do template a partir do cabeçalho da coluna:
+   "{{1}}" -> "1" · "{{nome}}" -> "nome" · "var1"/"variavel_1" -> "1".
+   É o que liga a coluna da planilha ao {{n}} usado na campanha. */
+function chaveVariavelColuna(coluna) {
+    const bruto = String(coluna || '').trim();
+    if (!bruto) return '';
+
+    let achado = bruto.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
+    if (achado) return normalizarChave(achado[1]);
+
+    achado = bruto.match(/^var(?:iavel)?[\s_-]*([a-zA-Z0-9_]+)$/i);
+    if (achado) return normalizarChave(achado[1]);
+
+    return '';
+}
+
 function separadorDoCsv(linha) {
     const candidatos = [';', ',', '\t'];
     let escolhido = ';';
@@ -775,7 +791,7 @@ function gravarMapaMemoria() {
         tabelaLista.colunas.forEach((coluna, indice) => {
             const chave = normalizarChave(coluna);
             const destino = tabelaLista.mapa[indice];
-            if (chave && destino && destino !== 'custom') memoria[chave] = destino;
+            if (chave && destino && destino !== 'custom' && destino !== 'variavel') memoria[chave] = destino;
         });
         window.localStorage.setItem(MAPA_MEMORIA_CHAVE, JSON.stringify(memoria));
     } catch (erro) { /* localStorage indisponível */ }
@@ -818,7 +834,12 @@ function analisarLista() {
     }
 
     const memoria = lerMapaMemoria();
+    tabela.variaveis = tabela.colunas.map((coluna) => chaveVariavelColuna(coluna));
+
     tabela.mapa = tabela.colunas.map((coluna, indice) => {
+        // Cabeçalho {{1}}/{{2}} já define a variável: não precisa mapear à mão.
+        if (tabela.variaveis[indice]) return 'variavel';
+
         const lembrado = memoria[normalizarChave(coluna)];
         // "custom" depende do nome digitado na hora, então não reaproveita.
         return (lembrado && lembrado !== 'custom') ? lembrado : adivinharDestino(coluna, indice, tabela.linhas);
@@ -882,6 +903,33 @@ function lerArquivoLista(input) {
     leitor.readAsText(arquivo, 'UTF-8');
 }
 
+/* Modelo pronto do formato: telefone + variáveis {{1}}, {{2}}...
+   O BOM (\uFEFF) mantém os acentos corretos quando abre no Excel. */
+function baixarModeloLista() {
+    const conteudo = [
+        'telefone;{{1}};{{2}}',
+        '5511999999999;João da Silva;12.345.678/0001-90',
+        ''
+    ].join('\r\n');
+
+    try {
+        const blob = new Blob(['\uFEFF' + conteudo], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = 'modelo-lista-variaveis.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        toast('Modelo .csv baixado. Preencha e importe aqui.');
+    } catch (erro) {
+        toast('Não foi possível gerar o modelo .csv.', 'erro');
+    }
+}
+
 function renderizarMapaLista() {
     const caixa = $('lista-colunas');
     if (!caixa || !tabelaLista) return;
@@ -905,6 +953,7 @@ function renderizarMapaLista() {
         seletor.className = 'form-control mapa-select';
         seletor.innerHTML = '<option value="">Ignorar coluna</option>' +
             CAMPOS_LISTA.map((campo) => `<option value="${campo.chave}">${escaparHtml(campo.rotulo)}</option>`).join('') +
+            '<option value="variavel">Variável do template…</option>' +
             '<option value="custom">Atributo personalizado…</option>';
         seletor.value = tabelaLista.mapa[indice] || '';
 
@@ -915,13 +964,26 @@ function renderizarMapaLista() {
         personalizado.value = tabelaLista.custom[indice] || '';
         personalizado.classList.toggle('oculto', seletor.value !== 'custom');
 
+        const variavel = document.createElement('input');
+        variavel.className = 'form-control mapa-custom mapa-variavel';
+        variavel.type = 'text';
+        variavel.placeholder = 'variável do template (ex.: 1)';
+        variavel.value = (tabelaLista.variaveis && tabelaLista.variaveis[indice]) || '';
+        variavel.classList.toggle('oculto', seletor.value !== 'variavel');
+
         seletor.onchange = () => {
             tabelaLista.mapa[indice] = seletor.value;
             personalizado.classList.toggle('oculto', seletor.value !== 'custom');
+            variavel.classList.toggle('oculto', seletor.value !== 'variavel');
 
             if (seletor.value === 'custom' && !personalizado.value) {
                 personalizado.value = normalizarChave(coluna);
                 tabelaLista.custom[indice] = personalizado.value;
+            }
+
+            if (seletor.value === 'variavel' && !variavel.value) {
+                variavel.value = chaveVariavelColuna(coluna);
+                tabelaLista.variaveis[indice] = variavel.value;
             }
 
             atualizarResumoLista();
@@ -932,9 +994,16 @@ function renderizarMapaLista() {
             atualizarResumoLista();
         };
 
+        variavel.oninput = () => {
+            tabelaLista.variaveis = tabelaLista.variaveis || [];
+            tabelaLista.variaveis[indice] = variavel.value;
+            atualizarResumoLista();
+        };
+
         linha.appendChild(info);
         linha.appendChild(seletor);
         linha.appendChild(personalizado);
+        linha.appendChild(variavel);
         caixa.appendChild(linha);
     });
 
@@ -948,7 +1017,7 @@ function montarContatosDaLista() {
     const contatos = [];
 
     tabelaLista.linhas.forEach((linha) => {
-        const contato = { telefone: '', nome: '', atributos: {} };
+        const contato = { telefone: '', nome: '', atributos: {}, variaveis: {} };
 
         tabelaLista.colunas.forEach((coluna, indice) => {
             const destino = tabelaLista.mapa[indice];
@@ -957,7 +1026,16 @@ function montarContatosDaLista() {
 
             if (destino === 'telefone') contato.telefone = apenasNumeros(valor);
             else if (destino === 'nome') contato.nome = valor;
-            else if (destino === 'custom') {
+            else if (destino === 'variavel') {
+                // Guarda no formato { "1": "João", "2": "..." } — o mesmo
+                // {{1}}/{{2}} do template, sem virar atributo da Wati.
+                const informada = (tabelaLista.variaveis && tabelaLista.variaveis[indice]) || '';
+                const variavel = normalizarChave(informada || chaveVariavelColuna(coluna));
+                if (!variavel) return;
+
+                contato.variaveis[variavel] = valor;
+                if (variavel === 'nome' && !contato.nome) contato.nome = valor;
+            } else if (destino === 'custom') {
                 const atributo = normalizarChave(tabelaLista.custom[indice]);
                 if (atributo) contato.atributos[atributo] = valor;
             } else {
@@ -979,16 +1057,29 @@ function atualizarResumoLista() {
 
     const contatos = montarContatosDaLista();
     const atributos = new Set();
+    const variaveis = new Set();
 
-    contatos.forEach((contato) => Object.keys(contato.atributos).forEach((nome) => atributos.add(nome)));
+    contatos.forEach((contato) => {
+        Object.keys(contato.atributos).forEach((nome) => atributos.add(nome));
+        Object.keys(contato.variaveis || {}).forEach((nome) => variaveis.add(nome));
+    });
 
     const listaAtributos = Array.from(atributos);
     const textoAtributos = listaAtributos.length
         ? ' · atributos: ' + listaAtributos.slice(0, 6).join(', ') + (listaAtributos.length > 6 ? '…' : '')
         : '';
 
+    // Mostra {{1}}, {{2}}... com quantos contatos têm valor em cada variável.
+    const listaVariaveis = Array.from(variaveis);
+    const textoVariaveis = listaVariaveis.length
+        ? ' · variáveis: ' + listaVariaveis.map((nome) => {
+            const preenchidos = contatos.filter((contato) => contato.variaveis && contato.variaveis[nome]).length;
+            return '{{' + nome + '}} (' + preenchidos + ')';
+        }).join(', ')
+        : '';
+
     resumo.innerHTML = '<strong>' + contatos.length + '</strong> contato(s) válido(s) de ' +
-        (tabelaLista ? tabelaLista.linhas.length : 0) + ' linha(s)' + escaparHtml(textoAtributos) +
+        (tabelaLista ? tabelaLista.linhas.length : 0) + ' linha(s)' + escaparHtml(textoAtributos + textoVariaveis) +
         (contatos.length ? '' : ' — escolha a coluna do telefone.');
 }
 
@@ -1685,7 +1776,10 @@ function montarPreviewTemplate(template) {
 
         const estado = mapaVariaveisCampanha[chave];
         if (!estado || !estado.valor) return achado;
-        return estado.origem === 'fixo' ? estado.valor : `«${estado.valor}»`;
+        if (estado.origem === 'fixo') return estado.valor;
+
+        // Variável numérica vem da coluna {{n}} da lista.
+        return /^\d+$/.test(estado.valor) ? `«{{${estado.valor}}}»` : `«${estado.valor}»`;
     });
 }
 
@@ -1729,20 +1823,25 @@ function renderizarParametrosTemplate() {
             </div>`;
     }).join('');
 
-    Array.from(caixa.querySelectorAll('.template-parametro')).forEach((linha) => {
+    Array.from(caixa.querySelectorAll('.template-parametro')).forEach((linha, indiceVariavel) => {
         const variavel = linha.dataset.variavel;
         const seletorOrigem = linha.querySelector('[data-origem]');
         const seletorAtributo = linha.querySelector('[data-atributo]');
         const campoFixo = linha.querySelector('[data-fixo]');
         const estado = mapaVariaveisCampanha[variavel] || {};
 
+        // 1º procura atributo com o mesmo nome da variável ({{nome}} -> nome);
+        // 2º usa a coluna {{1}}, {{2}}... na mesma posição do template.
         const sugestao = atributosListaCampanha.find((a) =>
             String(a.nome).toLowerCase() === variavel.toLowerCase()
+        ) || atributosListaCampanha.find((a) =>
+            a.tipo === 'variavel' && String(a.nome) === String(indiceVariavel + 1)
         );
 
-        seletorAtributo.innerHTML = '<option value="">Escolha o atributo...</option>' + atributosListaCampanha.map((a) =>
-            `<option value="${escaparHtml(a.nome)}">${escaparHtml(a.nome)} (${Number(a.comValor) || 0})</option>`
-        ).join('');
+        seletorAtributo.innerHTML = '<option value="">Escolha o atributo...</option>' + atributosListaCampanha.map((a) => {
+            const rotulo = a.tipo === 'variavel' ? `{{${a.nome}}}` : a.nome;
+            return `<option value="${escaparHtml(a.nome)}">${escaparHtml(rotulo)} (${Number(a.comValor) || 0})</option>`;
+        }).join('');
 
         seletorOrigem.value = estado.origem || (atributosListaCampanha.length ? 'atributo' : 'fixo');
         seletorAtributo.value = estado.origem !== 'fixo' && estado.valor ? estado.valor : (sugestao ? sugestao.nome : '');
