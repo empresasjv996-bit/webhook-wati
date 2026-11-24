@@ -113,6 +113,7 @@ function irPara(view) {
         logs: 'Logs',
         auditoria: 'Auditoria',
         validar: 'Validar listas',
+        listasuja: 'Processar Lista',
         usuarios: 'Usuários'
     };
 
@@ -3321,6 +3322,159 @@ window.fetch = async function (...argumentos) {
 
     return resposta;
 };
+
+/* ---------------------------------------------------------
+   PROCESSAR LISTA (LISTA SUJA)
+   ETL local no navegador: dump bruto -> linhas
+   {telefone};{nome};{cnpj} prontas para disparo.
+   O parser puro fica em lista-suja.js (carregado antes deste).
+   --------------------------------------------------------- */
+let listaSuja = { registros: 0, linhas: [], descartados: [] };
+
+function mostrarAbaListaSuja(aba) {
+    const painelProntos = $('suja-painel-prontos');
+    const painelDescartados = $('suja-painel-descartados');
+    const abaProntos = $('suja-aba-prontos');
+    const abaDescartados = $('suja-aba-descartados');
+
+    if (painelProntos && painelDescartados) {
+        painelProntos.classList.toggle('oculto', aba !== 'prontos');
+        painelDescartados.classList.toggle('oculto', aba !== 'descartados');
+    }
+    if (abaProntos && abaDescartados) {
+        abaProntos.classList.toggle('active', aba === 'prontos');
+        abaDescartados.classList.toggle('active', aba === 'descartados');
+    }
+}
+
+function renderizarListaSuja() {
+    const abaProntos = $('suja-aba-prontos');
+    const abaDescartados = $('suja-aba-descartados');
+    const saida = $('suja-saida');
+    const corpo = $('tabela-suja-descartados');
+
+    if (abaProntos) abaProntos.textContent = 'Prontos (' + listaSuja.linhas.length + ')';
+    if (abaDescartados) abaDescartados.textContent = 'Descartados (' + listaSuja.descartados.length + ')';
+    if (saida) saida.value = listaSuja.linhas.join('\n');
+
+    if (corpo) {
+        if (!listaSuja.descartados.length) {
+            corpo.innerHTML = '<tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>';
+        } else {
+            corpo.innerHTML = listaSuja.descartados.map((item) => (
+                '<tr>' +
+                '<td><span class="status-badge status-nao-quis">' + escaparHtml(item.motivo) + '</span></td>' +
+                '<td><pre class="suja-bruto">' + escaparHtml(item.bruto) + '</pre></td>' +
+                '</tr>'
+            )).join('');
+        }
+    }
+}
+
+function processarListaSujaPainel() {
+    const caixa = $('suja-texto');
+    const progresso = $('suja-progresso');
+
+    if (!caixa || !String(caixa.value || '').trim()) {
+        toast('Cole a lista bruta antes de processar.', 'erro');
+        return;
+    }
+
+    const botao = document.querySelector('button[onclick="processarListaSujaPainel()"]');
+    if (botao) botao.disabled = true;
+    if (progresso) progresso.textContent = 'Processando...';
+
+    /* o setTimeout deixa o estado de loading pintar antes do parse (que é rápido) */
+    setTimeout(() => {
+        try {
+            const resultado = processarListaSuja(caixa.value);
+
+            listaSuja = resultado;
+            renderizarListaSuja();
+
+            const partes = [
+                resultado.registros + ' registro(s)',
+                resultado.linhas.length + ' linha(s) pronta(s)',
+                resultado.descartados.length + ' descartado(s)'
+            ];
+
+            if (progresso) progresso.textContent = partes.join(' · ') + '.';
+            toast(partes.join(' · '), resultado.descartados.length ? 'erro' : undefined);
+            mostrarAbaListaSuja(resultado.linhas.length ? 'prontos' : 'descartados');
+        } catch (erro) {
+            if (progresso) progresso.textContent = erro.message || 'Não foi possível processar a lista.';
+            toast(erro.message || 'Não foi possível processar a lista.', 'erro');
+        } finally {
+            if (botao) botao.disabled = false;
+        }
+    }, 30);
+}
+
+async function copiarListaSuja() {
+    if (!listaSuja.linhas.length) { toast('Processe a lista antes de copiar.', 'erro'); return; }
+
+    const texto = listaSuja.linhas.join('\n');
+
+    try {
+        await navigator.clipboard.writeText(texto);
+        toast(listaSuja.linhas.length + ' linha(s) copiada(s).');
+    } catch (falha) {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        toast(listaSuja.linhas.length + ' linha(s) copiada(s).');
+    }
+}
+
+function baixarListaSuja() {
+    if (!listaSuja.linhas.length) { toast('Processe a lista antes de baixar.', 'erro'); return; }
+
+    const blob = new Blob([listaSuja.linhas.join('\r\n') + '\r\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+    link.href = url;
+    link.download = 'lista-limpa-' + carimbo + '.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast(listaSuja.linhas.length + ' linha(s) no .txt.');
+}
+
+function usarListaSujaNaImportacao() {
+    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
+
+    const caixa = $('lista-texto');
+    if (!caixa) { toast('Abra a tela de importação de listas.', 'erro'); return; }
+
+    /* As linhas já saem como telefone;nome;cnpj. O cabeçalho {{1}}/{{2}}
+       deixa o painel ligar nome e CNPJ nas variáveis do template. */
+    caixa.value = ['telefone;{{1}};{{2}}'].concat(listaSuja.linhas).join('\n');
+
+    irPara('listas');
+    analisarLista();
+    toast(listaSuja.linhas.length + ' linha(s) na importação ({{1}} = nome, {{2}} = CNPJ).');
+}
+
+function limparListaSuja() {
+    ['suja-texto', 'suja-saida'].forEach((id) => {
+        const campo = $(id);
+        if (campo) campo.value = '';
+    });
+
+    const progresso = $('suja-progresso');
+    if (progresso) progresso.textContent = '';
+
+    listaSuja = { registros: 0, linhas: [], descartados: [] };
+    renderizarListaSuja();
+    mostrarAbaListaSuja('prontos');
+}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', iniciarPainel);

@@ -483,6 +483,10 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .validar-card.ignorado strong { color: #ffc107; }
 .validar-card.duplicado strong { color: #b98cff; }
 
+/* Lista Suja */
+.suja-tabs .btn-mini { padding: 8px 14px; border-radius: 10px; }
+.suja-tabs .btn-mini.active { background: var(--green); color: #04120a; border-color: transparent; font-weight: 700; }
+.suja-bruto { margin: 0; padding: 8px; font-size: 0.72rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; max-width: 460px; max-height: 160px; overflow: auto; }
 @media (max-width: 980px) {
     body { height: auto; min-height: 100vh; overflow: auto; }
     .app-container { width: 100%; height: auto; min-height: 100vh; }

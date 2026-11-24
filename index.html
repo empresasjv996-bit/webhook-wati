@@ -26,6 +26,7 @@
                 <button data-view="clientes" onclick="mostrarClientes()">Clientes</button>
                 <button data-view="listas" onclick="mostrarListas()">Listas</button>
                 <button data-view="validar" onclick="irPara('validar')">Validar listas</button>
+                <button data-view="listasuja" onclick="irPara('listasuja')">Lista Suja</button>
                 <button data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
                 <button data-view="wati" onclick="irPara('wati')">Atividade Wati</button>
                 <button data-view="canais" onclick="irPara('canais')">Canais</button>
@@ -609,6 +610,73 @@
                 </div>
             </section>
 
+            <!-- PROCESSAR LISTA (LISTA SUJA) -->
+            <section class="view oculto" id="view-listasuja">
+                <div class="section-title">
+                    <div>
+                        <h1>Processar Lista (Lista Suja)</h1>
+                        <p>Cola o dump bruto (blocos com <code>CPF Persona:</code>, <code>CNPJ:</code>, <code>Telefone cadastro:</code>, <code>Telefones:</code>...) e transforma em linhas <code>{telefone};{nome};{cnpj}</code> prontas para disparo. Tudo roda no seu navegador — nada sai do computador.</p>
+                    </div>
+                    <button class="btn-mini" onclick="limparListaSuja()">🧹 Limpar</button>
+                </div>
+
+                <div class="listas-grid">
+                    <div class="screen-panel">
+                        <div class="form-group">
+                            <label>1. Cole a lista bruta (dump)</label>
+                            <textarea id="suja-texto" class="form-control lista-texto" style="min-height: 320px;" placeholder="CPF Persona:            123.456.789-09&#10;CNPJ:                   27.964.767/0001-97&#10;Telefone cadastro:      (12) 3153-3128&#10;Nome:                   MARCOS TOBIAS LIMA&#10;Telefones:&#10;    (12) 99711-2233&#10;    +55 12 99888-7766&#10;..."></textarea>
+                            <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
+                                Um bloco por pessoa, começando em <code>CPF Persona:</code>. Os telefones saem dos campos
+                                <code>Telefone cadastro</code> e <code>Telefones</code> (lista) — telefones da empresa não entram.
+                                CPF é validado pelo dígito verificador; registro sem telefone válido é descartado.
+                            </small>
+                        </div>
+
+                        <button class="btn-primary" style="margin-top: 16px" onclick="processarListaSujaPainel()">Processar Lista</button>
+                        <p id="suja-progresso" class="mapa-resumo"></p>
+                    </div>
+
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Resultado</h3>
+
+                        <div class="suja-tabs" style="display: flex; gap: 8px; margin-bottom: 12px;">
+                            <button id="suja-aba-prontos" class="btn-mini active" type="button" onclick="mostrarAbaListaSuja('prontos')">Prontos (0)</button>
+                            <button id="suja-aba-descartados" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('descartados')">Descartados (0)</button>
+                        </div>
+
+                        <div id="suja-painel-prontos">
+                            <p class="mapa-ajuda">Linhas no formato <code>{telefone};{nome};{cnpj}</code> — uma por telefone válido (deduplicado).</p>
+
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
+                                <button class="btn-mini" type="button" onclick="copiarListaSuja()">📋 Copiar</button>
+                                <button class="btn-mini" type="button" onclick="baixarListaSuja()">⬇ Baixar .txt</button>
+                                <button class="btn-mini" type="button" onclick="usarListaSujaNaImportacao()">↪ Enviar para importação</button>
+                            </div>
+
+                            <textarea id="suja-saida" class="form-control lista-texto" readonly style="min-height: 240px;" placeholder="551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97&#10;..."></textarea>
+                        </div>
+
+                        <div id="suja-painel-descartados" class="oculto">
+                            <p class="mapa-ajuda">Registros rejeitados com o motivo e o trecho bruto para conferir.</p>
+
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Motivo</th>
+                                            <th>Dado bruto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tabela-suja-descartados">
+                                        <tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- LOGS -->
             <section class="view oculto" id="view-logs">
                 <div class="section-title">
@@ -840,6 +908,7 @@
         </aside>
     </div>
 
+    <script src="lista-suja.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

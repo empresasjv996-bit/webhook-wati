@@ -34,6 +34,7 @@ const ARQUIVOS_PUBLICOS = new Set([
     'colaborador.html',
     'colaborador.css',
     'colaborador.js',
+    'lista-suja.js',
     'logo-qgc.png.jpeg',
     'favicon.ico'
 ]);
