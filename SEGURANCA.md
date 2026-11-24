@@ -82,6 +82,32 @@ Invoke-RestMethod https://webhook-wati.onrender.com/api/health |
 try { Invoke-WebRequest -Method Post -Uri 'https://webhook-wati.onrender.com/webhook' -Body '{}' -ContentType 'application/json' -UseBasicParsing } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
+## Arquivos servidos pelo painel (lista branca)
+
+O `express.static` roda com **lista branca** (`ARQUIVOS_PUBLICOS`, no topo do
+`index.js`). Só estes arquivos são públicos:
+
+`index.html`, `app.js`, `style.css`, `login.html`, `login.css`,
+`colaborador.html`, `colaborador.css`, `colaborador.js`,
+`logo-qgc.png.jpeg`, `favicon.ico`.
+
+Todo o resto responde `404` — inclusive `index.js`, `db.js`, `senha.js`,
+`cnpj.js`, `package.json`, `prisma/`, `listas/`, `downloads/`, `backups/`,
+`server.log` e qualquer `.md`/`test-*.js`. Arquivos que começam com ponto
+(`.env`) também são negados (`dotfiles: 'deny'`).
+
+> Antes dessa correção o projeto inteiro era servido: `https://webhook-wati.onrender.com/index.js`
+> e `/db.js` devolviam `200`. Se criar uma tela nova, acrescente o arquivo em
+> `ARQUIVOS_PUBLICOS`; sem isso o navegador recebe `404`.
+
+```powershell
+# tudo abaixo deve responder 404
+'/index.js','/db.js','/package.json','/prisma/schema.prisma','/.env' | ForEach-Object {
+  try { (Invoke-WebRequest -Method Head -Uri "https://webhook-wati.onrender.com$_" -UseBasicParsing).StatusCode }
+  catch { "$_ -> $($_.Exception.Response.StatusCode.value__)" }
+}
+```
+
 ## Isolamento dos colaboradores
 
 - Cada lead pertence ao vendedor gravado em `clientes.vendedor_email`, que é
