@@ -1597,6 +1597,19 @@ app.post('/api/extrator/consultar', exigirAdmin, async (req, res) => {
         res.json(resposta);
     } catch (erro) {
         console.error('Consulta no extrator falhou:', erro.message);
+
+        /* Servidor sem Chrome (ex.: Render): em vez de uma linha "sem retorno"
+           por CPF, orienta o caminho que funciona — rodar o script local. */
+        if (erro.codigo === 'sem-chrome') {
+            return res.status(503).json({
+                success: false,
+                codigo: 'sem-chrome',
+                message: 'O extrator automático roda só na máquina que tem o Chrome. '
+                    + 'Baixe os CPFs, rode "node extrator.js testar cpfs.txt" no seu computador '
+                    + 'e cole o resultado no passo 3 da tela Listas.'
+            });
+        }
+
         res.status(erro.codigo || 502).json({ success: false, message: erro.message });
     }
 });

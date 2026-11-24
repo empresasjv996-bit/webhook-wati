@@ -402,6 +402,9 @@ assert.ok(!html.includes('id="view-listasuja"'), 'a tela separada de Lista Suja 
 const telaListas = html.slice(html.indexOf('id="view-listas"'), html.indexOf('id="view-canais"'));
 
 assert.ok(telaListas.includes('id="suja-texto"'), 'passo do dump dentro da tela Listas');
+assert.ok(telaListas.includes('id="suja-extrator-aviso"'), 'aviso de servidor sem Chrome dentro da tela Listas');
+assert.ok(html.includes('id="extrator-aviso"'), 'aviso de servidor sem Chrome na tela Consultar CPF');
+assert.ok(html.includes('onclick="copiarComandoExtrator()"'), 'botão Copiar comando do extrator local');
 assert.ok(telaListas.includes('id="lista-importar"'), 'planilha pronta recolhida na mesma tela');
 assert.ok(telaListas.includes('id="lista-texto"'), 'importação manual na mesma tela');
 assert.ok(telaListas.includes('id="tabela-listas"'), 'listas salvas na mesma tela');
@@ -434,7 +437,7 @@ assert.ok(
     'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel', 'copiarListaSuja',
     'copiarListaSujaCpfs', 'baixarListaSujaCpfs', 'levarListaSujaParaExtrator', 'cpfsDaCaixa',
     'baixarListaSuja', 'usarListaSujaNaImportacao', 'usarListaSujaNaImportacaoComEmpresa',
-    'baixarCadastroListaSuja', 'limparListaSuja'].forEach((nome) => {
+    'baixarCadastroListaSuja', 'limparListaSuja', 'verificarExtratorPainel', 'copiarComandoExtrator'].forEach((nome) => {
     assert.ok(new RegExp('function ' + nome + '\\(').test(painel), 'app.js define ' + nome);
 });
 
@@ -443,6 +446,7 @@ assert.ok(servidor.includes("'lista-suja.js'"), 'lista-suja.js está na lista br
 assert.ok(estilos.includes('.suja-bruto'), 'estilo do trecho bruto do descarte');
 assert.ok(estilos.includes('.suja-tabs'), 'estilo das abas do resultado');
 assert.ok(estilos.includes('.lista-importar'), 'estilo da planilha pronta recolhida');
+assert.ok(estilos.includes('.aviso-extrator'), 'estilo do aviso de extrator sem Chrome');
 
 console.log('OK - integração da tela (HTML, app.js, lista branca e CSS)');
 console.log('');

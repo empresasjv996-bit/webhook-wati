@@ -291,6 +291,14 @@
                                 <button class="btn-mini" type="button" onclick="baixarListaSujaCpfs()">⬇ Baixar CPFs .txt</button>
                                 <button class="btn-mini" type="button" onclick="levarListaSujaParaExtrator()">↪ Levar para Consultar CPF</button>
                             </div>
+
+                            <p id="suja-extrator-aviso" class="aviso-extrator oculto">
+                                <strong>Consulta automática indisponível neste servidor.</strong>
+                                O servidor não tem Chrome, então o extrator não roda aqui: baixe os CPFs
+                                (<strong>Baixar CPFs .txt</strong>) e rode no seu computador
+                                <code>node extrator.js testar cpfs.txt</code> — depois cole o resultado no passo 3.
+                                <button class="btn-mini" type="button" onclick="copiarComandoExtrator()">Copiar comando</button>
+                            </p>
                         </div>
 
                         <div class="form-group" style="margin-top: 20px;">
@@ -669,9 +677,17 @@
                             <small>Arquivo .txt/.csv lido no seu navegador: entram na caixa só as linhas com CPF (11 dígitos).</small>
                         </div>
 
-                        <button class="btn-primary" style="margin-top: 16px" onclick="consultarCpfsExtrator()">Consultar CPFs</button>
+                        <button class="btn-primary" id="btn-consultar-cpfs" style="margin-top: 16px" onclick="consultarCpfsExtrator()">Consultar CPFs</button>
                         <p id="extrator-progresso" class="mapa-resumo"></p>
                         <p id="extrator-status" class="mapa-ajuda" style="margin-top: 8px;"></p>
+
+                        <p id="extrator-aviso" class="aviso-extrator oculto">
+                            <strong>Este servidor não tem Chrome.</strong>
+                            A consulta automática não roda aqui: rode no seu computador
+                            <code>node extrator.js testar cpfs.txt</code> e cole o resultado na tela
+                            <strong>Listas</strong>, passo 3 (<em>Cole o resultado do extrator</em>).
+                            <button class="btn-mini" type="button" onclick="copiarComandoExtrator()">Copiar comando</button>
+                        </p>
                     </div>
 
                     <div class="screen-panel">

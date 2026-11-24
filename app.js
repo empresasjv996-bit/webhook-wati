@@ -149,7 +149,8 @@ function irPara(view) {
     if (view === 'inicio') carregarDashboard();
     if (view === 'conversas') carregarConversas(true);
     if (view === 'clientes') carregarTabelaClientes();
-    if (view === 'listas') carregarListas();
+    if (view === 'listas') { carregarListas(); verificarExtratorPainel(); }
+    if (view === 'extrator') verificarExtratorPainel(true);
     if (view === 'canais') { carregarCanais(); carregarWebhook(); }
     if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); alterarCanalCampanha(); }
     if (view === 'wati') iniciarAtividadeWati();
@@ -1403,6 +1404,14 @@ async function verificarNumerosLista() {
 let extratorResultado = { resumo: null, resultados: [] };
 let telefonesColetados = [];
 
+/* Comando que o painel mostra quando o servidor não tem Chrome: o extrator
+   roda aqui na máquina e o resultado volta colado no passo 3. */
+const COMANDO_EXTRATOR = 'node extrator.js testar cpfs.txt';
+
+/* Situação do extrator automático no servidor:
+   navegador null = ainda não verificado, true = tem Chrome, false = sem Chrome. */
+let extratorSituacao = { conhecido: false, navegador: null, motivo: '', chrome: false };
+
 /* Extrai CPFs (11 dígitos) de um texto colado, sem repetir. */
 function cpfsDeTexto(texto) {
     const achados = String(texto || '')
@@ -1538,6 +1547,67 @@ async function copiarTelefoneUnico(wati) {
     }
 }
 
+/* Pergunta ao servidor se ele consegue abrir o Chrome do extrator.
+   No Render não tem navegador: então o painel mostra o caminho local
+   (script + colar o resultado) em vez de devolver "sem retorno" por CPF. */
+async function verificarExtratorPainel(forcar) {
+    if (extratorSituacao.conhecido && !forcar) return extratorSituacao;
+
+    try {
+        const resposta = await fetch('/api/extrator/status');
+        const situacao = await resposta.json().catch(() => ({}));
+
+        if (resposta.ok) {
+            extratorSituacao = {
+                conhecido: true,
+                navegador: situacao.navegador !== false,
+                motivo: situacao.motivo || '',
+                chrome: Boolean(situacao.chrome)
+            };
+        }
+    } catch (erro) {
+        /* sem status: segue para a consulta normal e deixa o servidor responder */
+    }
+
+    renderizarAvisoExtrator();
+    return extratorSituacao;
+}
+
+/* Mostra/oculta o aviso de "sem Chrome" e desabilita o botão de consultar. */
+function renderizarAvisoExtrator() {
+    const bloqueado = extratorSituacao.navegador === false;
+
+    ['suja-extrator-aviso', 'extrator-aviso'].forEach((id) => {
+        const aviso = $(id);
+        if (aviso) aviso.classList.toggle('oculto', !bloqueado);
+    });
+
+    const botao = $('btn-consultar-cpfs');
+    if (botao) {
+        botao.disabled = bloqueado;
+        botao.title = bloqueado
+            ? 'A consulta automática precisa do Chrome na máquina onde o servidor roda. Use o script local.'
+            : '';
+    }
+
+    if (bloqueado) {
+        const status = $('extrator-status');
+        if (status && !status.textContent) {
+            status.textContent = 'Consulta automática indisponível neste servidor (sem Chrome). '
+                + 'Use o script local: ' + COMANDO_EXTRATOR;
+        }
+    }
+}
+
+async function copiarComandoExtrator() {
+    try {
+        await navigator.clipboard.writeText(COMANDO_EXTRATOR);
+        toast('Comando copiado: ' + COMANDO_EXTRATOR);
+    } catch (falha) {
+        toast('Comando: ' + COMANDO_EXTRATOR);
+    }
+}
+
 async function consultarCpfsExtrator() {
     const cpfs = entradasCpfs();
 
@@ -1547,6 +1617,19 @@ async function consultarCpfsExtrator() {
     const progresso = $('extrator-progresso');
     const status = $('extrator-status');
     const botao = document.querySelector('button[onclick="consultarCpfsExtrator()"]');
+
+    /* Servidor sem Chrome: não adianta consultar — orienta o script local. */
+    await verificarExtratorPainel();
+
+    if (extratorSituacao.navegador === false) {
+        const aviso = 'Consulta automática indisponível neste servidor (sem Chrome). '
+            + 'Baixe os CPFs, rode "' + COMANDO_EXTRATOR + '" no seu computador e cole o resultado no passo 3.';
+
+        if (status) status.textContent = aviso;
+        if (progresso) progresso.textContent = '';
+        toast('Servidor sem Chrome: use o script local e cole o resultado no passo 3.', 'erro');
+        return;
+    }
 
     if (botao) botao.disabled = true;
     if (status) status.textContent = '';
@@ -1576,7 +1659,11 @@ async function consultarCpfsExtrator() {
         });
 
         const retorno = await resposta.json().catch(() => ({}));
-        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
+        if (!resposta.ok || !retorno.success) {
+            const erro = new Error(retorno.message || ('HTTP ' + resposta.status));
+            erro.codigo = retorno.codigo || '';
+            throw erro;
+        }
 
         extratorResultado = { resumo: retorno.resumo || {}, resultados: retorno.resultados || [] };
         renderizarExtrator();
@@ -1590,11 +1677,18 @@ async function consultarCpfsExtrator() {
         if (progresso) progresso.textContent = partes.join(' · ') + '.';
         toast(partes.join(' · '), resumo.semRetorno ? 'erro' : undefined);
     } catch (erro) {
+        /* O servidor confirmou que não tem Chrome: guarda a situação para o
+           aviso continuar visível nas próximas visitas à tela. */
+        if (erro.codigo === 'sem-chrome') {
+            extratorSituacao = { conhecido: true, navegador: false, motivo: 'sem-chrome', chrome: false };
+            renderizarAvisoExtrator();
+        }
+
         if (progresso) progresso.textContent = erro.message || 'Não foi possível consultar os CPFs.';
         toast(erro.message || 'Não foi possível consultar os CPFs.', 'erro');
     } finally {
         clearInterval(relogio);
-        if (botao) botao.disabled = false;
+        if (botao) botao.disabled = extratorSituacao.navegador === false;
     }
 }
 
@@ -3635,6 +3729,22 @@ function baixarListaSujaCpfs() {
 function levarListaSujaParaExtrator() {
     const cpfs = cpfsDaCaixa();
     if (!cpfs.length) { toast('Processe a lista antes de levar os CPFs.', 'erro'); return; }
+
+    /* Servidor sem Chrome: não existe tela automática — copia os CPFs e
+       aponta para o script local, cujo resultado volta no passo 3. */
+    if (extratorSituacao.navegador === false) {
+        copiarListaSujaCpfs();
+
+        const aviso = $('suja-extrator-aviso');
+        if (aviso) {
+            aviso.classList.remove('oculto');
+            if (typeof aviso.scrollIntoView === 'function') aviso.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+
+        toast('Sem Chrome no servidor: ' + cpfs.length + ' CPF(s) copiado(s). Rode "' + COMANDO_EXTRATOR
+            + '" no seu PC e cole o resultado no passo 3.', 'erro');
+        return;
+    }
 
     const caixa = $('extrator-texto');
     if (!caixa) { toast('Abra a tela "Consultar CPF".', 'erro'); return; }

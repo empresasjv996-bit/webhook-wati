@@ -51,17 +51,52 @@ function esperar(ms) {
     return new Promise((resolver) => setTimeout(resolver, ms));
 }
 
-function acharNavegador() {
-    const candidatos = [
+/* Caminhos procurados quando CHROME_PATH não está definido.
+   A lista de teste (opcional) existe para os testes automatizados. */
+function acharNavegador(candidatos) {
+    const lista = Array.isArray(candidatos) ? candidatos : [
         process.env.CHROME_PATH,
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
         path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
         'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
-    ].filter(Boolean);
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        /* Linux — o container do Render não tem nenhum destes */
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium',
+        /* macOS */
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+    ];
 
-    return candidatos.find((caminho) => fs.existsSync(caminho)) || '';
+    return lista.filter(Boolean).find((caminho) => {
+        try {
+            return fs.existsSync(caminho);
+        } catch (erro) {
+            return false;
+        }
+    }) || '';
+}
+
+/* Por que a consulta automática não roda agora:
+     ''              -> navegador conectado, pode consultar
+     'chrome-fechado'-> navegador existe na máquina, janela ainda não aberta
+     'sem-chrome'    -> nenhum navegador na máquina (caso do servidor/Render) */
+function motivoIndisponivel(navegador, conectado) {
+    if (conectado) return '';
+    return navegador ? 'chrome-fechado' : 'sem-chrome';
+}
+
+function erroSemChrome() {
+    const erro = new Error(
+        'Chrome/Edge não encontrado nesta máquina. A consulta automática só roda onde existe ' +
+        'navegador (defina CHROME_PATH) — no servidor use o script local "node extrator.js testar cpfs.txt".'
+    );
+    erro.codigo = 'sem-chrome';
+    return erro;
 }
 
 async function esperarDevtools(tentativas) {
@@ -172,7 +207,7 @@ async function abrir() {
 
     estado.iniciando = (async () => {
         const navegador = acharNavegador();
-        if (!navegador) throw new Error('Chrome/Edge não encontrado. Defina CHROME_PATH.');
+        if (!navegador) throw erroSemChrome();
 
         fs.mkdirSync(PERFIL, { recursive: true });
 
@@ -500,6 +535,11 @@ async function consultarCpfs(entradas) {
         throw erro;
     }
 
+    /* Sem navegador na máquina (ex.: container do Render) a consulta não tem
+       como rodar: melhor recusar de uma vez do que devolver "sem retorno"
+       para cada CPF e parecer que o CPF é que falhou. */
+    if (!acharNavegador()) throw erroSemChrome();
+
     estado.ocupado = true;
     estado.progresso = { atual: 0, total: cpfs.length, cpf: '' };
 
@@ -554,8 +594,13 @@ async function consultarCpfs(entradas) {
 }
 
 function status() {
+    const navegador = acharNavegador();
+    const conectado = Boolean(estado.processo && estado.cdp);
+
     return {
-        chrome: Boolean(estado.processo && estado.cdp),
+        chrome: conectado,
+        navegador: Boolean(navegador),
+        motivo: motivoIndisponivel(navegador, conectado),
         ocupado: estado.ocupado,
         progresso: estado.progresso,
         porta: PORTA
@@ -622,7 +667,7 @@ async function principal() {
     ].join('\n'));
 }
 
-module.exports = { consultarCpfs, status, fechar };
+module.exports = { consultarCpfs, status, fechar, acharNavegador, motivoIndisponivel };
 
 if (require.main === module) {
     principal().catch((erro) => {
