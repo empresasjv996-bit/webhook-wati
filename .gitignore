@@ -13,3 +13,13 @@ admin-resposta.json
 logs-prod.json
 status-prod.json
 
+# Listas com dados pessoais (CPF/telefone) e saidas da automacao do extrator
+listas/
+downloads/
+consulta.json
+consulta.png
+tela.json
+tela.png
+captura-api.json
+*-verificado.csv
+

@@ -141,6 +141,45 @@ assert.strictEqual(preview, 'Olá «{{1}}», sobre QGC TEAM by JV.');
 
 console.log('OK - importação no formato de listas por variáveis');
 
+/* ---------- Validar listas: arquivo local rende só telefones ---------- */
+const doArquivo = limpo(noApp(`
+    extrairTelefonesValidacao([
+        'CPF Persona:            256.255.598-80',
+        'CNPJ:                   26.526.968/0001-40',
+        'CEP:                    09820-020',
+        'Inicio Atividade:       11/11/2016',
+        'Tel Empresa 1:          (11) 4362-1043',
+        'Telefone cadastro:      55 (**) ***** 7130',
+        'Final visivel:          7130',
+        'Telefones:',
+        '    (11) 4238-3161',
+        '    1532265950',
+        '    1532265950',
+        'Telefone desmascarado:  (19) 98955-7130',
+        'Razao Social:           GRAZIELA CAPRONI 31422348881',
+        'Tel Empresa 2:          000000000000',
+        'Movel 011 9876-5432 e +55 21 99876-5432'
+    ].join('\\n'))
+`));
+
+assert.deepStrictEqual(doArquivo, [
+    '(11) 4362-1043',
+    '(11) 4238-3161',
+    '1532265950',
+    '(19) 98955-7130',
+    '011 9876-5432',
+    '+55 21 99876-5432'
+]);
+
+/* Nada de CPF/CNPJ/CEP/data virando telefone */
+assert.strictEqual(noApp(`pareceTelefoneValidacao('31422348881')`), false);
+assert.strictEqual(noApp(`pareceTelefoneValidacao('38454528890')`), false);
+assert.strictEqual(noApp(`pareceTelefoneValidacao('09820020')`), false);
+assert.strictEqual(noApp(`pareceTelefoneValidacao('11987654321')`), true);
+assert.strictEqual(noApp(`pareceTelefoneValidacao('5511987654321')`), true);
+
+console.log('OK - leitura de arquivo na validação aproveita só telefones');
+
 /* ---------- index.js (resolução no envio) ---------- */
 const { valorDoContato } = require('./index.js');
 

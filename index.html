@@ -500,12 +500,20 @@
                 <div class="listas-grid">
                     <div class="screen-panel">
                         <div class="form-group">
-                            <label>1. Cole os telefones (um por linha)</label>
+                            <label>1. Cole os telefones ou carregue um arquivo (um por linha)</label>
                             <textarea id="validar-texto" class="form-control lista-texto" placeholder="(11) 98765-4321&#10;011 9876-5432&#10;+55 21 99876-5432&#10;5511987654321&#10;11987654321;João da Silva"></textarea>
                             <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
                                 Aceita <code>(11) 98765-4321</code>, <code>011 9876-5432</code>, <code>+55 11 98765-4321</code>,
                                 <code>5511987654321</code> e linhas com nome (<code>telefone;nome</code>). Cabeçalho
                                 <code>telefone</code> é ignorado.
+                            </small>
+                        </div>
+
+                        <div class="file-row">
+                            <input id="validar-arquivo" type="file" accept=".txt,.csv" onchange="carregarArquivoValidacao(this)">
+                            <small>
+                                Lido no seu navegador (.txt ou .csv): entram na caixa só os números com DDD —
+                                CPF, CNPJ, CEP, datas e demais dados são descartados e nada é enviado ao servidor.
                             </small>
                         </div>
 

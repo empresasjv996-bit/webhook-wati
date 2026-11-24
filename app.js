@@ -1345,6 +1345,114 @@ function entradasValidacao() {
         .filter((item) => apenasNumeros(item.valor).length >= 8);
 }
 
+/* ---------------------------------------------------------
+   ARQUIVO LOCAL (.txt/.csv) -> SÓ TELEFONES
+   Lê a lista escolhida no computador e aproveita apenas os
+   números com DDD que já estão escritos no arquivo. CPF, CNPJ,
+   CEP e datas são mascarados antes da leitura, então nada de
+   pessoa física entra na validação. O arquivo não é enviado ao
+   servidor: só os números que aparecem na caixa de texto.
+   --------------------------------------------------------- */
+
+/* Mesma faixa de DDDs usada em telefone.js (ANATEL). */
+const DDD_FORMATO_VALIDACAO = /^(?:1[1-9]|2[12478]|3[1-578]|4[1-9]|5[1345]|6[1-9]|7[134579]|8[1-9]|9[1-9])$/;
+
+/* Confere só o formato (DDI 55 opcional, DDD oficial, celular 9 + 6a9,
+   fixo 2a5) para separar telefone de CPF/CEP/outros números do arquivo.
+   A validação final continua sendo a da API. */
+function pareceTelefoneValidacao(digitos) {
+    let numero = String(digitos || '');
+
+    if (numero.length === 12 || numero.length === 13) {
+        if (!numero.startsWith('55')) return false;
+        numero = numero.slice(2);
+    }
+
+    if (numero.length !== 10 && numero.length !== 11) return false;
+    if (!DDD_FORMATO_VALIDACAO.test(numero.slice(0, 2))) return false;
+
+    const assinante = numero.slice(2);
+
+    return assinante.length === 9
+        ? assinante[0] === '9'
+        : (assinante[0] >= '2' && assinante[0] <= '9');
+}
+
+/* Devolve os telefones encontrados no texto, sem repetir. */
+function extrairTelefonesValidacao(texto) {
+    const limpo = String(texto || '')
+        .replace(/\uFEFF/g, '')
+        .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, ' ')          // CPF
+        .replace(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g, ' ')   // CNPJ
+        .replace(/\b\d{2}\/\d{2}\/\d{4}\b/g, ' ')                // data
+        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');                 // data ISO
+
+    const achados = limpo.match(/(?:\+?55[\s.-]?)?0?\(?\d{2}\)?[\s.-]?\d{4,5}[\s.-]?\d{4}(?!\d)/g) || [];
+
+    const numeros = [];
+    const vistos = new Set();
+
+    achados.forEach((achado) => {
+        const digitos = apenasNumeros(achado).replace(/^0+/, '');
+        if (!pareceTelefoneValidacao(digitos) || vistos.has(digitos)) return;
+
+        vistos.add(digitos);
+        numeros.push(achado.trim());
+    });
+
+    return numeros;
+}
+
+function carregarArquivoValidacao(input) {
+    const arquivo = input && input.files && input.files[0];
+    const caixa = $('validar-texto');
+    const progresso = $('validar-progresso');
+
+    if (!arquivo) return;
+
+    if (arquivo.size > 5 * 1024 * 1024) {
+        toast('Arquivo muito grande (máximo 5 MB). Divida a lista em partes.', 'erro');
+        if (input) input.value = '';
+        return;
+    }
+
+    const leitor = new FileReader();
+
+    leitor.onload = () => {
+        const numeros = extrairTelefonesValidacao(leitor.result);
+
+        if (!numeros.length) {
+            toast('Nenhum telefone com DDD encontrado em ' + arquivo.name + '.', 'erro');
+            if (input) input.value = '';
+            return;
+        }
+
+        const atuais = caixa
+            ? String(caixa.value || '').split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean)
+            : [];
+
+        const existentes = new Set(atuais.map((linha) => apenasNumeros(telefoneDaLinhaValidacao(linha))));
+        const novas = numeros.filter((numero) => !existentes.has(apenasNumeros(numero)));
+
+        if (caixa) caixa.value = atuais.concat(novas).join('\n');
+
+        const partes = [numeros.length + ' telefone(s) lido(s) de ' + arquivo.name];
+        if (novas.length < numeros.length) partes.push((numeros.length - novas.length) + ' já estava(m) na caixa');
+        if (atuais.length + novas.length > 5000) partes.push('limite de 5000 por validação');
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '. Clique em "Validar números".';
+        toast(partes.join(' · ') + '.');
+        if (input) input.value = '';
+    };
+
+    leitor.onerror = () => {
+        toast('Não foi possível ler o arquivo.', 'erro');
+        if (input) input.value = '';
+    };
+
+    leitor.readAsText(arquivo, 'UTF-8');
+}
+
 function cartaoValidacao(valor, rotulo, classe) {
     return '<div class="validar-card ' + (classe || '') + '"><strong>' + valor + '</strong><span>' + rotulo + '</span></div>';
 }
