@@ -1408,44 +1408,42 @@ async function validarListaTelefones() {
     const deduplicar = !$('validar-deduplicar') || $('validar-deduplicar').checked;
     const somenteCelular = !!($('validar-so-celular') && $('validar-so-celular').checked);
 
-    const vistos = new Set();
-    const unicos = [];
-    let duplicados = 0;
-
-    entradas.forEach((item) => {
-        const chave = apenasNumeros(item.valor);
-        if (deduplicar && vistos.has(chave)) { duplicados += 1; return; }
-        vistos.add(chave);
-        unicos.push(item);
-    });
-
-    if (unicos.length > 5000) {
+    if (entradas.length > 5000) {
         toast('Máximo de 5000 números por vez. Divida a lista em partes.', 'erro');
         return;
     }
 
+    const vistos = new Set();
+    let duplicados = 0;
+
     const progresso = $('validar-progresso');
-    if (progresso) progresso.textContent = 'Validando ' + unicos.length + ' número(s)...';
+    if (progresso) progresso.textContent = 'Validando ' + entradas.length + ' número(s)...';
 
     try {
         const resposta = await fetch('/api/telefones/verificar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ telefones: unicos.map((item) => item.valor), dddPadrao })
+            body: JSON.stringify({ telefones: entradas.map((item) => item.valor), dddPadrao })
         });
 
         const retorno = await resposta.json().catch(() => ({}));
         if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
 
-        const resultados = (retorno.resultados || []).map((item, posicao) => {
-            const linha = unicos[posicao] ? unicos[posicao].linha : item.original;
-            const ignoradoFixo = somenteCelular && item.valido && item.tipo === 'fixo';
+        const resultados = [];
 
-            return Object.assign({}, item, {
+        (retorno.resultados || []).forEach((item, posicao) => {
+            const linha = entradas[posicao] ? entradas[posicao].linha : item.original;
+            const ignoradoFixo = somenteCelular && item.valido && item.tipo === 'fixo';
+            const chave = item.valido ? 'n:' + item.wati : 'i:' + apenasNumeros(item.original);
+
+            if (deduplicar && vistos.has(chave)) { duplicados += 1; return; }
+            vistos.add(chave);
+
+            resultados.push(Object.assign({}, item, {
                 linha,
                 ignoradoFixo,
                 motivo: ignoradoFixo ? 'fixo ignorado (somente celulares)' : item.motivo
-            });
+            }));
         });
 
         validacaoLista = {
@@ -1458,7 +1456,7 @@ async function validarListaTelefones() {
         const validos = resultados.filter((item) => item.valido && !item.ignoradoFixo).length;
         const invalidos = resultados.filter((item) => !item.valido).length;
         const partes = [
-            unicos.length + ' analisado(s)',
+            entradas.length + ' analisado(s)',
             validos + ' pronto(s)',
             invalidos + ' inválido(s)'
         ];
