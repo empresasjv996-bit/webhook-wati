@@ -22,7 +22,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
+
+const navegador = require('./navegador');
 
 const PORTA = Number(process.env.CDP_PORT || 9223);
 const PERFIL = path.join(os.tmpdir(), 'qgc-captura-extrator');
@@ -72,16 +74,7 @@ function uso() {
 }
 
 function acharNavegador() {
-    const candidatos = [
-        process.env.CHROME_PATH,
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
-    ].filter(Boolean);
-
-    return candidatos.find((caminho) => fs.existsSync(caminho)) || '';
+    return navegador.acharNavegador();
 }
 
 async function esperarDevtools(tentativas) {
@@ -159,24 +152,21 @@ function conectarCdp(urlWebsocket) {
    Devolve { processo, pagina, cdp } para quem quiser reaproveitar
    (por exemplo consultar-extrator.js). */
 async function abrirNavegador(url) {
-    const navegador = acharNavegador();
+    const binario = acharNavegador();
 
-    if (!navegador) {
+    if (!binario) {
         throw new Error('Chrome/Edge não encontrado. Instale o Chrome ou defina CHROME_PATH.');
     }
 
     fs.mkdirSync(PERFIL, { recursive: true });
 
-    console.log('Abrindo o Chrome (perfil: ' + PERFIL + ') ...');
+    console.log('Abrindo o Chrome (perfil: ' + PERFIL + ')' + (navegador.modoHeadless() ? ' em modo headless' : '') + ' ...');
 
-    const processo = spawn(navegador, [
-        '--remote-debugging-port=' + PORTA,
-        '--user-data-dir=' + PERFIL,
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--window-size=1400,1000',
+    const processo = spawn(binario, navegador.flagsNavegador({
+        porta: PORTA,
+        perfil: PERFIL,
         url
-    ], { stdio: 'ignore' });
+    }), { stdio: 'ignore' });
 
     await esperarDevtools();
 
@@ -637,13 +627,14 @@ async function principal() {
         cdp.fechar();
     } finally {
         if (opcoes.fechar && processo && processo.pid) {
-            spawnSync('taskkill', ['/PID', String(processo.pid), '/T', '/F'], { stdio: 'ignore' });
+            navegador.encerrarProcesso(processo.pid);
         }
     }
 }
 
 module.exports = {
     abrirNavegador,
+    conectarCdp,
     fazerLogin,
     avaliar,
     esperarFormulario,

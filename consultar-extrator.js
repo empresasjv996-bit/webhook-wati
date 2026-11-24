@@ -22,9 +22,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const mapear = require('./mapear-tela');
+const navegador = require('./navegador');
 
 const SELETOR_UPLOAD = 'input[data-testid="stFileUploaderDropzoneInput"]';
 
@@ -415,7 +415,7 @@ async function principal() {
         await salvarArtefatos(cdp, opcoes.saida, painel);
     } finally {
         if (opcoes.fechar && processo && processo.pid) {
-            spawnSync('taskkill', ['/PID', String(processo.pid), '/T', '/F'], { stdio: 'ignore' });
+            navegador.encerrarProcesso(processo.pid);
         }
     }
 }

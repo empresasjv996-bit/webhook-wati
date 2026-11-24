@@ -20,6 +20,13 @@
      node extrator.js testar listas/teste-cpfs.txt
      node extrator.js status
      node extrator.js fechar
+
+   Onde roda:
+     - Na sua máquina (Windows/macOS): abre a janela do Chrome, você vê
+       o site trabalhando.
+     - Em container (Docker/Render): não há tela, então roda headless
+       (EXTRATOR_HEADLESS=1, já definido no Dockerfile). Veja
+       EXTRATOR-CHROME.md.
    ========================================================= */
 
 'use strict';
@@ -27,9 +34,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const mapear = require('./mapear-tela');
+const navegador = require('./navegador');
 
 const URL_SITE = process.env.EXTRATOR_URL || 'https://extratorgov.online/';
 const PORTA = Number(process.env.CDP_PORT_EXT || 9224);
@@ -51,43 +59,16 @@ function esperar(ms) {
     return new Promise((resolver) => setTimeout(resolver, ms));
 }
 
-/* Caminhos procurados quando CHROME_PATH não está definido.
-   A lista de teste (opcional) existe para os testes automatizados. */
-function acharNavegador(candidatos) {
-    const lista = Array.isArray(candidatos) ? candidatos : [
-        process.env.CHROME_PATH,
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-        /* Linux — o container do Render não tem nenhum destes */
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        '/snap/bin/chromium',
-        /* macOS */
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
-    ];
+/* Detecção do binário e modo (janela/headless) vêm de navegador.js, para o
+   extrator, o mapear-tela e o consultar-extrator usarem a mesma regra. */
+const acharNavegador = navegador.acharNavegador;
+const motivoIndisponivel = navegador.motivoIndisponivel;
+const modoHeadless = navegador.modoHeadless;
+const encerrarProcesso = navegador.encerrarProcesso;
 
-    return lista.filter(Boolean).find((caminho) => {
-        try {
-            return fs.existsSync(caminho);
-        } catch (erro) {
-            return false;
-        }
-    }) || '';
-}
-
-/* Por que a consulta automática não roda agora:
-     ''              -> navegador conectado, pode consultar
-     'chrome-fechado'-> navegador existe na máquina, janela ainda não aberta
-     'sem-chrome'    -> nenhum navegador na máquina (caso do servidor/Render) */
-function motivoIndisponivel(navegador, conectado) {
-    if (conectado) return '';
-    return navegador ? 'chrome-fechado' : 'sem-chrome';
+/* Flags do Chrome nesta porta/perfil (headless quando não há tela). */
+function flagsNavegador(url) {
+    return navegador.flagsNavegador({ porta: PORTA, perfil: PERFIL, url: url || URL_SITE });
 }
 
 function erroSemChrome() {
@@ -206,21 +187,14 @@ async function abrir() {
     if (estado.iniciando) return estado.iniciando;
 
     estado.iniciando = (async () => {
-        const navegador = acharNavegador();
-        if (!navegador) throw erroSemChrome();
+        const binario = acharNavegador();
+        if (!binario) throw erroSemChrome();
 
         fs.mkdirSync(PERFIL, { recursive: true });
 
-        console.log('[extrator] abrindo Chrome dedicado (' + PERFIL + ')');
+        console.log('[extrator] abrindo Chrome dedicado (' + PERFIL + ')' + (modoHeadless() ? ' em modo headless' : ''));
 
-        estado.processo = spawn(navegador, [
-            '--remote-debugging-port=' + PORTA,
-            '--user-data-dir=' + PERFIL,
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--window-size=1400,1000',
-            URL_SITE
-        ], { stdio: 'ignore' });
+        estado.processo = spawn(binario, flagsNavegador(), { stdio: 'ignore' });
 
         estado.processo.on('exit', () => {
             /* O exit pode ser de um spawn redundante (Chrome já aberto com o
@@ -594,13 +568,14 @@ async function consultarCpfs(entradas) {
 }
 
 function status() {
-    const navegador = acharNavegador();
+    const binario = acharNavegador();
     const conectado = Boolean(estado.processo && estado.cdp);
 
     return {
         chrome: conectado,
-        navegador: Boolean(navegador),
-        motivo: motivoIndisponivel(navegador, conectado),
+        navegador: Boolean(binario),
+        motivo: motivoIndisponivel(binario, conectado),
+        headless: modoHeadless(),
         ocupado: estado.ocupado,
         progresso: estado.progresso,
         porta: PORTA
@@ -609,7 +584,7 @@ function status() {
 
 function fechar() {
     if (estado.processo && estado.processo.pid) {
-        spawnSync('taskkill', ['/PID', String(estado.processo.pid), '/T', '/F'], { stdio: 'ignore' });
+        encerrarProcesso(estado.processo.pid);
     }
 
     estado.processo = null;
@@ -667,7 +642,15 @@ async function principal() {
     ].join('\n'));
 }
 
-module.exports = { consultarCpfs, status, fechar, acharNavegador, motivoIndisponivel };
+module.exports = {
+    consultarCpfs,
+    status,
+    fechar,
+    acharNavegador,
+    motivoIndisponivel,
+    modoHeadless,
+    flagsNavegador
+};
 
 if (require.main === module) {
     principal().catch((erro) => {
