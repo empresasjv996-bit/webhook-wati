@@ -1,6 +1,6 @@
 /* =========================================================
-   QGC TEAM by JV - Testes do menu agrupado
-   Início · Puxadores · Envio · Auditoria
+   QGC TEAM by JV - Testes do menu
+   Início · Listas · Contatos · Envio · Sistema
    Roda com: node test-navegacao.js
    ========================================================= */
 
@@ -35,11 +35,16 @@ assert.strictEqual(
 
 const grupos = Array.from(menu.matchAll(/class="nav-grupo" data-grupo="([a-z]+)"/g)).map((m) => m[1]);
 
-assert.deepStrictEqual(grupos, ['puxadores', 'envio', 'auditoria'], 'grupos do menu: Puxadores, Envio e Auditoria');
+assert.deepStrictEqual(grupos, ['contatos', 'envio', 'sistema'], 'grupos do menu: Contatos, Envio e Sistema');
 
 assert.ok(
     /<div class="top-nav" id="menu">[\s\S]*?<button class="active" data-view="inicio" onclick="irPara\('inicio'\)">Início<\/button>/.test(menu),
     'Início continua como botão direto, ativo por padrão'
+);
+
+assert.ok(
+    /<button data-view="listas" onclick="mostrarListas\(\)">Listas<\/button>/.test(menu),
+    'Listas é um botão direto (fluxo único: dump, CPF, telefone e importação)'
 );
 
 /* ---------- itens de cada submenu ---------- */
@@ -51,23 +56,9 @@ menu.split(/<div class="nav-grupo" data-grupo="/).slice(1).forEach((parte) => {
     itens[nome] = Array.from(parte.matchAll(/data-view="([a-z]+)"/g)).map((m) => m[1]);
 });
 
-assert.deepStrictEqual(itens.puxadores.slice(0, 2), ['conversas', 'clientes'], 'Puxadores: Conversas e Clientes');
-assert.ok(
-    itens.puxadores.every((view) => ['conversas', 'clientes', 'extrator'].includes(view)),
-    'Puxadores não recebe telas de outros módulos'
-);
-
-// "Validar listas" (versão publicada) e "Consultar CPF" (versão local) são opcionais,
-// mas a ordem de Envio precisa ser mantida.
-const envioBase = itens.envio.filter((view) => view !== 'validar');
-
-assert.deepStrictEqual(
-    envioBase,
-    ['listas', 'listasuja', 'campanhas', 'wati', 'canais'],
-    'Envio: Listas, Lista Suja, Campanhas, Atividade Wati e Canais'
-);
-
-assert.deepStrictEqual(itens.auditoria, ['logs', 'auditoria', 'usuarios'], 'Auditoria: Logs, Auditoria e Usuários');
+assert.deepStrictEqual(itens.contatos, ['conversas', 'clientes', 'extrator'], 'Contatos: Conversas, Clientes e Consultar CPF');
+assert.deepStrictEqual(itens.envio, ['campanhas', 'wati', 'canais'], 'Envio: Campanhas, Atividade Wati e Canais');
+assert.deepStrictEqual(itens.sistema, ['logs', 'auditoria', 'usuarios'], 'Sistema: Logs, Auditoria e Usuários');
 
 /* ---------- todo item aponta para uma tela real ---------- */
 
@@ -85,6 +76,26 @@ assert.strictEqual(
     Array.from(menu.matchAll(/data-view="[a-z]+"[^>]*onclick="/g)).length,
     'todo item do menu tem onclick (nenhum item morto)'
 );
+
+/* ---------- cada item do submenu explica o que faz ---------- */
+
+assert.strictEqual(
+    (menu.match(/data-view="[a-z]+"[^>]*>[\s\S]{0,120}?<small>[^<]+<\/small>/g) || []).length,
+    views.filter((view) => view !== 'inicio' && view !== 'listas').length,
+    'todo item do submenu tem uma linha de ajuda (<small>)'
+);
+
+/* ---------- tela única de listas (Importar + Validar + Lista Suja) ---------- */
+
+const telaListas = html.slice(html.indexOf('id="view-listas"'), html.indexOf('id="view-canais"'));
+
+assert.ok(!html.includes('id="view-listasuja"'), 'não existe mais tela separada de Lista Suja');
+assert.ok(!html.includes('class="listas-nav"'), 'não existem mais abas Importar <-> Lista Suja');
+assert.ok(telaListas.includes('id="suja-texto"'), 'tela Listas começa pelo dump');
+assert.ok(telaListas.includes('id="suja-cpfs"'), 'tela Listas gera os CPFs do extrator');
+assert.ok(telaListas.includes('id="lista-importar"'), 'tela Listas guarda a planilha pronta');
+assert.ok(telaListas.includes('id="tabela-listas"'), 'tela Listas mostra as listas salvas');
+assert.ok(estilos.includes('.lista-importar'), 'style.css estiliza a planilha pronta recolhida');
 
 assert.strictEqual(
     Array.from(menu.matchAll(/class="nav-grupo-btn"/g)).length,
@@ -121,12 +132,13 @@ assert.ok(
 
 /* ---------- estilos ---------- */
 
-['.nav-grupo {', '.nav-submenu {', '.nav-grupo.aberto > .nav-submenu', '.nav-grupo-ativo'].forEach((regra) => {
+['.nav-grupo {', '.nav-submenu {', '.nav-grupo.aberto > .nav-submenu', '.nav-grupo-ativo', '.nav-submenu button small', '.nav-submenu button.active small'].forEach((regra) => {
     assert.ok(estilos.includes(regra), 'style.css contém ' + regra);
 });
 
 assert.ok(estilos.includes('@keyframes navSubmenuAbrir'), 'animação de abertura do submenu');
 
-console.log('OK - menu agrupado (Início, Puxadores, Envio, Auditoria) no HTML, app.js e CSS');
+console.log('OK - menu: Início e Listas diretos + 3 grupos (Contatos, Envio, Sistema) com ajuda em cada item');
+console.log('OK - tela única de Listas (dump -> CPF -> telefone -> planilha -> listas salvas)');
 console.log('');
 console.log('Todos os testes de navegação passaram.');

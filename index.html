@@ -22,14 +22,22 @@
             
             <div class="top-nav" id="menu">
                 <button class="active" data-view="inicio" onclick="irPara('inicio')">Início</button>
+                <button data-view="listas" onclick="mostrarListas()">Listas</button>
 
-                <div class="nav-grupo" data-grupo="puxadores">
-                    <button class="nav-grupo-btn" type="button" data-grupo="puxadores" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('puxadores')">
-                        Puxadores <span class="nav-seta" aria-hidden="true">▾</span>
+                <div class="nav-grupo" data-grupo="contatos">
+                    <button class="nav-grupo-btn" type="button" data-grupo="contatos" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('contatos')">
+                        Contatos <span class="nav-seta" aria-hidden="true">▾</span>
                     </button>
                     <div class="nav-submenu" role="menu">
-                        <button type="button" data-view="conversas" onclick="irParaConversas()">Conversas</button>
-                        <button type="button" data-view="clientes" onclick="mostrarClientes()">Clientes</button>
+                        <button type="button" data-view="conversas" onclick="irParaConversas()">
+                            Conversas <small>Atendimento no WhatsApp</small>
+                        </button>
+                        <button type="button" data-view="clientes" onclick="mostrarClientes()">
+                            Clientes <small>Fichas e status</small>
+                        </button>
+                        <button type="button" data-view="extrator" onclick="irPara('extrator')">
+                            Consultar CPF <small>CPF → nome e telefone</small>
+                        </button>
                     </div>
                 </div>
 
@@ -38,23 +46,32 @@
                         Envio <span class="nav-seta" aria-hidden="true">▾</span>
                     </button>
                     <div class="nav-submenu" role="menu">
-                        <button type="button" data-view="listas" onclick="mostrarListas()">Listas</button>
-                        <button type="button" data-view="validar" onclick="irPara('validar')">Validar listas</button>
-                        <button type="button" data-view="listasuja" onclick="irPara('listasuja')">Lista Suja</button>
-                        <button type="button" data-view="campanhas" onclick="irPara('campanhas')">Campanhas</button>
-                        <button type="button" data-view="wati" onclick="irPara('wati')">Atividade Wati</button>
-                        <button type="button" data-view="canais" onclick="irPara('canais')">Canais</button>
+                        <button type="button" data-view="campanhas" onclick="irPara('campanhas')">
+                            Campanhas <small>Disparo em massa</small>
+                        </button>
+                        <button type="button" data-view="wati" onclick="irPara('wati')">
+                            Atividade Wati <small>Eventos do webhook</small>
+                        </button>
+                        <button type="button" data-view="canais" onclick="irPara('canais')">
+                            Canais <small>Número conectado</small>
+                        </button>
                     </div>
                 </div>
 
-                <div class="nav-grupo" data-grupo="auditoria">
-                    <button class="nav-grupo-btn" type="button" data-grupo="auditoria" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('auditoria')">
-                        Auditoria <span class="nav-seta" aria-hidden="true">▾</span>
+                <div class="nav-grupo" data-grupo="sistema">
+                    <button class="nav-grupo-btn" type="button" data-grupo="sistema" aria-haspopup="true" aria-expanded="false" onclick="alternarGrupoNav('sistema')">
+                        Sistema <span class="nav-seta" aria-hidden="true">▾</span>
                     </button>
                     <div class="nav-submenu" role="menu">
-                        <button type="button" data-view="logs" onclick="irPara('logs')">Logs</button>
-                        <button type="button" data-view="auditoria" onclick="irPara('auditoria')">Auditoria</button>
-                        <button type="button" data-view="usuarios" onclick="irPara('usuarios')">Usuários</button>
+                        <button type="button" data-view="logs" onclick="irPara('logs')">
+                            Logs <small>Histórico técnico</small>
+                        </button>
+                        <button type="button" data-view="auditoria" onclick="irPara('auditoria')">
+                            Auditoria <small>Ações do painel</small>
+                        </button>
+                        <button type="button" data-view="usuarios" onclick="irPara('usuarios')">
+                            Usuários <small>Acessos e permissões</small>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -232,89 +249,203 @@
                     </div>
                 </div>
             </section>
-            <!-- LISTAS -->
+            <!-- LISTAS: fluxo unico (dump -> CPF -> telefone -> planilha) -->
             <section class="view oculto" id="view-listas">
                 <div class="section-title">
                     <div>
                         <h1>Listas</h1>
-                        <p>Envie o .csv (ou cole os contatos). Colunas <code>{{1}}</code>, <code>{{2}}</code>… já entram como variáveis do template — na campanha elas são ligadas sozinhas.</p>
+                        <p>Um lugar só: cole o dump bruto e o painel separa persona, empresa e sócios, valida os CPFs, gera a lista final <code>{telefone};{nome};{cnpj}</code> e devolve os números para o disparo. O processamento é local; o atalho <em>Levar para Consultar CPF</em> é o único passo que entrega os CPFs ao módulo do extrator.</p>
                     </div>
                     <div class="chat-actions">
-                        <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
+                        <button class="btn-mini" onclick="limparListaSuja()">🧹 Limpar</button>
                         <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
+                        <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
                     </div>
                 </div>
 
                 <div class="listas-grid">
                     <div class="screen-panel">
                         <div class="form-group">
-                            <label>Nome da lista</label>
-                            <input id="lista-nome" class="form-control" type="text" placeholder="Ex: Clientes SP - Novembro">
-                        </div>
-
-                        <div class="form-group">
-                            <label>1. Arquivo ou contatos colados</label>
-                            <textarea id="lista-texto" class="form-control lista-texto" placeholder="telefone;{{1}};{{2}}&#10;5511999999999;João da Silva;12.345.678/0001-90&#10;5511888888888;Maria Souza;98.765.432/0001-10"></textarea>
+                            <label>1. Cole a lista bruta (dump)</label>
+                            <textarea id="suja-texto" class="form-control lista-texto" style="min-height: 240px;" placeholder="CNPJ:                   27.964.767/0001-97&#10;CPF Persona:            014.079.598-75&#10;--- DADOS DA EMPRESA ---&#10;Razao Social:           IMPERIAL MARKETING E PROPAGANDA LTDA&#10;...&#10;--- DADOS DA PERSONA (CPF) ---&#10;Nome:                   MARCOS TOBIAS LIMA&#10;Telefones:&#10;    (12) 3153-3128&#10;..."></textarea>
                             <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                <strong>Formato:</strong> 1ª linha = cabeçalho · <code>telefone</code> obrigatório ·
-                                <code>{{1}}</code>, <code>{{2}}</code>… = variáveis do template ·
-                                outras colunas = atributos (<code>nome</code>, <code>cnpj</code>, <code>razao_social</code>…).
-                                Separador <code>;</code>, <code>,</code> ou Tab · arquivo UTF-8.
+                                Um bloco por empresa (<code>CNPJ:</code> + <code>CPF Persona:</code>). A seção
+                                <code>--- DADOS DA EMPRESA ---</code> fica guardada para a ficha do cliente; os sócios
+                                são separados da persona. CPF é validado pelo dígito verificador. Colagem sem quebras
+                                (PDF/tabela) e linhas indentadas também são aceitas.
                             </small>
                         </div>
 
-                        <div class="file-row">
-                            <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
-                            <button class="btn-mini" type="button" onclick="baixarModeloLista()">⬇ Baixar modelo .csv</button>
-                            <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
+                        <button class="btn-primary" style="margin-top: 16px" onclick="processarListaSujaPainel()">Processar lista</button>
+                        <p id="suja-progresso" class="mapa-resumo"></p>
+
+                        <div class="form-group" style="margin-top: 20px;">
+                            <label>2. CPFs para o extrator</label>
+                            <small class="mapa-ajuda" style="display: block; margin-bottom: 8px;">
+                                Um CPF completo por linha (formato <code>000.000.000-00</code>). O resultado do
+                                extrator volta no passo 3 — o telefone revelado entra na lista final.
+                            </small>
+                            <textarea id="suja-cpfs" class="form-control lista-texto" style="min-height: 140px;" placeholder="000.000.000-00&#10;000.000.000-00"></textarea>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+                                <button class="btn-mini" type="button" onclick="copiarListaSujaCpfs()">📋 Copiar CPFs</button>
+                                <button class="btn-mini" type="button" onclick="baixarListaSujaCpfs()">⬇ Baixar CPFs .txt</button>
+                                <button class="btn-mini" type="button" onclick="levarListaSujaParaExtrator()">↪ Levar para Consultar CPF</button>
+                            </div>
                         </div>
 
-                        <button class="btn-primary" style="margin-top: 18px" onclick="analisarLista()">Analisar colunas</button>
+                        <div class="form-group" style="margin-top: 20px;">
+                            <label>3. Cole o resultado do extrator</label>
+                            <small class="mapa-ajuda" style="display: block; margin-bottom: 8px;">
+                                Aceita <code>CPF;telefone</code> (CPF completo ou mascarado <code>000.000.xxx-xx</code>),
+                                <code>✓ [LIVE] NOME | Mask: ... | Revelado: ...</code> e o JSON do painel.
+                            </small>
+                            <textarea id="suja-extrator" class="form-control lista-texto" style="min-height: 140px;" placeholder="014.079.xxx-xx;5512999999999&#10;✓ [LIVE] LAYLA SHIRATORI | Mask: (11) *****1514 | Revelado: 11979591514"></textarea>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+                                <button class="btn-primary" type="button" onclick="aplicarResultadoExtratorPainel()">Aplicar resultado</button>
+                                <button class="btn-mini" type="button" onclick="puxarResultadoExtratorPainel()">⤓ Usar última consulta do painel</button>
+                            </div>
+                        </div>
 
-                        <div id="lista-mapeamento" class="oculto">
-                            <div class="mapa-topo">
-                                <h3>2. Vincule as colunas</h3>
-                                <p class="mapa-ajuda">
-                                    Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as colunas
-                                    <strong>Variável do template</strong> viram <code>{{1}}</code>, <code>{{2}}</code>… na campanha.
-                                    As demais viram atributos do contato na Wati.
-                                </p>
+
+                        <details class="lista-importar" id="lista-importar">
+                            <summary>Planilha pronta — revisar e importar na Wati</summary>
+
+                            <p class="mapa-ajuda" style="margin: 10px 0 14px;">
+                                O botão <strong>Enviar para importação</strong> preenche os campos abaixo sozinho.
+                                Confira as colunas, complete os números e clique em <strong>Importar lista</strong>.
+                            </p>
+
+                            <div class="form-group">
+                                <label>Nome da lista</label>
+                                <input id="lista-nome" class="form-control" type="text" placeholder="Ex: Clientes SP - Novembro">
                             </div>
 
-                            <div id="lista-colunas" class="mapa-colunas"></div>
+                            <div class="form-group">
+                                <label>Arquivo ou contatos colados</label>
+                                <textarea id="lista-texto" class="form-control lista-texto" placeholder="telefone;{{1}};{{2}}&#10;5511999999999;João da Silva;12.345.678/0001-90&#10;5511888888888;Maria Souza;98.765.432/0001-10"></textarea>
+                                <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
+                                    <strong>Formato:</strong> 1ª linha = cabeçalho · <code>telefone</code> obrigatório ·
+                                    <code>{{1}}</code>, <code>{{2}}</code>… = variáveis do template ·
+                                    outras colunas = atributos (<code>nome</code>, <code>cnpj</code>, <code>razao_social</code>…).
+                                    Separador <code>;</code>, <code>,</code> ou Tab · arquivo UTF-8.
+                                </small>
+                            </div>
 
-                            <p id="lista-resumo" class="mapa-resumo"></p>
+                            <div class="file-row">
+                                <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
+                                <button class="btn-mini" type="button" onclick="baixarModeloLista()">⬇ Baixar modelo .csv</button>
+                                <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
+                            </div>
 
-                            <button class="btn-mini" type="button" onclick="verificarNumerosLista()">✓ Verificar e completar números</button>
+                            <button class="btn-primary" style="margin-top: 18px" onclick="analisarLista()">Analisar colunas</button>
 
-                            <label class="mapa-check">
-                                <input id="lista-enviar-wati" type="checkbox" checked>
-                                Enviar os contatos para a Wati já com esses atributos
-                            </label>
+                            <div id="lista-mapeamento" class="oculto">
+                                <div class="mapa-topo">
+                                    <h3>Vincule as colunas</h3>
+                                    <p class="mapa-ajuda">
+                                        Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as colunas
+                                        <strong>Variável do template</strong> viram <code>{{1}}</code>, <code>{{2}}</code>… na campanha.
+                                        As demais viram atributos do contato na Wati.
+                                    </p>
+                                </div>
 
-                            <button class="btn-primary" style="margin-top: 16px" onclick="salvarLista()">Importar lista</button>
-                            <p id="lista-progresso" class="mapa-resumo"></p>
-                        </div>
+                                <div id="lista-colunas" class="mapa-colunas"></div>
+
+                                <p id="lista-resumo" class="mapa-resumo"></p>
+
+                                <button class="btn-mini" type="button" onclick="verificarNumerosLista()">✓ Verificar e completar números</button>
+
+                                <label class="mapa-check">
+                                    <input id="lista-enviar-wati" type="checkbox" checked>
+                                    Enviar os contatos para a Wati já com esses atributos
+                                </label>
+
+                                <button class="btn-primary" style="margin-top: 16px" onclick="salvarLista()">Importar lista</button>
+                                <p id="lista-progresso" class="mapa-resumo"></p>
+                            </div>
+                        </details>
                     </div>
 
                     <div class="screen-panel">
-                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Listas salvas</h3>
-                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Clique na lixeira para excluir uma lista.</p>
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Resultado</h3>
 
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Lista</th>
-                                        <th>Contatos</th>
-                                        <th>Criada em</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="tabela-listas">
-                                    <tr><td colspan="4" class="vazio">Carregando listas...</td></tr>
-                                </tbody>
-                            </table>
+                        <div class="suja-tabs" style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <button id="suja-aba-prontos" class="btn-mini active" type="button" onclick="mostrarAbaListaSuja('prontos')">Prontos (0)</button>
+                            <button id="suja-aba-sem-telefone" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('sem-telefone')">Sem telefone (0)</button>
+                            <button id="suja-aba-descartados" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('descartados')">Descartados (0)</button>
+                        </div>
+
+                        <div id="suja-painel-prontos">
+                            <p class="mapa-ajuda">Linhas no formato <code>{telefone};{nome};{cnpj}</code> — uma por telefone (deduplicado). O telefone revelado pelo extrator entra junto.</p>
+
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
+                                <button class="btn-mini" type="button" onclick="copiarListaSuja()">📋 Copiar</button>
+                                <button class="btn-mini" type="button" onclick="baixarListaSuja()">⬇ Baixar .txt</button>
+                                <button class="btn-primary" type="button" onclick="usarListaSujaNaImportacao()">↪ Enviar para importação</button>
+                                <button class="btn-mini" type="button" onclick="usarListaSujaNaImportacaoComEmpresa()">↪ Enviar com dados da empresa</button>
+                                <button class="btn-mini" type="button" onclick="baixarCadastroListaSuja()">⬇ Baixar cadastro (.csv)</button>
+                            </div>
+
+                            <textarea id="suja-saida" class="form-control lista-texto" readonly style="min-height: 220px;" placeholder="551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97&#10;..."></textarea>
+                        </div>
+
+                        <div id="suja-painel-sem-telefone" class="oculto">
+                            <p class="mapa-ajuda">CPFs válidos que ainda não têm telefone. Rode o extrator para eles e cole o resultado no passo 3.</p>
+
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>CPF</th>
+                                            <th>Nome</th>
+                                            <th>CNPJ</th>
+                                            <th>Empresa</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tabela-suja-sem-telefone">
+                                        <tr><td colspan="4" class="vazio">Nenhum registro sem telefone.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="suja-painel-descartados" class="oculto">
+                            <p class="mapa-ajuda">Registros rejeitados com o motivo e o trecho bruto para conferir.</p>
+
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Motivo</th>
+                                            <th>Dado bruto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tabela-suja-descartados">
+                                        <tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 24px;">
+                            <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Listas salvas</h3>
+                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Listas já importadas na Wati. Clique na lixeira para excluir.</p>
+
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Lista</th>
+                                            <th>Contatos</th>
+                                            <th>Criada em</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tabela-listas">
+                                        <tr><td colspan="4" class="vazio">Carregando listas...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -512,81 +643,61 @@
                 </div>
             </section>
 
-            <!-- VALIDAR LISTAS -->
-            <section class="view oculto" id="view-validar">
+            <!-- CONSULTAR CPF (EXTRATOR) -->
+            <section class="view oculto" id="view-extrator">
                 <div class="section-title">
                     <div>
-                        <h1>Validar listas</h1>
-                        <p>Corrige e padroniza telefones no formato da Wati (55 + DDD + número). Regras de formato: DDD oficial, 9º dígito, celular/fixo. A consulta de CNPJ usa a base pública da Receita e traz só os dados da empresa.</p>
+                        <h1>Consultar CPF (Extrator)</h1>
+                        <p>Envia os CPFs para o <strong>extratorgov.online</strong> (conta cliente1010) e devolve o telefone de cada um. A extração roda no painel do site, <strong>um CPF por vez (~1 minuto cada)</strong>. Abaixo continuam a coleta de telefones de CNPJ e a consulta pública da Receita.</p>
                     </div>
-                    <button class="btn-mini" onclick="limparValidacaoListas()">🧹 Limpar</button>
+                    <button class="btn-mini" onclick="limparExtrator()">🧹 Limpar</button>
                 </div>
 
                 <div class="listas-grid">
                     <div class="screen-panel">
                         <div class="form-group">
-                            <label>1. Cole os telefones ou carregue um arquivo (um por linha)</label>
-                            <textarea id="validar-texto" class="form-control lista-texto" placeholder="(11) 98765-4321&#10;011 9876-5432&#10;+55 21 99876-5432&#10;5511987654321&#10;11987654321;João da Silva"></textarea>
+                            <label>1. Cole os CPFs ou carregue um arquivo (um por linha)</label>
+                            <textarea id="extrator-texto" class="form-control lista-texto" placeholder="326.955.618-73&#10;21970056851"></textarea>
                             <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                Aceita <code>(11) 98765-4321</code>, <code>011 9876-5432</code>, <code>+55 11 98765-4321</code>,
-                                <code>5511987654321</code> e linhas com nome (<code>telefone;nome</code>). Cabeçalho
-                                <code>telefone</code> é ignorado.
+                                Aceita com ou sem máscara (<code>326.955.618-73</code> ou <code>32695561873</code>).
+                                Máximo de 25 CPFs por consulta (~1 minuto por CPF).
                             </small>
                         </div>
 
                         <div class="file-row">
-                            <input id="validar-arquivo" type="file" accept=".txt,.csv" onchange="carregarArquivoValidacao(this)">
-                            <small>
-                                Lido no seu navegador (.txt ou .csv): entram na caixa só os números com DDD —
-                                CPF, CNPJ, CEP, datas e demais dados são descartados e nada é enviado ao servidor.
-                            </small>
+                            <input id="extrator-arquivo" type="file" accept=".txt,.csv" onchange="carregarArquivoCpfs(this)">
+                            <small>Arquivo .txt/.csv lido no seu navegador: entram na caixa só as linhas com CPF (11 dígitos).</small>
                         </div>
 
-                        <div class="form-group">
-                            <label>DDD padrão (para números sem DDD)</label>
-                            <input id="validar-ddd" class="form-control" type="text" inputmode="numeric" maxlength="2" placeholder="Ex: 11">
-                        </div>
-
-                        <label class="mapa-check">
-                            <input id="validar-deduplicar" type="checkbox" checked>
-                            Remover números duplicados
-                        </label>
-
-                        <label class="mapa-check">
-                            <input id="validar-so-celular" type="checkbox">
-                            Manter somente celulares (descarta fixos)
-                        </label>
-
-                        <button class="btn-primary" style="margin-top: 16px" onclick="validarListaTelefones()">Validar números</button>
-                        <p id="validar-progresso" class="mapa-resumo"></p>
+                        <button class="btn-primary" style="margin-top: 16px" onclick="consultarCpfsExtrator()">Consultar CPFs</button>
+                        <p id="extrator-progresso" class="mapa-resumo"></p>
+                        <p id="extrator-status" class="mapa-ajuda" style="margin-top: 8px;"></p>
                     </div>
 
                     <div class="screen-panel">
                         <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Resultado</h3>
-                        <p class="mapa-ajuda">Números prontos para importar (DDI 55 + DDD + número).</p>
+                        <p class="mapa-ajuda">CPF → nome e telefone(s) retornados pelo extrator. Telefones já no formato Wati (55 + DDD + número).</p>
 
-                        <div id="validar-resumo" class="validar-resumo"></div>
+                        <div id="extrator-resumo" class="validar-resumo"></div>
 
                         <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
-                            <button class="btn-mini" type="button" onclick="baixarValidacaoLista()">⬇ Baixar .csv</button>
-                            <button class="btn-mini" type="button" onclick="copiarValidosValidacao()">📋 Copiar válidos</button>
-                            <button class="btn-mini" type="button" onclick="usarValidacaoNaLista()">↪ Usar na importação</button>
+                            <button class="btn-mini" type="button" onclick="baixarExtrator()">⬇ Baixar .csv</button>
+                            <button class="btn-mini" type="button" onclick="copiarTelefonesExtrator()">📋 Copiar telefones</button>
+                            <button class="btn-mini" type="button" onclick="usarExtratorNaLista()">↪ Usar na importação</button>
                         </div>
 
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Original</th>
+                                        <th>CPF</th>
                                         <th>Status</th>
-                                        <th>Número Wati</th>
-                                        <th>Formatado</th>
-                                        <th>Tipo</th>
-                                        <th>Motivo</th>
+                                        <th>Nome</th>
+                                        <th>Telefone(s)</th>
                                     </tr>
                                 </thead>
-                                <tbody id="tabela-validar">
-                                    <tr><td colspan="6" class="vazio">Cole os números e clique em “Validar números”.</td></tr>
+                                <tbody id="tabela-extrator">
+                                    <tr><td colspan="4" class="vazio">Cole os CPFs e clique em “Consultar CPFs”.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -594,7 +705,20 @@
                 </div>
 
                 <div class="screen-panel" style="margin-top: 18px;">
-                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">2. Consultar CNPJ (dados públicos)</h3>
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">2. Telefones coletados (CNPJ)</h3>
+                    <p class="mapa-ajuda">Telefones de empresas que você marcou com ↪ na consulta de CNPJ, prontos para copiar ou importar.</p>
+
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
+                        <button class="btn-mini" type="button" onclick="copiarColetados()">📋 Copiar</button>
+                        <button class="btn-mini" type="button" onclick="usarColetadosNaLista()">↪ Usar na importação</button>
+                        <button class="btn-mini" type="button" onclick="limparColetados()">🧹 Limpar</button>
+                    </div>
+
+                    <p id="coletados-lista" class="mapa-ajuda">Nenhum telefone coletado ainda.</p>
+                </div>
+
+                <div class="screen-panel" style="margin-top: 18px;">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">3. Consultar CNPJ (dados públicos)</h3>
                     <p class="mapa-ajuda">
                         Consulta a base pública da Receita (BrasilAPI / Minha Receita): razão social, nome fantasia,
                         situação, CNAE, endereço e <strong>telefone e e-mail da empresa</strong>. Não traz CPF de sócio
@@ -634,73 +758,7 @@
                 </div>
             </section>
 
-            <!-- PROCESSAR LISTA (LISTA SUJA) -->
-            <section class="view oculto" id="view-listasuja">
-                <div class="section-title">
-                    <div>
-                        <h1>Processar Lista (Lista Suja)</h1>
-                        <p>Cola o dump bruto (blocos com <code>CPF Persona:</code>, <code>CNPJ:</code>, <code>Telefone cadastro:</code>, <code>Telefones:</code>...) e transforma em linhas <code>{telefone};{nome};{cnpj}</code> prontas para disparo. Tudo roda no seu navegador — nada sai do computador.</p>
-                    </div>
-                    <button class="btn-mini" onclick="limparListaSuja()">🧹 Limpar</button>
-                </div>
-
-                <div class="listas-grid">
-                    <div class="screen-panel">
-                        <div class="form-group">
-                            <label>1. Cole a lista bruta (dump)</label>
-                            <textarea id="suja-texto" class="form-control lista-texto" style="min-height: 320px;" placeholder="CPF Persona:            123.456.789-09&#10;CNPJ:                   27.964.767/0001-97&#10;Telefone cadastro:      (12) 3153-3128&#10;Nome:                   MARCOS TOBIAS LIMA&#10;Telefones:&#10;    (12) 99711-2233&#10;    +55 12 99888-7766&#10;..."></textarea>
-                            <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                Um bloco por pessoa, começando em <code>CPF Persona:</code>. Os telefones saem dos campos
-                                <code>Telefone cadastro</code> e <code>Telefones</code> (lista) — telefones da empresa não entram.
-                                CPF é validado pelo dígito verificador; registro sem telefone válido é descartado.
-                            </small>
-                        </div>
-
-                        <button class="btn-primary" style="margin-top: 16px" onclick="processarListaSujaPainel()">Processar Lista</button>
-                        <p id="suja-progresso" class="mapa-resumo"></p>
-                    </div>
-
-                    <div class="screen-panel">
-                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Resultado</h3>
-
-                        <div class="suja-tabs" style="display: flex; gap: 8px; margin-bottom: 12px;">
-                            <button id="suja-aba-prontos" class="btn-mini active" type="button" onclick="mostrarAbaListaSuja('prontos')">Prontos (0)</button>
-                            <button id="suja-aba-descartados" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('descartados')">Descartados (0)</button>
-                        </div>
-
-                        <div id="suja-painel-prontos">
-                            <p class="mapa-ajuda">Linhas no formato <code>{telefone};{nome};{cnpj}</code> — uma por telefone válido (deduplicado).</p>
-
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
-                                <button class="btn-mini" type="button" onclick="copiarListaSuja()">📋 Copiar</button>
-                                <button class="btn-mini" type="button" onclick="baixarListaSuja()">⬇ Baixar .txt</button>
-                                <button class="btn-mini" type="button" onclick="usarListaSujaNaImportacao()">↪ Enviar para importação</button>
-                            </div>
-
-                            <textarea id="suja-saida" class="form-control lista-texto" readonly style="min-height: 240px;" placeholder="551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97&#10;..."></textarea>
-                        </div>
-
-                        <div id="suja-painel-descartados" class="oculto">
-                            <p class="mapa-ajuda">Registros rejeitados com o motivo e o trecho bruto para conferir.</p>
-
-                            <div class="table-container">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Motivo</th>
-                                            <th>Dado bruto</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tabela-suja-descartados">
-                                        <tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
+            
             <!-- LOGS -->
             <section class="view oculto" id="view-logs">
                 <div class="section-title">

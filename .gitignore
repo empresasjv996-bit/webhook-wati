@@ -16,6 +16,7 @@ status-prod.json
 # Listas com dados pessoais (CPF/telefone) e saidas da automacao do extrator
 listas/
 downloads/
+diagnostico/
 consulta.json
 consulta.png
 tela.json

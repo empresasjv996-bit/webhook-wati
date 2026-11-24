@@ -13,7 +13,12 @@ const {
     formatarCnpj,
     normalizarTelefone,
     extrairTelefones,
-    segmentarRegistros
+    segmentarRegistros,
+    aplicarResultadoExtrator,
+    montarLinhasComEmpresa,
+    montarCadastroCsv,
+    mascararCpf,
+    cpfCombina
 } = require('./lista-suja');
 
 /* ---------- UAT 1: cenário positivo (MARCOS TOBIAS LIMA) ---------- */
@@ -83,10 +88,11 @@ const blocoSemTelefone = [
 const resultadoSemTelefone = processarListaSuja(blocoSemTelefone);
 
 assert.strictEqual(resultadoSemTelefone.linhas.length, 0, 'nada na lista verde');
-assert.strictEqual(resultadoSemTelefone.descartados.length, 1, '1 descarte');
-assert.strictEqual(resultadoSemTelefone.descartados[0].motivo, 'Sem Telefone Válido', 'motivo exato');
+assert.strictEqual(resultadoSemTelefone.descartados.length, 0, 'CPF válido não é descartado por falta de telefone');
+assert.strictEqual(resultadoSemTelefone.semTelefone.length, 1, '1 registro aguardando o extrator');
+assert.deepStrictEqual(resultadoSemTelefone.cpfs, ['529.982.247-25'], 'CPF completo formatado na lista do extrator');
 
-console.log('OK - UAT 3: sem telefone vai para descartados com motivo');
+console.log('OK - UAT 3: sem telefone fica aguardando o extrator (não é descartado)');
 
 /* ---------- UAT 4: deduplicação (coberto no UAT 1: 1297112233 repetido) ---------- */
 
@@ -127,6 +133,170 @@ assert.ok(duracao < 2000, 'processou em ' + duracao + 'ms (limite 2000ms)');
 
 console.log('OK - UAT 5: 1.000 registros em ' + duracao + 'ms');
 
+/* ---------- UAT 6: dump LIVE C6 PJ (empresa + persona + sócios) ---------- */
+
+const blocoLive = [
+    '  CNPJ:                   27964767000197',
+    '  CPF Persona:            014.079.598-75',
+    '  Email cadastro:         pr*****@gmail.com',
+    '  Telefone cadastro:      55 (**) ***** 9400',
+    '  Final visivel:          9400',
+    '',
+    '  --- DADOS DA EMPRESA ---',
+    '  Razao Social:           IMPERIAL MARKETING E PROPAGANDA LTDA',
+    '  Nome Fantasia:          IMP',
+    '  Situacao:               ATIVA',
+    '  Porte:                  ME',
+    '  Capital Social:         R$ 100000',
+    '  Inicio Atividade:       14/06/2017',
+    '  Logradouro:             R DE CAXIAS 53, 53',
+    '  Bairro:                 CENTRO',
+    '  Cidade:                 LORENA - SP',
+    '  CEP:                    12600-040',
+    '  Tel Empresa 1:          (12) 3157-3730',
+    '  Tel Empresa 2:          -',
+    '  Email Empresa:          contador@dilonet.com.br',
+    '',
+    '  --- DADOS DA PERSONA (CPF) ---',
+    '  Nome:                   MARCOS TOBIAS LIMA',
+    '  Nascimento:             01/03/1965',
+    '  Nome da mae:            YOLANDA FERREIRA SILVA',
+    '  Sexo:                   M',
+    '  Email:                  digitalbrasil.vip@r7.com',
+    '  Telefones:',
+    '                          (12) 3153-3128',
+    '                          (12) 98261-8776',
+    '  Endereco:               R DE CAXIAS, 53 - CENTRO, LORENA - SP, CEP: 12600-040'
+].join('\n');
+
+const blocoLiveSocios = [
+    '  CNPJ:                   55251617000171',
+    '  CPF Persona:            305.863.028-08',
+    '  Email cadastro:         la*****@gmail.com',
+    '  Telefone cadastro:      55 (**) ***** 9866',
+    '  Final visivel:          9866',
+    '',
+    '  --- DADOS DA EMPRESA ---',
+    '  Razao Social:           SHIRATORI COMERCIO DE ALIMENTOS E BEBIDAS LTDA',
+    '  Nome Fantasia:          -',
+    '  Situacao:               ATIVA',
+    '  Porte:                  MICRO EMPRESA',
+    '  Capital Social:         R$ 400000',
+    '  Inicio Atividade:       2024-05-23',
+    '  Logradouro:             KENNEDY, 700',
+    '  Bairro:                 VILA MARLENE',
+    '  Cidade:                 SAO BERNARDO DO CAMPO - SP',
+    '  CEP:                    09726901',
+    '  Tel Empresa 1:          1134505751',
+    '  Tel Empresa 2:          -',
+    '  Email Empresa:          -',
+    '',
+    '  --- DADOS DA PERSONA (CPF) ---',
+    '  Nome:                   LAYLA SHIRATORI',
+    '  Nascimento:             19/10/1982',
+    '  Nome da mae:            MARCIA APARECIDA EBOLI SHIRATORI',
+    '  Email:                  laylashiratori@gmail.com',
+    '  Telefones:',
+    '                          (11) 3333-4444',
+    '  Endereco:               R JOAQUIM FLORIANO, 233 - ITAIM BIBI, SAO PAULO - SP, CEP: 04534-010',
+    '',
+    '  --- SOCIOS (1) ---',
+    '',
+    '  [Socio 1]',
+    '  Nome:                   LAYLA SHIRATORI',
+    '  Qualificacao:           Sócio-Administrador',
+    '  Data Entrada:           2026-06-01',
+    '  CPF Mascarado:          ***863028**',
+    '  CPF Completo:           305.863.028-08',
+    '  Nascimento:             19/10/1982',
+    '  Nome da mae:            MARCIA APARECIDA EBOLI SHIRATORI',
+    '  Telefones:',
+    '                          (11) 99999-8888',
+    '  Email:                  laylashiratori@gmail.com'
+].join('\n');
+
+const resultadoLive = processarListaSuja(blocoLive + '\n\n' + blocoLiveSocios);
+
+assert.strictEqual(resultadoLive.registros, 2, '2 registros LIVE');
+assert.strictEqual(resultadoLive.validos.length, 2, '2 registros válidos');
+assert.strictEqual(resultadoLive.descartados.length, 0, 'nenhum descarte');
+assert.deepStrictEqual(resultadoLive.linhas, [
+    '551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97',
+    '5512982618776;MARCOS TOBIAS LIMA;27.964.767/0001-97',
+    '551133334444;LAYLA SHIRATORI;55.251.617/0001-71'
+], 'telefones da persona (telefone do sócio não entra)');
+
+assert.deepStrictEqual(resultadoLive.cpfs, ['014.079.598-75', '305.863.028-08'], 'CPFs um por linha para o extrator');
+
+assert.strictEqual(resultadoLive.validos[0].empresa.razaoSocial, 'IMPERIAL MARKETING E PROPAGANDA LTDA');
+assert.strictEqual(resultadoLive.validos[0].empresa.cidade, 'LORENA');
+assert.strictEqual(resultadoLive.validos[0].empresa.uf, 'SP');
+assert.strictEqual(resultadoLive.validos[0].empresa.cep, '12600-040');
+assert.strictEqual(resultadoLive.validos[1].empresa.cidade, 'SAO BERNARDO DO CAMPO');
+assert.strictEqual(resultadoLive.validos[1].empresa.cep, '09726-901');
+assert.strictEqual(resultadoLive.validos[1].empresa.telefone1, '(11) 3450-5751');
+assert.strictEqual(resultadoLive.validos[1].empresa.nomeFantasia, '', 'nome fantasia "-" vira vazio');
+
+assert.strictEqual(resultadoLive.validos[1].socios.length, 1, 'sócio separado da persona');
+assert.strictEqual(resultadoLive.validos[1].socios[0].nome, 'LAYLA SHIRATORI');
+assert.strictEqual(resultadoLive.validos[1].socios[0].cpfFormatado, '305.863.028-08');
+assert.strictEqual(resultadoLive.validos[1].socios[0].telefones[0], '5511999998888');
+
+assert.strictEqual(mascararCpf('30586302808'), '305.863.xxx-xx');
+assert.strictEqual(cpfCombina('305.863.xxx-xx', '30586302808'), true);
+assert.strictEqual(cpfCombina('305.863.xxx-xx', '99986302808'), false);
+assert.strictEqual(cpfCombina('305.863.028-08', '30586302808'), true);
+
+/* extrator por CPF mascarado */
+const comMascarado = aplicarResultadoExtrator(resultadoLive.validos, '305.863.xxx-xx;5511999990000');
+assert.strictEqual(comMascarado.aplicados, 1, 'CPF mascarado casa com o registro');
+assert.ok(comMascarado.registros[1].telefones.includes('5511999990000'), 'telefone revelado entrou na lista');
+
+/* extrator por nome (linha LIVE do site) */
+const comLive = aplicarResultadoExtrator(
+    resultadoLive.validos,
+    '✓ [LIVE] MARCOS TOBIAS LIMA | Mask: (12) *****8776 | Revelado: 12998218776'
+);
+assert.strictEqual(comLive.aplicados, 1, 'linha LIVE casa pelo nome');
+assert.ok(comLive.registros[0].telefones.includes('5512998218776'), 'revelado do LIVE entrou');
+
+/* JSON do painel */
+const comJson = aplicarResultadoExtrator(resultadoLive.validos, JSON.stringify({
+    resultados: [{ cpf: '30586302808', status: 'ok', nome: 'LAYLA SHIRATORI', telefones: [{ wati: '5511988887777' }] }]
+}));
+assert.strictEqual(comJson.aplicados, 1, 'JSON do painel casa pelo CPF');
+assert.ok(comJson.registros[1].telefones.includes('5511988887777'), 'telefone do JSON entrou');
+
+/* registro sem telefone no dump: o extrator é quem completa */
+const soEmpresa = processarListaSuja(blocoLive.replace(/  Telefones:[\s\S]*?  Endereco:/, '  Endereco:'));
+assert.strictEqual(soEmpresa.linhas.length, 0, 'sem telefone no dump: nada pronto');
+assert.deepStrictEqual(soEmpresa.cpfs, ['014.079.598-75'], 'CPF na lista do extrator');
+assert.strictEqual(soEmpresa.semTelefone.length, 1);
+
+const completado = aplicarResultadoExtrator(
+    soEmpresa.validos,
+    '014.079.xxx-xx;5512999999999'
+);
+assert.strictEqual(completado.registros[0].telefones[0], '5512999999999');
+assert.deepStrictEqual(
+    completado.registros[0].linhas,
+    ['5512999999999;MARCOS TOBIAS LIMA;27.964.767/0001-97'],
+    'saída final {telefone};{nome};{cnpj}'
+);
+
+/* dados da empresa para a ficha/importação */
+const importacao = montarLinhasComEmpresa(completado.registros);
+assert.ok(importacao.cabecalho.indexOf('telefone;{{1}};{{2}};razao_social;') === 0, 'cabeçalho com as 3 colunas + atributos');
+assert.strictEqual(importacao.linhas.length, 1);
+assert.ok(importacao.linhas[0].indexOf('5512999999999;MARCOS TOBIAS LIMA;27.964.767/0001-97;IMPERIAL MARKETING') === 0);
+
+const cadastro = montarCadastroCsv(resultadoLive.validos);
+assert.strictEqual(cadastro.linhas.length, 2, '1 linha por empresa');
+assert.ok(cadastro.colunas.indexOf('razao_social') >= 0);
+assert.ok(cadastro.linhas[1].indexOf('55.251.617/0001-71;SHIRATORI COMERCIO DE ALIMENTOS E BEBIDAS LTDA') === 0);
+
+console.log('OK - UAT 6: dump LIVE C6 PJ (empresa/persona/sócios, extrator e lista final)');
+
 /* ---------- unidades ---------- */
 
 assert.strictEqual(validarCpf('123.456.789-09'), true, 'CPF de teste válido');
@@ -155,6 +325,66 @@ assert.strictEqual(segmentarRegistros(doisRegistros).length, 2, 'segmenta 2 regi
 
 console.log('OK - unidades do parser (CPF, CNPJ, telefone, segmentação)');
 
+/* ---------- UAT 7: tolerância à colagem (PDF, HTML, CRLF, rótulos) ---------- */
+
+const blocoColagem = [
+    'CNPJ:                   27.964.767/0001-97',
+    'CPF Persona:            014.079.598-75',
+    '--- DADOS DA EMPRESA ---',
+    'Razao Social:           IMPERIAL MARKETING E PROPAGANDA LTDA',
+    'Cidade:                 SAO JOSE DOS CAMPOS/SP',
+    '--- DADOS DA PERSONA (CPF) ---',
+    'Nome:                   MARCOS TOBIAS LIMA',
+    'Telefones:',
+    '    (12) 3153-3128'
+];
+
+const blocoCpfPrimeiro = [
+    'CPF Persona:            014.079.598-75',
+    'Nome:                   MARCOS TOBIAS LIMA',
+    'Telefones:',
+    '    (12) 3153-3128',
+    'CNPJ:                   27.964.767/0001-97'
+];
+
+const variantesColagem = {
+    'quebras CRLF': blocoColagem.join('\r\n'),
+    'linhas indentadas com espaço': blocoColagem.map((linha) => '   ' + linha).join('\n'),
+    'linhas indentadas com NBSP': blocoColagem.map((linha) => '\u00A0\u00A0' + linha).join('\n'),
+    'colagem esmagada em uma linha (PDF/tabela)': blocoColagem.join(' '),
+    'rótulo "CPF da Persona"': blocoColagem.join('\n').replace('CPF Persona:', 'CPF da Persona:'),
+    'rótulo "CPF Persona (Titular)"': blocoColagem.join('\n').replace('CPF Persona:', 'CPF Persona (Titular):'),
+    'CPF Persona antes do CNPJ (dump antigo)': blocoCpfPrimeiro.join('\n'),
+    'linha em branco entre registros': blocoColagem.join('\n') + '\n\n' + blocoColagem.join('\n')
+};
+
+Object.keys(variantesColagem).forEach((nome) => {
+    const saida = processarListaSuja(variantesColagem[nome]);
+
+    assert.ok(saida.registros >= 1, nome + ': registro reconhecido');
+    assert.ok(
+        saida.linhas[0] === '551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97',
+        nome + ': telefone, nome e CNPJ na lista final'
+    );
+});
+
+const doisNaColagem = processarListaSuja(variantesColagem['linha em branco entre registros']);
+assert.strictEqual(doisNaColagem.registros, 2, 'dois blocos separados por linha em branco');
+
+/* texto que não é dump: erro explicativo (e não uma lista vazia silenciosa) */
+let erroFormato = null;
+try {
+    processarListaSuja('Telefone: (12) 3153-3128\nNome: PESSOA QUALQUER');
+} catch (erro) {
+    erroFormato = erro;
+}
+
+assert.ok(erroFormato, 'texto sem os rótulos do dump é recusado');
+assert.strictEqual(erroFormato.codigo, 'formato', 'erro marcado como problema de formato');
+assert.ok(erroFormato.message.indexOf('CPF Persona') >= 0, 'mensagem diz qual rótulo era esperado');
+
+console.log('OK - UAT 7: colagem tolerante (CRLF, NBSP, uma linha, rótulos alternativos)');
+
 /* ---------- integração da tela (index.html + app.js + lista branca) ---------- */
 
 const fs = require('fs');
@@ -166,28 +396,53 @@ const painel = fs.readFileSync(path.join(raiz, 'app.js'), 'utf8');
 const servidor = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
 const estilos = fs.readFileSync(path.join(raiz, 'style.css'), 'utf8');
 
-assert.ok(html.includes('id="view-listasuja"'), 'tela "Processar Lista" existe no index.html');
+assert.ok(html.includes('id="view-listas"'), 'tela "Listas" existe no index.html');
+assert.ok(!html.includes('id="view-listasuja"'), 'a tela separada de Lista Suja foi unificada em Listas');
+
+const telaListas = html.slice(html.indexOf('id="view-listas"'), html.indexOf('id="view-canais"'));
+
+assert.ok(telaListas.includes('id="suja-texto"'), 'passo do dump dentro da tela Listas');
+assert.ok(telaListas.includes('id="lista-importar"'), 'planilha pronta recolhida na mesma tela');
+assert.ok(telaListas.includes('id="lista-texto"'), 'importação manual na mesma tela');
+assert.ok(telaListas.includes('id="tabela-listas"'), 'listas salvas na mesma tela');
+assert.ok(painel.includes("if (view === 'listasuja') view = 'listas';"), 'irPara aceita o apelido antigo "listasuja"');
+assert.ok(painel.includes('function abrirImportacaoLista('), 'app.js abre a planilha pronta ao enviar para importação');
 assert.ok(html.includes('id="suja-texto"'), 'textarea da lista bruta');
 assert.ok(html.includes('id="suja-saida"'), 'textarea do resultado');
+assert.ok(html.includes('id="suja-cpfs"'), 'textarea dos CPFs para o extrator');
+assert.ok(html.includes('id="suja-extrator"'), 'textarea do resultado do extrator');
 assert.ok(html.includes('id="tabela-suja-descartados"'), 'tabela de descartados');
+assert.ok(html.includes('id="tabela-suja-sem-telefone"'), 'tabela de registros sem telefone');
+assert.ok(html.includes('id="suja-aba-sem-telefone"'), 'aba Sem telefone');
 assert.ok(html.includes('onclick="processarListaSujaPainel()"'), 'botão Processar Lista');
 assert.ok(html.includes('onclick="copiarListaSuja()"'), 'botão Copiar');
 assert.ok(html.includes('onclick="baixarListaSuja()"'), 'botão Baixar .txt');
+assert.ok(html.includes('onclick="copiarListaSujaCpfs()"'), 'botão Copiar CPFs');
+assert.ok(html.includes('onclick="baixarListaSujaCpfs()"'), 'botão Baixar CPFs');
+assert.ok(html.includes('onclick="levarListaSujaParaExtrator()"'), 'botão Levar para Consultar CPF');
+assert.ok(html.includes('onclick="aplicarResultadoExtratorPainel()"'), 'botão Aplicar resultado do extrator');
+assert.ok(html.includes('onclick="puxarResultadoExtratorPainel()"'), 'botão Usar última consulta do painel');
+assert.ok(html.includes('onclick="usarListaSujaNaImportacaoComEmpresa()"'), 'botão Enviar com dados da empresa');
+assert.ok(html.includes('onclick="baixarCadastroListaSuja()"'), 'botão Baixar cadastro .csv');
 assert.ok(html.includes('<script src="lista-suja.js"></script>'), 'parser carregado no index.html');
 assert.ok(
     html.indexOf('src="lista-suja.js"') < html.indexOf('src="app.js"'),
     'lista-suja.js precisa vir antes de app.js'
 );
 
-['mostrarAbaListaSuja', 'renderizarListaSuja', 'processarListaSujaPainel', 'copiarListaSuja',
-    'baixarListaSuja', 'usarListaSujaNaImportacao', 'limparListaSuja'].forEach((nome) => {
+['mostrarAbaListaSuja', 'renderizarListaSuja', 'recalcularListaSuja', 'processarListaSujaPainel',
+    'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel', 'copiarListaSuja',
+    'copiarListaSujaCpfs', 'baixarListaSujaCpfs', 'levarListaSujaParaExtrator', 'cpfsDaCaixa',
+    'baixarListaSuja', 'usarListaSujaNaImportacao', 'usarListaSujaNaImportacaoComEmpresa',
+    'baixarCadastroListaSuja', 'limparListaSuja'].forEach((nome) => {
     assert.ok(new RegExp('function ' + nome + '\\(').test(painel), 'app.js define ' + nome);
 });
 
 assert.ok(painel.includes("'telefone;{{1}};{{2}}'"), 'enviar para a importação usa telefone;{{1}};{{2}}');
 assert.ok(servidor.includes("'lista-suja.js'"), 'lista-suja.js está na lista branca de estáticos');
 assert.ok(estilos.includes('.suja-bruto'), 'estilo do trecho bruto do descarte');
-assert.ok(estilos.includes('.suja-tabs'), 'estilo das abas');
+assert.ok(estilos.includes('.suja-tabs'), 'estilo das abas do resultado');
+assert.ok(estilos.includes('.lista-importar'), 'estilo da planilha pronta recolhida');
 
 console.log('OK - integração da tela (HTML, app.js, lista branca e CSS)');
 console.log('');

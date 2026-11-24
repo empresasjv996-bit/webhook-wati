@@ -106,14 +106,16 @@ function toast(mensagem, tipo) {
    NAVEGAÇÃO ENTRE AS TELAS
    --------------------------------------------------------- */
 function irPara(view) {
+    /* A antiga tela "Lista Suja" virou o fluxo único da tela Listas. */
+    if (view === 'listasuja') view = 'listas';
+
     const titulos = {
         campanhas: 'Campanhas',
         wati: 'Atividade Wati',
         canais: 'Canais',
         logs: 'Logs',
         auditoria: 'Auditoria',
-        validar: 'Validar listas',
-        listasuja: 'Processar Lista',
+        extrator: 'Consultar CPF',
         usuarios: 'Usuários'
     };
 
@@ -164,7 +166,20 @@ function mostrarClientes() { irPara('clientes'); }
 function mostrarListas() { irPara('listas'); }
 function mostrarInicio() { irPara('inicio'); }
 
-/* --- menu agrupado (Início · Puxadores · Envio · Auditoria) --- */
+/* Abre o bloco "Planilha pronta" da tela Listas — usado quando outra tela
+   preenche o texto e leva o usuário direto para a importação. */
+function abrirImportacaoLista() {
+    const bloco = $('lista-importar');
+    if (!bloco) return;
+
+    bloco.open = true;
+
+    if (typeof bloco.scrollIntoView === 'function') {
+        bloco.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+}
+
+/* --- menu agrupado (Início e Listas diretos · Contatos · Envio · Sistema) --- */
 function alternarGrupoNav(nome) {
     const alvo = document.querySelector('.nav-grupo[data-grupo="' + nome + '"]');
     const estavaAberto = !!(alvo && alvo.classList.contains('aberto'));
@@ -891,7 +906,34 @@ const CAMPOS_LISTA = [
     { chave: 'razao_social', rotulo: 'Razão social → razao_social' },
     { chave: 'ag_conta', rotulo: 'Agência / Conta → ag_conta' },
     { chave: 'socio', rotulo: 'Sócio → socio' },
-    { chave: 'responsavel', rotulo: 'Responsável → responsavel' }
+    { chave: 'responsavel', rotulo: 'Responsável → responsavel' },
+    { chave: 'nome_fantasia', rotulo: 'Nome fantasia → nome_fantasia' },
+    { chave: 'situacao', rotulo: 'Situação → situacao' },
+    { chave: 'porte', rotulo: 'Porte → porte' },
+    { chave: 'capital_social', rotulo: 'Capital social → capital_social' },
+    { chave: 'inicio_atividade', rotulo: 'Início atividade → inicio_atividade' },
+    { chave: 'logradouro', rotulo: 'Logradouro → logradouro' },
+    { chave: 'bairro', rotulo: 'Bairro → bairro' },
+    { chave: 'cidade', rotulo: 'Cidade → cidade' },
+    { chave: 'uf', rotulo: 'UF → uf' },
+    { chave: 'cep', rotulo: 'CEP → cep' },
+    { chave: 'tel_empresa_1', rotulo: 'Tel. empresa 1 → tel_empresa_1' },
+    { chave: 'tel_empresa_2', rotulo: 'Tel. empresa 2 → tel_empresa_2' },
+    { chave: 'email_empresa', rotulo: 'E-mail empresa → email_empresa' },
+    { chave: 'nascimento', rotulo: 'Nascimento → nascimento' },
+    { chave: 'nome_mae', rotulo: 'Nome da mãe → nome_mae' },
+    { chave: 'sexo', rotulo: 'Sexo → sexo' },
+    { chave: 'email', rotulo: 'E-mail → email' },
+    { chave: 'endereco', rotulo: 'Endereço → endereco' },
+    { chave: 'socios', rotulo: 'Sócios → socios' }
+];
+
+/* Colunas do cadastro da empresa que já têm nome de atributo pronto. */
+const DESTINOS_CADASTRO = [
+    'razao_social', 'nome_fantasia', 'situacao', 'porte', 'capital_social',
+    'inicio_atividade', 'logradouro', 'bairro', 'cidade', 'uf', 'cep',
+    'tel_empresa_1', 'tel_empresa_2', 'email_empresa', 'cpf', 'nascimento',
+    'nome_mae', 'sexo', 'email', 'endereco', 'socios'
 ];
 
 const MAPA_MEMORIA_CHAVE = 'qgc-mapa-lista';
@@ -1015,6 +1057,7 @@ function adivinharDestino(coluna, indice, linhas) {
     const chave = normalizarChave(coluna);
 
     if (chave) {
+        if (DESTINOS_CADASTRO.indexOf(chave) >= 0) return chave;
         if (/cnpj/.test(chave)) return 'cnpj';
         if (/cpf/.test(chave)) return 'cpf';
         if (/(razao|social|empresa|fantasia|company)/.test(chave)) return 'razao_social';
@@ -1353,104 +1396,47 @@ async function verificarNumerosLista() {
 }
 
 /* ---------------------------------------------------------
-   VALIDAR LISTAS (somente formato: DDI 55, DDD e 9º dígito)
-   Não consulta serviço externo e não confirma se a linha existe.
+   CONSULTAR CPF (EXTRATOR)
+   Envia CPFs ao extratorgov.online (via API do painel) e
+   devolve nome + telefone(s) de cada um.
    --------------------------------------------------------- */
-let validacaoLista = { resultados: [], resumo: null };
+let extratorResultado = { resumo: null, resultados: [] };
+let telefonesColetados = [];
 
-/* Extrai o telefone de uma linha colada. Aceita "telefone", "telefone;nome",
-   "nome;telefone" e separadores ; , Tab |. */
-function telefoneDaLinhaValidacao(linha) {
-    const limpa = String(linha || '').replace(/^\uFEFF/, '').trim();
-    if (!limpa) return '';
+/* Extrai CPFs (11 dígitos) de um texto colado, sem repetir. */
+function cpfsDeTexto(texto) {
+    const achados = String(texto || '')
+        .replace(/﻿/g, '')
+        .match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g) || [];
 
-    const partes = limpa.split(/[;,\t|]/).map((parte) => parte.trim()).filter(Boolean);
-    const comNumero = partes.find((parte) => apenasNumeros(parte).length >= 8);
-
-    return comNumero || limpa;
-}
-
-function entradasValidacao() {
-    const caixa = $('validar-texto');
-    if (!caixa) return [];
-
-    return String(caixa.value || '')
-        .replace(/\uFEFF/g, '')
-        .split(/\r?\n/)
-        .map((linha) => linha.trim())
-        .filter(Boolean)
-        .filter((linha) => !/^telefone\b/i.test(linha.replace(/["']/g, '')))
-        .map((linha) => ({ linha, valor: telefoneDaLinhaValidacao(linha) }))
-        .filter((item) => apenasNumeros(item.valor).length >= 8);
-}
-
-/* ---------------------------------------------------------
-   ARQUIVO LOCAL (.txt/.csv) -> SÓ TELEFONES
-   Lê a lista escolhida no computador e aproveita apenas os
-   números com DDD que já estão escritos no arquivo. CPF, CNPJ,
-   CEP e datas são mascarados antes da leitura, então nada de
-   pessoa física entra na validação. O arquivo não é enviado ao
-   servidor: só os números que aparecem na caixa de texto.
-   --------------------------------------------------------- */
-
-/* Mesma faixa de DDDs usada em telefone.js (ANATEL). */
-const DDD_FORMATO_VALIDACAO = /^(?:1[1-9]|2[12478]|3[1-578]|4[1-9]|5[1345]|6[1-9]|7[134579]|8[1-9]|9[1-9])$/;
-
-/* Confere só o formato (DDI 55 opcional, DDD oficial, celular 9 + 6a9,
-   fixo 2a5) para separar telefone de CPF/CEP/outros números do arquivo.
-   A validação final continua sendo a da API. */
-function pareceTelefoneValidacao(digitos) {
-    let numero = String(digitos || '');
-
-    if (numero.length === 12 || numero.length === 13) {
-        if (!numero.startsWith('55')) return false;
-        numero = numero.slice(2);
-    }
-
-    if (numero.length !== 10 && numero.length !== 11) return false;
-    if (!DDD_FORMATO_VALIDACAO.test(numero.slice(0, 2))) return false;
-
-    const assinante = numero.slice(2);
-
-    return assinante.length === 9
-        ? assinante[0] === '9'
-        : (assinante[0] >= '2' && assinante[0] <= '9');
-}
-
-/* Devolve os telefones encontrados no texto, sem repetir. */
-function extrairTelefonesValidacao(texto) {
-    const limpo = String(texto || '')
-        .replace(/\uFEFF/g, '')
-        .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, ' ')          // CPF
-        .replace(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g, ' ')   // CNPJ
-        .replace(/\b\d{2}\/\d{2}\/\d{4}\b/g, ' ')                // data
-        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');                 // data ISO
-
-    const achados = limpo.match(/(?:\+?55[\s.-]?)?0?\(?\d{2}\)?[\s.-]?\d{4,5}[\s.-]?\d{4}(?!\d)/g) || [];
-
-    const numeros = [];
+    const cpfs = [];
     const vistos = new Set();
 
     achados.forEach((achado) => {
-        const digitos = apenasNumeros(achado).replace(/^0+/, '');
-        if (!pareceTelefoneValidacao(digitos) || vistos.has(digitos)) return;
-
+        const digitos = apenasNumeros(achado);
+        if (digitos.length !== 11 || vistos.has(digitos)) return;
         vistos.add(digitos);
-        numeros.push(achado.trim());
+        cpfs.push(digitos);
     });
 
-    return numeros;
+    return cpfs;
 }
 
-function carregarArquivoValidacao(input) {
+function entradasCpfs() {
+    const caixa = $('extrator-texto');
+    if (!caixa) return [];
+    return cpfsDeTexto(caixa.value);
+}
+
+function carregarArquivoCpfs(input) {
     const arquivo = input && input.files && input.files[0];
-    const caixa = $('validar-texto');
-    const progresso = $('validar-progresso');
+    const caixa = $('extrator-texto');
+    const progresso = $('extrator-progresso');
 
     if (!arquivo) return;
 
-    if (arquivo.size > 5 * 1024 * 1024) {
-        toast('Arquivo muito grande (máximo 5 MB). Divida a lista em partes.', 'erro');
+    if (arquivo.size > 2 * 1024 * 1024) {
+        toast('Arquivo muito grande (máximo 2 MB). Divida a lista em partes.', 'erro');
         if (input) input.value = '';
         return;
     }
@@ -1458,10 +1444,10 @@ function carregarArquivoValidacao(input) {
     const leitor = new FileReader();
 
     leitor.onload = () => {
-        const numeros = extrairTelefonesValidacao(leitor.result);
+        const cpfs = cpfsDeTexto(leitor.result);
 
-        if (!numeros.length) {
-            toast('Nenhum telefone com DDD encontrado em ' + arquivo.name + '.', 'erro');
+        if (!cpfs.length) {
+            toast('Nenhum CPF encontrado em ' + arquivo.name + '.', 'erro');
             if (input) input.value = '';
             return;
         }
@@ -1470,16 +1456,14 @@ function carregarArquivoValidacao(input) {
             ? String(caixa.value || '').split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean)
             : [];
 
-        const existentes = new Set(atuais.map((linha) => apenasNumeros(telefoneDaLinhaValidacao(linha))));
-        const novas = numeros.filter((numero) => !existentes.has(apenasNumeros(numero)));
+        const existentes = new Set(atuais.map((linha) => apenasNumeros(linha).slice(0, 11)));
+        const novas = cpfs.filter((cpf) => !existentes.has(cpf));
 
         if (caixa) caixa.value = atuais.concat(novas).join('\n');
 
-        const partes = [numeros.length + ' telefone(s) lido(s) de ' + arquivo.name];
-        if (novas.length < numeros.length) partes.push((numeros.length - novas.length) + ' já estava(m) na caixa');
-        if (atuais.length + novas.length > 5000) partes.push('limite de 5000 por validação');
-
-        if (progresso) progresso.textContent = partes.join(' · ') + '. Clique em "Validar números".';
+        const partes = [cpfs.length + ' CPF(s) lido(s) de ' + arquivo.name];
+        if (novas.length < cpfs.length) partes.push((cpfs.length - novas.length) + ' já estava(m) na caixa');
+        if (progresso) progresso.textContent = partes.join(' · ') + '. Clique em "Consultar CPFs".';
         toast(partes.join(' · ') + '.');
         if (input) input.value = '';
     };
@@ -1492,6 +1476,295 @@ function carregarArquivoValidacao(input) {
     leitor.readAsText(arquivo, 'UTF-8');
 }
 
+function formatarCpfPainel(cpf) {
+    const digitos = apenasNumeros(cpf);
+    if (digitos.length !== 11) return cpf;
+    return digitos.slice(0, 3) + '.' + digitos.slice(3, 6) + '.' + digitos.slice(6, 9) + '-' + digitos.slice(9);
+}
+
+function cartaoValidacao(valor, rotulo, classe) {
+    return '<div class="validar-card ' + (classe || '') + '"><strong>' + valor + '</strong><span>' + rotulo + '</span></div>';
+}
+
+function renderizarExtrator() {
+    const resultados = extratorResultado.resultados || [];
+    const resumo = extratorResultado.resumo || {};
+    const caixa = $('extrator-resumo');
+    const corpo = $('tabela-extrator');
+
+    if (caixa) {
+        caixa.innerHTML = [
+            cartaoValidacao(resumo.comTelefone || 0, 'com telefone', 'ok'),
+            cartaoValidacao(resumo.semRetorno || 0, 'sem retorno', 'invalido'),
+            cartaoValidacao(resumo.total || 0, 'consultados', 'completado')
+        ].join('');
+    }
+
+    if (!corpo) return;
+
+    if (!resultados.length) {
+        corpo.innerHTML = '<tr><td colspan="4" class="vazio">Nenhum CPF consultado.</td></tr>';
+        return;
+    }
+
+    corpo.innerHTML = resultados.map((item) => {
+        const rotulo = item.status === 'ok' ? 'com telefone' : 'sem retorno';
+        const classe = item.status === 'ok' ? 'status-vendido' : 'status-nao-quis';
+
+        const celulasTelefone = item.telefones && item.telefones.length
+            ? item.telefones.map((telefone) =>
+                '<span class="telefone-chip">' + escaparHtml(telefone.formatado || telefone.wati) +
+                ' <button class="btn-mini" type="button" onclick="copiarTelefoneUnico(\'' + (telefone.wati || '') + '\')">📋</button></span>'
+            ).join(' ')
+            : (item.message ? '<small>' + escaparHtml(item.message) + '</small>' : '-');
+
+        return '<tr>' +
+            '<td>' + formatarCpfPainel(item.cpf) + '</td>' +
+            '<td><span class="status-badge ' + classe + '">' + rotulo + '</span></td>' +
+            '<td>' + escaparHtml(item.nome || '-') + '</td>' +
+            '<td>' + celulasTelefone + '</td>' +
+            '</tr>';
+    }).join('');
+}
+
+async function copiarTelefoneUnico(wati) {
+    if (!wati) return;
+
+    try {
+        await navigator.clipboard.writeText(wati);
+        toast(wati + ' copiado.');
+    } catch (falha) {
+        toast('Não consegui copiar.', 'erro');
+    }
+}
+
+async function consultarCpfsExtrator() {
+    const cpfs = entradasCpfs();
+
+    if (!cpfs.length) { toast('Cole pelo menos um CPF (11 dígitos) para consultar.', 'erro'); return; }
+    if (cpfs.length > 25) { toast('Máximo de 25 CPFs por consulta (você colou ' + cpfs.length + ').', 'erro'); return; }
+
+    const progresso = $('extrator-progresso');
+    const status = $('extrator-status');
+    const botao = document.querySelector('button[onclick="consultarCpfsExtrator()"]');
+
+    if (botao) botao.disabled = true;
+    if (status) status.textContent = '';
+    if (progresso) progresso.textContent = 'Consultando ' + cpfs.length + ' CPF(s) no extrator... (~1 minuto por CPF)';
+
+    /* Mostra o progresso real da fila (a consulta roda um CPF por vez). */
+    const relogio = setInterval(async () => {
+        try {
+            const respostaStatus = await fetch('/api/extrator/status');
+            const situacao = await respostaStatus.json().catch(() => ({}));
+
+            if (situacao.progresso && situacao.progresso.total) {
+                const passos = situacao.progresso;
+                const texto = 'Consultando ' + passos.atual + '/' + passos.total + ' CPF(s)' +
+                    (passos.cpf ? ' · atual: ' + formatarCpfPainel(passos.cpf) : '') +
+                    ' · (~1 minuto por CPF)';
+                if (progresso) progresso.textContent = texto;
+            }
+        } catch (erro) { /* sem status: segue */ }
+    }, 5000);
+
+    try {
+        const resposta = await fetch('/api/extrator/consultar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cpfs })
+        });
+
+        const retorno = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
+
+        extratorResultado = { resumo: retorno.resumo || {}, resultados: retorno.resultados || [] };
+        renderizarExtrator();
+
+        const resumo = extratorResultado.resumo;
+        const partes = [
+            (resumo.comTelefone || 0) + ' com telefone',
+            (resumo.semRetorno || 0) + ' sem retorno'
+        ];
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '.';
+        toast(partes.join(' · '), resumo.semRetorno ? 'erro' : undefined);
+    } catch (erro) {
+        if (progresso) progresso.textContent = erro.message || 'Não foi possível consultar os CPFs.';
+        toast(erro.message || 'Não foi possível consultar os CPFs.', 'erro');
+    } finally {
+        clearInterval(relogio);
+        if (botao) botao.disabled = false;
+    }
+}
+
+function telefonesDoExtrator() {
+    const telefones = [];
+
+    (extratorResultado.resultados || []).forEach((item) => {
+        (item.telefones || []).forEach((telefone) => {
+            if (telefone.wati && !telefones.includes(telefone.wati)) telefones.push(telefone.wati);
+        });
+    });
+
+    return telefones;
+}
+
+function baixarExtrator() {
+    const resultados = (extratorResultado.resultados || []).filter((item) => item.status === 'ok');
+    if (!resultados.length) { toast('Nenhum resultado com telefone para baixar.', 'erro'); return; }
+
+    const linhas = ['cpf;nome;telefones_wati;telefones_formatados'];
+
+    resultados.forEach((item) => {
+        linhas.push([
+            formatarCpfPainel(item.cpf),
+            item.nome,
+            (item.telefones || []).map((telefone) => telefone.wati).join(' '),
+            (item.telefones || []).map((telefone) => telefone.formatado).join(' ')
+        ].map((valor) => String(valor == null ? '' : valor).replace(/;/g, ',')).join(';'));
+    });
+
+    const blob = new Blob(['﻿' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+    link.href = url;
+    link.download = 'extrator-cpf-' + carimbo + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast(resultados.length + ' CPF(s) no .csv.');
+}
+
+async function copiarTelefonesExtrator() {
+    const telefones = telefonesDoExtrator();
+    if (!telefones.length) { toast('Nenhum telefone para copiar. Consulte os CPFs primeiro.', 'erro'); return; }
+
+    const texto = telefones.join('\n');
+
+    try {
+        await navigator.clipboard.writeText(texto);
+        toast(telefones.length + ' telefone(s) copiado(s) no formato Wati.');
+    } catch (falha) {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        toast(telefones.length + ' telefone(s) copiado(s).');
+    }
+}
+
+function usarExtratorNaLista() {
+    const telefones = telefonesDoExtrator();
+    if (!telefones.length) { toast('Nenhum telefone para importar.', 'erro'); return; }
+
+    const caixa = $('lista-texto');
+    if (caixa) caixa.value = ['telefone'].concat(telefones).join('\n');
+
+    irPara('listas');
+    analisarLista();
+    abrirImportacaoLista();
+    toast(telefones.length + ' telefone(s) levado(s) para a importação de listas.');
+}
+
+function limparExtrator() {
+    ['extrator-texto'].forEach((id) => {
+        const campo = $(id);
+        if (campo) campo.value = '';
+    });
+
+    const arquivo = $('extrator-arquivo');
+    if (arquivo) arquivo.value = '';
+
+    const progresso = $('extrator-progresso');
+    if (progresso) progresso.textContent = '';
+
+    const status = $('extrator-status');
+    if (status) status.textContent = '';
+
+    const cnpjTexto = $('cnpj-texto');
+    if (cnpjTexto) cnpjTexto.value = '';
+
+    const cnpjProgresso = $('cnpj-progresso');
+    if (cnpjProgresso) cnpjProgresso.textContent = '';
+
+    consultaCnpj = [];
+    renderizarCnpjValidacao();
+
+    extratorResultado = { resumo: null, resultados: [] };
+    renderizarExtrator();
+}
+
+/* ---------------------------------------------------------
+   TELEFONES COLETADOS (via consulta de CNPJ)
+   --------------------------------------------------------- */
+function renderizarColetados() {
+    const alvo = $('coletados-lista');
+    if (!alvo) return;
+
+    if (!telefonesColetados.length) {
+        alvo.textContent = 'Nenhum telefone coletado ainda.';
+        return;
+    }
+
+    alvo.textContent = telefonesColetados.join('  |  ');
+}
+
+async function copiarColetados() {
+    if (!telefonesColetados.length) { toast('Nenhum telefone coletado.', 'erro'); return; }
+
+    const texto = telefonesColetados.join('\n');
+
+    try {
+        await navigator.clipboard.writeText(texto);
+        toast(telefonesColetados.length + ' telefone(s) copiado(s).');
+    } catch (falha) {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        toast(telefonesColetados.length + ' telefone(s) copiado(s).');
+    }
+}
+
+function usarColetadosNaLista() {
+    if (!telefonesColetados.length) { toast('Nenhum telefone coletado para importar.', 'erro'); return; }
+
+    const caixa = $('lista-texto');
+    if (caixa) caixa.value = ['telefone'].concat(telefonesColetados).join('\n');
+
+    irPara('listas');
+    analisarLista();
+    abrirImportacaoLista();
+    toast(telefonesColetados.length + ' telefone(s) levado(s) para a importação de listas.');
+}
+
+function limparColetados() {
+    telefonesColetados = [];
+    renderizarColetados();
+    toast('Coletados limpos.');
+}
+
+function adicionarColetado(wati, formatado) {
+    if (!wati) { toast('Telefone não reconhecido como número do Brasil.', 'erro'); return; }
+
+    if (!telefonesColetados.includes(wati)) {
+        telefonesColetados.push(wati);
+        renderizarColetados();
+        toast('+' + (formatado || wati) + ' coletado.');
+    } else {
+        toast('Esse telefone já está na lista de coletados.', 'erro');
+    }
+}
+
 /* ---------------------------------------------------------
    CONSULTA DE CNPJ (dados públicos da empresa)
    Puxa razão social, situação, endereço, telefone e e-mail da
@@ -1500,38 +1773,6 @@ function carregarArquivoValidacao(input) {
    é da empresa. Nada é gravado no banco.
    --------------------------------------------------------- */
 let consultaCnpj = [];
-
-/* Chave de comparação do telefone: ignora máscara e o DDI 55. */
-function chaveTelefoneValidacao(valor) {
-    const digitos = apenasNumeros(valor);
-
-    return (digitos.length === 12 || digitos.length === 13) && digitos.startsWith('55')
-        ? digitos.slice(2)
-        : digitos;
-}
-
-/* Acrescenta números na caixa de validação sem repetir o que já está lá. */
-function adicionarTelefonesValidacao(watis) {
-    const caixa = $('validar-texto');
-    if (!caixa) return 0;
-
-    const atuais = String(caixa.value || '').split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean);
-    const existentes = new Set(atuais.map((linha) => chaveTelefoneValidacao(telefoneDaLinhaValidacao(linha))));
-
-    const novos = [];
-    (watis || []).forEach((wati) => {
-        const chave = chaveTelefoneValidacao(wati);
-        if (!chave || existentes.has(chave)) return;
-
-        existentes.add(chave);
-        novos.push(wati);
-    });
-
-    if (!novos.length) return 0;
-
-    caixa.value = atuais.concat(novos).join('\n');
-    return novos.length;
-}
 
 async function consultarCnpjsValidacao() {
     const caixa = $('cnpj-texto');
@@ -1648,13 +1889,7 @@ function usarTelefoneCnpj(indice, posicao) {
 
     if (!telefone || !telefone.wati) { toast('Telefone da empresa não reconhecido como número do Brasil.', 'erro'); return; }
 
-    const adicionados = adicionarTelefonesValidacao([telefone.wati]);
-    if (!adicionados) { toast('Esse telefone já está na lista.', 'erro'); return; }
-
-    const progresso = $('validar-progresso');
-    if (progresso) progresso.textContent = '1 telefone da empresa adicionado. Clique em "Validar números".';
-
-    toast('+' + telefone.formatado + ' na lista de validação.');
+    adicionarColetado(telefone.wati, telefone.formatado);
 }
 
 function usarTodosTelefonesCnpj(indice) {
@@ -1663,13 +1898,14 @@ function usarTodosTelefonesCnpj(indice) {
         .map((telefone) => telefone.wati)
         .filter(Boolean);
 
-    const adicionados = adicionarTelefonesValidacao(watis);
-    if (!adicionados) { toast('Nenhum telefone novo para adicionar.', 'erro'); return; }
+    if (!watis.length) { toast('Nenhum telefone publicado para essa empresa.', 'erro'); return; }
 
-    const progresso = $('validar-progresso');
-    if (progresso) progresso.textContent = adicionados + ' telefone(s) da empresa adicionado(s). Clique em "Validar números".';
+    watis.forEach((wati) => {
+        if (!telefonesColetados.includes(wati)) telefonesColetados.push(wati);
+    });
 
-    toast(adicionados + ' telefone(s) da empresa adicionado(s).');
+    renderizarColetados();
+    toast(watis.length + ' telefone(s) da empresa coletado(s).');
 }
 
 /* Baixa as empresas consultadas em .csv (só campos da empresa). */
@@ -1696,7 +1932,7 @@ function baixarCnpjValidacao() {
         ].map((valor) => String(valor == null ? '' : valor).replace(/;/g, ',')).join(';'));
     });
 
-    const blob = new Blob(['\uFEFF' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['﻿' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
@@ -1711,218 +1947,6 @@ function baixarCnpjValidacao() {
     toast(empresas.length + ' empresa(s) no .csv.');
 }
 
-function cartaoValidacao(valor, rotulo, classe) {
-    return '<div class="validar-card ' + (classe || '') + '"><strong>' + valor + '</strong><span>' + rotulo + '</span></div>';
-}
-
-function renderizarValidacaoLista() {
-    const resultados = validacaoLista.resultados || [];
-    const resumo = validacaoLista.resumo || {};
-    const caixa = $('validar-resumo');
-    const corpo = $('tabela-validar');
-
-    const validos = resultados.filter((item) => item.valido && !item.ignoradoFixo);
-    const ok = validos.filter((item) => item.status !== 'completado').length;
-    const completados = validos.filter((item) => item.status === 'completado').length;
-    const invalidos = resultados.filter((item) => !item.valido).length;
-    const fixos = resultados.filter((item) => item.ignoradoFixo).length;
-
-    if (caixa) {
-        caixa.innerHTML = [
-            cartaoValidacao(ok, 'válidos', 'ok'),
-            cartaoValidacao(completados, 'completados', 'completado'),
-            cartaoValidacao(invalidos, 'inválidos', 'invalido'),
-            cartaoValidacao(fixos, 'fixos ignorados', 'ignorado'),
-            cartaoValidacao(resumo.duplicados || 0, 'duplicados', 'duplicado')
-        ].join('');
-    }
-
-    if (!corpo) return;
-
-    if (!resultados.length) {
-        corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum número analisado.</td></tr>';
-        return;
-    }
-
-    const limite = resultados.slice(0, 1000);
-
-    corpo.innerHTML = limite.map((item) => {
-        const classe = item.ignoradoFixo ? 'status-pensando' : (item.valido ? 'status-vendido' : 'status-nao-quis');
-        const rotulo = item.ignoradoFixo ? 'ignorado' : (item.valido ? (item.status === 'completado' ? 'completado' : 'válido') : 'inválido');
-
-        return '<tr>' +
-            '<td>' + escaparHtml(item.linha || item.original || '-') + '</td>' +
-            '<td><span class="status-badge ' + classe + '">' + rotulo + '</span></td>' +
-            '<td>' + (item.wati || '-') + '</td>' +
-            '<td>' + (item.formatado || '-') + '</td>' +
-            '<td>' + (item.tipo || '-') + '</td>' +
-            '<td>' + escaparHtml(item.motivo || '') + '</td>' +
-            '</tr>';
-    }).join('');
-
-    if (resultados.length > limite.length) {
-        corpo.innerHTML += '<tr><td colspan="6" class="vazio">Mostrando 1000 de ' + resultados.length + '. O .csv traz todos.</td></tr>';
-    }
-}
-
-async function validarListaTelefones() {
-    const entradas = entradasValidacao();
-    if (!entradas.length) { toast('Cole pelo menos um telefone (com DDD ou use o DDD padrão).', 'erro'); return; }
-
-    const campoDdd = $('validar-ddd');
-    const dddPadrao = apenasNumeros(campoDdd ? campoDdd.value : '').slice(0, 2);
-    const deduplicar = !$('validar-deduplicar') || $('validar-deduplicar').checked;
-    const somenteCelular = !!($('validar-so-celular') && $('validar-so-celular').checked);
-
-    if (entradas.length > 5000) {
-        toast('Máximo de 5000 números por vez. Divida a lista em partes.', 'erro');
-        return;
-    }
-
-    const vistos = new Set();
-    let duplicados = 0;
-
-    const progresso = $('validar-progresso');
-    if (progresso) progresso.textContent = 'Validando ' + entradas.length + ' número(s)...';
-
-    try {
-        const resposta = await fetch('/api/telefones/verificar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ telefones: entradas.map((item) => item.valor), dddPadrao })
-        });
-
-        const retorno = await resposta.json().catch(() => ({}));
-        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
-
-        const resultados = [];
-
-        (retorno.resultados || []).forEach((item, posicao) => {
-            const linha = entradas[posicao] ? entradas[posicao].linha : item.original;
-            const ignoradoFixo = somenteCelular && item.valido && item.tipo === 'fixo';
-            const chave = item.valido ? 'n:' + item.wati : 'i:' + apenasNumeros(item.original);
-
-            if (deduplicar && vistos.has(chave)) { duplicados += 1; return; }
-            vistos.add(chave);
-
-            resultados.push(Object.assign({}, item, {
-                linha,
-                ignoradoFixo,
-                motivo: ignoradoFixo ? 'fixo ignorado (somente celulares)' : item.motivo
-            }));
-        });
-
-        validacaoLista = {
-            resultados,
-            resumo: Object.assign({}, retorno.resumo || {}, { duplicados })
-        };
-
-        renderizarValidacaoLista();
-
-        const validos = resultados.filter((item) => item.valido && !item.ignoradoFixo).length;
-        const invalidos = resultados.filter((item) => !item.valido).length;
-        const partes = [
-            entradas.length + ' analisado(s)',
-            validos + ' pronto(s)',
-            invalidos + ' inválido(s)'
-        ];
-        if (duplicados) partes.push(duplicados + ' duplicado(s) removido(s)');
-
-        if (progresso) progresso.textContent = partes.join(' · ') + '.';
-        toast(partes.join(' · '), invalidos ? 'erro' : undefined);
-    } catch (erro) {
-        if (progresso) progresso.textContent = erro.message || 'Não foi possível validar a lista.';
-        toast(erro.message || 'Não foi possível validar a lista.', 'erro');
-    }
-}
-
-function resultadosValidosValidacao() {
-    return (validacaoLista.resultados || []).filter((item) => item.valido && !item.ignoradoFixo);
-}
-
-function baixarValidacaoLista() {
-    const validos = resultadosValidosValidacao();
-    if (!validos.length) { toast('Nenhum número válido para baixar. Valide a lista primeiro.', 'erro'); return; }
-
-    const linhas = ['telefone;formatado;tipo;status'];
-    validos.forEach((item) => {
-        linhas.push([item.wati, item.formatado, item.tipo, item.status === 'completado' ? 'completado' : 'ok'].join(';'));
-    });
-
-    const blob = new Blob(['\uFEFF' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-
-    link.href = url;
-    link.download = 'validacao-' + carimbo + '.csv';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast(validos.length + ' número(s) válido(s) no .csv.');
-}
-
-async function copiarValidosValidacao() {
-    const validos = resultadosValidosValidacao();
-    if (!validos.length) { toast('Nenhum número válido para copiar.', 'erro'); return; }
-
-    const texto = validos.map((item) => item.wati).join('\n');
-
-    try {
-        await navigator.clipboard.writeText(texto);
-        toast(validos.length + ' número(s) copiado(s).');
-    } catch (falha) {
-        const area = document.createElement('textarea');
-        area.value = texto;
-        document.body.appendChild(area);
-        area.select();
-        document.execCommand('copy');
-        document.body.removeChild(area);
-        toast(validos.length + ' número(s) copiado(s).');
-    }
-}
-
-function usarValidacaoNaLista() {
-    const validos = resultadosValidosValidacao();
-    if (!validos.length) { toast('Nenhum número válido para importar.', 'erro'); return; }
-
-    const caixa = $('lista-texto');
-    if (caixa) caixa.value = ['telefone'].concat(validos.map((item) => item.wati)).join('\n');
-
-    irPara('listas');
-    analisarLista();
-    toast(validos.length + ' número(s) levado(s) para a importação de listas.');
-}
-
-function limparValidacaoListas() {
-    ['validar-texto', 'validar-ddd'].forEach((id) => {
-        const campo = $(id);
-        if (campo) campo.value = '';
-    });
-
-    const deduplicar = $('validar-deduplicar');
-    if (deduplicar) deduplicar.checked = true;
-
-    const soCelular = $('validar-so-celular');
-    if (soCelular) soCelular.checked = false;
-
-    const progresso = $('validar-progresso');
-    if (progresso) progresso.textContent = '';
-
-    const cnpjTexto = $('cnpj-texto');
-    if (cnpjTexto) cnpjTexto.value = '';
-
-    const cnpjProgresso = $('cnpj-progresso');
-    if (cnpjProgresso) cnpjProgresso.textContent = '';
-
-    consultaCnpj = [];
-    renderizarCnpjValidacao();
-
-    validacaoLista = { resultados: [], resumo: null };
-    renderizarValidacaoLista();
-}
 
 async function salvarLista() {
     const campoNome = $('lista-nome');
@@ -3368,33 +3392,64 @@ window.fetch = async function (...argumentos) {
    {telefone};{nome};{cnpj} prontas para disparo.
    O parser puro fica em lista-suja.js (carregado antes deste).
    --------------------------------------------------------- */
-let listaSuja = { registros: 0, linhas: [], descartados: [] };
+let listaSuja = {
+    registros: 0,
+    validos: [],
+    prontos: [],
+    semTelefone: [],
+    descartados: [],
+    linhas: [],
+    cpfs: [],
+    empresas: []
+};
 
 function mostrarAbaListaSuja(aba) {
-    const painelProntos = $('suja-painel-prontos');
-    const painelDescartados = $('suja-painel-descartados');
-    const abaProntos = $('suja-aba-prontos');
-    const abaDescartados = $('suja-aba-descartados');
+    const paineis = {
+        prontos: $('suja-painel-prontos'),
+        'sem-telefone': $('suja-painel-sem-telefone'),
+        descartados: $('suja-painel-descartados')
+    };
+    const abas = {
+        prontos: $('suja-aba-prontos'),
+        'sem-telefone': $('suja-aba-sem-telefone'),
+        descartados: $('suja-aba-descartados')
+    };
 
-    if (painelProntos && painelDescartados) {
-        painelProntos.classList.toggle('oculto', aba !== 'prontos');
-        painelDescartados.classList.toggle('oculto', aba !== 'descartados');
-    }
-    if (abaProntos && abaDescartados) {
-        abaProntos.classList.toggle('active', aba === 'prontos');
-        abaDescartados.classList.toggle('active', aba === 'descartados');
-    }
+    Object.keys(paineis).forEach((chave) => {
+        if (paineis[chave]) paineis[chave].classList.toggle('oculto', chave !== aba);
+        if (abas[chave]) abas[chave].classList.toggle('active', chave === aba);
+    });
 }
 
 function renderizarListaSuja() {
     const abaProntos = $('suja-aba-prontos');
+    const abaSemTelefone = $('suja-aba-sem-telefone');
     const abaDescartados = $('suja-aba-descartados');
     const saida = $('suja-saida');
+    const cpfs = $('suja-cpfs');
     const corpo = $('tabela-suja-descartados');
+    const corpoSem = $('tabela-suja-sem-telefone');
 
     if (abaProntos) abaProntos.textContent = 'Prontos (' + listaSuja.linhas.length + ')';
+    if (abaSemTelefone) abaSemTelefone.textContent = 'Sem telefone (' + listaSuja.semTelefone.length + ')';
     if (abaDescartados) abaDescartados.textContent = 'Descartados (' + listaSuja.descartados.length + ')';
     if (saida) saida.value = listaSuja.linhas.join('\n');
+    if (cpfs) cpfs.value = listaSuja.cpfs.join('\n');
+
+    if (corpoSem) {
+        if (!listaSuja.semTelefone.length) {
+            corpoSem.innerHTML = '<tr><td colspan="4" class="vazio">Nenhum registro sem telefone.</td></tr>';
+        } else {
+            corpoSem.innerHTML = listaSuja.semTelefone.map((item) => (
+                '<tr>' +
+                '<td>' + escaparHtml(item.cpfFormatado) + '</td>' +
+                '<td>' + escaparHtml(item.nome || '-') + '</td>' +
+                '<td>' + escaparHtml(item.cnpj || '-') + '</td>' +
+                '<td>' + escaparHtml((item.empresa && item.empresa.razaoSocial) || '-') + '</td>' +
+                '</tr>'
+            )).join('');
+        }
+    }
 
     if (corpo) {
         if (!listaSuja.descartados.length) {
@@ -3408,6 +3463,21 @@ function renderizarListaSuja() {
             )).join('');
         }
     }
+}
+
+/* Recalcula as abas e a lista final depois de aplicar o extrator. */
+function recalcularListaSuja(registros) {
+    listaSuja.validos = registros;
+    listaSuja.prontos = registros.filter((registro) => (registro.telefones || []).length);
+    listaSuja.semTelefone = registros.filter((registro) => !(registro.telefones || []).length);
+    listaSuja.linhas = [];
+    listaSuja.cpfs = registros.map((registro) => registro.cpfFormatado);
+
+    listaSuja.prontos.forEach((registro) => {
+        listaSuja.linhas.push.apply(listaSuja.linhas, linhasDoRegistro(registro));
+    });
+
+    renderizarListaSuja();
 }
 
 function processarListaSujaPainel() {
@@ -3434,12 +3504,13 @@ function processarListaSujaPainel() {
             const partes = [
                 resultado.registros + ' registro(s)',
                 resultado.linhas.length + ' linha(s) pronta(s)',
+                resultado.cpfs.length + ' CPF(s) para o extrator',
                 resultado.descartados.length + ' descartado(s)'
             ];
 
             if (progresso) progresso.textContent = partes.join(' · ') + '.';
             toast(partes.join(' · '), resultado.descartados.length ? 'erro' : undefined);
-            mostrarAbaListaSuja(resultado.linhas.length ? 'prontos' : 'descartados');
+            mostrarAbaListaSuja(resultado.linhas.length ? 'prontos' : (resultado.semTelefone.length ? 'sem-telefone' : 'descartados'));
         } catch (erro) {
             if (progresso) progresso.textContent = erro.message || 'Não foi possível processar a lista.';
             toast(erro.message || 'Não foi possível processar a lista.', 'erro');
@@ -3447,6 +3518,130 @@ function processarListaSujaPainel() {
             if (botao) botao.disabled = false;
         }
     }, 30);
+}
+
+/* Passo 3: aplica o que veio do extrator (colado ou da última consulta do painel). */
+function aplicarResultadoExtratorPainel() {
+    const caixa = $('suja-extrator');
+    const progresso = $('suja-progresso');
+
+    if (!listaSuja.validos.length) {
+        toast('Processe a lista do passo 1 antes de aplicar o extrator.', 'erro');
+        return;
+    }
+
+    if (!caixa || !String(caixa.value || '').trim()) {
+        toast('Cole o resultado do extrator no passo 3.', 'erro');
+        return;
+    }
+
+    try {
+        const resultado = aplicarResultadoExtrator(listaSuja.validos, caixa.value);
+
+        recalcularListaSuja(resultado.registros);
+
+        const partes = [
+            resultado.aplicados + ' CPF(s) com telefone revelado',
+            listaSuja.semTelefone.length + ' sem telefone',
+            resultado.naoEncontrados.length + ' linha(s) não casada(s)'
+        ];
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '.';
+        toast(partes.join(' · '), resultado.naoEncontrados.length ? 'erro' : undefined);
+        mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
+    } catch (erro) {
+        toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
+    }
+}
+
+function puxarResultadoExtratorPainel() {
+    const resultados = (extratorResultado && extratorResultado.resultados) || [];
+
+    if (!resultados.length) {
+        toast('Nenhuma consulta feita no módulo "Consultar CPF" ainda.', 'erro');
+        return;
+    }
+
+    if (!listaSuja.validos.length) {
+        toast('Processe a lista do passo 1 antes.', 'erro');
+        return;
+    }
+
+    const caixa = $('suja-extrator');
+    if (caixa) caixa.value = JSON.stringify({ resultados }, null, 2);
+
+    const resultado = aplicarResultadoExtrator(listaSuja.validos, { resultados });
+    recalcularListaSuja(resultado.registros);
+
+    toast(resultado.aplicados + ' CPF(s) casado(s) com a última consulta do painel.');
+    mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
+}
+
+/* ---------- passo 2: CPFs para o extrator ---------- */
+
+/* Usa o que está na caixa (o usuário pode apagar CPFs antes de consultar). */
+function cpfsDaCaixa() {
+    const caixa = $('suja-cpfs');
+    const texto = caixa && String(caixa.value || '').trim() ? caixa.value : listaSuja.cpfs.join('\n');
+
+    return texto
+        .split(/\r?\n/)
+        .map((linha) => linha.trim())
+        .filter(Boolean);
+}
+
+function baixarArquivoTexto(nome, conteudo, tipo) {
+    const blob = new Blob([conteudo], { type: tipo || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+    link.href = url;
+    link.download = nome.replace('{carimbo}', carimbo);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+async function copiarListaSujaCpfs() {
+    const cpfs = cpfsDaCaixa();
+    if (!cpfs.length) { toast('Processe a lista antes de copiar os CPFs.', 'erro'); return; }
+
+    const texto = cpfs.join('\n');
+
+    try {
+        await navigator.clipboard.writeText(texto);
+        toast(cpfs.length + ' CPF(s) copiado(s).');
+    } catch (falha) {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        toast(cpfs.length + ' CPF(s) copiado(s).');
+    }
+}
+
+function baixarListaSujaCpfs() {
+    const cpfs = cpfsDaCaixa();
+    if (!cpfs.length) { toast('Processe a lista antes de baixar os CPFs.', 'erro'); return; }
+
+    baixarArquivoTexto('cpfs-extrator-{carimbo}.txt', cpfs.join('\r\n') + '\r\n');
+    toast(cpfs.length + ' CPF(s) no .txt.');
+}
+
+function levarListaSujaParaExtrator() {
+    const cpfs = cpfsDaCaixa();
+    if (!cpfs.length) { toast('Processe a lista antes de levar os CPFs.', 'erro'); return; }
+
+    const caixa = $('extrator-texto');
+    if (!caixa) { toast('Abra a tela "Consultar CPF".', 'erro'); return; }
+
+    caixa.value = cpfs.join('\n');
+    irPara('extrator');
+    toast(cpfs.length + ' CPF(s) na tela de Consultar CPF (máximo 25 por consulta).');
 }
 
 async function copiarListaSuja() {
@@ -3498,11 +3693,39 @@ function usarListaSujaNaImportacao() {
 
     irPara('listas');
     analisarLista();
+    abrirImportacaoLista();
     toast(listaSuja.linhas.length + ' linha(s) na importação ({{1}} = nome, {{2}} = CNPJ).');
 }
 
+/* Mesma lista, mas com os dados da empresa/persona nas colunas extras:
+   viram atributos do cliente (a ficha do painel já mostra clientes.atributos). */
+function usarListaSujaNaImportacaoComEmpresa() {
+    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
+
+    const caixa = $('lista-texto');
+    if (!caixa) { toast('Abra a tela de importação de listas.', 'erro'); return; }
+
+    const montado = montarLinhasComEmpresa(listaSuja.validos);
+    caixa.value = [montado.cabecalho].concat(montado.linhas).join('\n');
+
+    irPara('listas');
+    analisarLista();
+    abrirImportacaoLista();
+    toast(montado.linhas.length + ' linha(s) com os dados da empresa (ficha do cliente).');
+}
+
+function baixarCadastroListaSuja() {
+    if (!listaSuja.validos.length) { toast('Processe a lista antes de baixar o cadastro.', 'erro'); return; }
+
+    const cadastro = montarCadastroCsv(listaSuja.validos);
+    const conteudo = [cadastro.colunas.join(';')].concat(cadastro.linhas).join('\r\n') + '\r\n';
+
+    baixarArquivoTexto('cadastro-empresas-{carimbo}.csv', '\uFEFF' + conteudo, 'text/csv;charset=utf-8');
+    toast(cadastro.linhas.length + ' empresa(s) no .csv.');
+}
+
 function limparListaSuja() {
-    ['suja-texto', 'suja-saida'].forEach((id) => {
+    ['suja-texto', 'suja-saida', 'suja-cpfs', 'suja-extrator'].forEach((id) => {
         const campo = $(id);
         if (campo) campo.value = '';
     });
@@ -3510,7 +3733,17 @@ function limparListaSuja() {
     const progresso = $('suja-progresso');
     if (progresso) progresso.textContent = '';
 
-    listaSuja = { registros: 0, linhas: [], descartados: [] };
+    listaSuja = {
+        registros: 0,
+        validos: [],
+        prontos: [],
+        semTelefone: [],
+        descartados: [],
+        linhas: [],
+        cpfs: [],
+        empresas: []
+    };
+
     renderizarListaSuja();
     mostrarAbaListaSuja('prontos');
 }

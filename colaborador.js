@@ -57,6 +57,70 @@
         return limpo.substring(0, 2).toUpperCase();
     }
 
+    /* Dados da empresa/persona importados na lista (clientes.atributos).
+       É o que a Lista Suja manda em "Enviar com dados da empresa". */
+    const ROTULOS_FICHA = {
+        cnpj: 'CNPJ',
+        razao_social: 'Razão social',
+        nome_fantasia: 'Nome fantasia',
+        situacao: 'Situação',
+        porte: 'Porte',
+        capital_social: 'Capital social',
+        inicio_atividade: 'Início atividade',
+        logradouro: 'Logradouro',
+        bairro: 'Bairro',
+        cidade: 'Cidade',
+        uf: 'UF',
+        cep: 'CEP',
+        tel_empresa_1: 'Tel. empresa 1',
+        tel_empresa_2: 'Tel. empresa 2',
+        email_empresa: 'E-mail empresa',
+        cpf: 'CPF',
+        nascimento: 'Nascimento',
+        nome_mae: 'Nome da mãe',
+        sexo: 'Sexo',
+        email: 'E-mail',
+        endereco: 'Endereço',
+        socios: 'Sócios',
+        socio: 'Sócio',
+        responsavel: 'Responsável',
+        ag_conta: 'Agência / conta'
+    };
+
+    const ORDEM_FICHA = [
+        'razao_social', 'nome_fantasia', 'cnpj', 'situacao', 'porte', 'capital_social',
+        'inicio_atividade', 'logradouro', 'bairro', 'cidade', 'uf', 'cep',
+        'tel_empresa_1', 'tel_empresa_2', 'email_empresa', 'socio', 'socios',
+        'cpf', 'nascimento', 'nome_mae', 'sexo', 'email', 'endereco', 'ag_conta', 'responsavel'
+    ];
+
+    function ordemFicha(chave) {
+        const indice = ORDEM_FICHA.indexOf(chave);
+        return indice < 0 ? ORDEM_FICHA.length : indice;
+    }
+
+    function renderizarAtributosFicha(ficha) {
+        const lista = $('ficha-atributos');
+        if (!lista) return;
+
+        const dados = Object.assign({}, (ficha && ficha.atributos) || {});
+        if (ficha && ficha.cnpj) dados.cnpj = ficha.cnpj;
+        if (ficha && ficha.cpf) dados.cpf = ficha.cpf;
+        if (ficha && ficha.socio) dados.socio = ficha.socio;
+        if (ficha && ficha.responsavel) dados.responsavel = ficha.responsavel;
+
+        const chaves = Object.keys(dados)
+            .filter((chave) => String(dados[chave] == null ? '' : dados[chave]).trim())
+            .sort((a, b) => ordemFicha(a) - ordemFicha(b) || a.localeCompare(b));
+
+        lista.innerHTML = chaves.length
+            ? chaves.map((chave) => (
+                '<li><span>' + escaparHtml(ROTULOS_FICHA[chave] || chave) + '</span>' +
+                '<strong>' + escaparHtml(dados[chave]) + '</strong></li>'
+            )).join('')
+            : '<li><span>Nenhum dado da empresa importado</span></li>';
+    }
+
     function rotuloMensagem(msg) {
         const data = formatarData(msg.criado_em);
         if (msg.direcao !== 'enviada') return data;
@@ -254,6 +318,7 @@
             if (chatNome && ficha.nome) chatNome.textContent = ficha.nome;
 
             marcarStatusAtivo(ficha.status || 'pensando');
+            renderizarAtributosFicha(ficha);
         } catch (erro) {
             console.error('Erro ao carregar ficha:', erro);
         }
@@ -281,6 +346,9 @@
         if (fichaNome) fichaNome.textContent = clienteAtivo.nome;
         const fichaTelefone = $('ficha-telefone');
         if (fichaTelefone) fichaTelefone.textContent = formatarTelefone(clienteAtivo.telefone);
+
+        const listaAtributos = $('ficha-atributos');
+        if (listaAtributos) listaAtributos.innerHTML = '<li><span>Carregando...</span></li>';
 
         marcarStatusAtivo(clienteAtivo.status);
         await carregarMensagens(clienteAtivo.telefone, true);

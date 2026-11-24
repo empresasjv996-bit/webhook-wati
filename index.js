@@ -15,10 +15,12 @@ const banco = require('./db');
 const { gerarHash, verificarSenha } = require('./senha');
 const { analisarListaTelefones } = require('./telefone');
 const { validarCnpj, formatarCnpj, normalizarEmpresa } = require('./cnpj');
+const extrator = require('./extrator');
 
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
+
 /* ---------------------------------------------------------
    ARQUIVOS ESTÁTICOS (lista branca)
    Antes era express.static(__dirname), então /index.js, /db.js,
@@ -1560,6 +1562,47 @@ app.post('/api/cnpj/consultar', exigirAdmin, async (req, res) => {
     }
 
     res.json({ success: true, resumo, resultados });
+});
+
+/* ---------------------------------------------------------
+   CONSULTA DE CPF NO EXTRATOR (extratorgov.online)
+   Body: { cpfs: ["32695561873", ...] } — até 50 por vez.
+   A extração roda no painel do site (conta cliente1010) e
+   pode levar de 1 a 5 minutos. A auditoria guarda só os CPFs.
+   --------------------------------------------------------- */
+app.post('/api/extrator/consultar', exigirAdmin, async (req, res) => {
+    const corpo = req.body || {};
+    const entradas = Array.isArray(corpo.cpfs)
+        ? corpo.cpfs
+        : String(corpo.cpfs || '').split(/[\s,;]+/);
+
+    try {
+        const resposta = await extrator.consultarCpfs(entradas);
+
+        try {
+            const encontrados = resposta.resultados
+                .filter((item) => item.status === 'ok')
+                .map((item) => item.cpf);
+
+            await banco.registrarAuditoria(
+                req.user && req.user.nome,
+                'consulta extrator cpf',
+                (encontrados.length ? encontrados.join(', ') : entradas.slice(0, 50).join(', ')) +
+                ' (' + ((resposta.resumo && resposta.resumo.via) || 'extrator') + ')'
+            );
+        } catch (erro) {
+            console.error('Erro ao registrar auditoria da consulta do extrator:', erro.message);
+        }
+
+        res.json(resposta);
+    } catch (erro) {
+        console.error('Consulta no extrator falhou:', erro.message);
+        res.status(erro.codigo || 502).json({ success: false, message: erro.message });
+    }
+});
+
+app.get('/api/extrator/status', exigirAdmin, (req, res) => {
+    res.json(Object.assign({ success: true }, extrator.status()));
 });
 
 app.post('/api/listas', exigirAdmin, async (req, res) => {

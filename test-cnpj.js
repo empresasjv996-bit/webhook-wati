@@ -145,7 +145,14 @@ assert.ok(servidor.includes("app.post('/api/cnpj/consultar', exigirAdmin"), 'rot
 assert.ok(servidor.includes('brasilapi.com.br/api/cnpj/v1/'), 'usa a BrasilAPI');
 assert.ok(servidor.includes('minhareceita.org/'), 'tem fallback na Minha Receita');
 assert.ok(servidor.includes('pedidos.length > 20'), 'limite de 20 CNPJs por consulta');
-assert.ok(!/consultar-extrator|saldo|credencial/i.test(servidor), 'consulta não usa o extrator pago');
+
+/* A consulta de CNPJ em si continua pública; o extrator é usado só pela rota nova. */
+const trechoCnpj = servidor.slice(
+    servidor.indexOf("app.post('/api/cnpj/consultar'"),
+    servidor.indexOf('CONSULTA DE CPF NO EXTRATOR')
+);
+assert.ok(!/extrator|saldo|credencial/i.test(trechoCnpj), 'consulta de CNPJ não usa o extrator pago');
+assert.ok(servidor.includes("app.post('/api/extrator/consultar', exigirAdmin"), 'rota do extrator exige administrador');
 
 /* ---------- tela: tabela e atalho para a lista ---------- */
 function carregarTela() {
@@ -159,7 +166,7 @@ function carregarTela() {
         createElement() {
             return {
                 classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
-                style: {}, click() {}, setAttribute() {},
+                style: {}, click() {}, setAttribute() {}, remove() {},
                 appendChild() {}, removeChild() {}
             };
         },
@@ -191,7 +198,7 @@ function carregarTela() {
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), contexto, { filename: 'app.js' });
 
     elementos['tabela-cnpj'] = { innerHTML: '' };
-    elementos['validar-texto'] = { value: '' };
+    elementos['coletados-lista'] = { textContent: '' };
 
     return { elementos, noVm: (codigo) => vm.runInContext(codigo, contexto) };
 }
@@ -232,18 +239,21 @@ assert.ok(htmlCnpj.includes('CNPJ inválido'), 'tabela avisa o CNPJ inválido');
 assert.ok(htmlCnpj.includes('contato@empresa.com.br'), 'tabela mostra o e-mail');
 assert.ok(!htmlCnpj.includes('<script'), 'nenhum HTML da resposta é injetado');
 
-/* Atalho: telefone da empresa entra na caixa sem duplicar (com/sem DDI). */
-tela.elementos['validar-texto'].value = '(21) 2166-0000';
+/* Atalho: telefone da empresa vai para os coletados sem duplicar. */
+tela.noVm(`adicionarColetado('552121660000', '(21) 2166-0000')`);
+tela.noVm(`adicionarColetado('552121660000', '(21) 2166-0000')`);
 
-const semNovidade = tela.noVm(`adicionarTelefonesValidacao(['552121660000'])`);
-assert.strictEqual(semNovidade, 0, 'não duplica o número que já está na caixa');
+let coletados = tela.noVm(`telefonesColetados.join(',')`);
+assert.strictEqual(coletados, '552121660000', 'não duplica o número coletado');
 
-const adicionados = tela.noVm(`adicionarTelefonesValidacao(['5511987654321', '5511987654321', ''])`);
-assert.strictEqual(adicionados, 1, 'adiciona uma vez só');
+tela.noVm(`adicionarColetado('5511987654321', '(11) 98765-4321')`);
+coletados = tela.noVm(`telefonesColetados.join(',')`);
+assert.strictEqual(coletados, '552121660000,5511987654321', 'acumula os coletados');
+
 assert.strictEqual(
-    tela.elementos['validar-texto'].value,
-    '(21) 2166-0000\n5511987654321',
-    'número entra pronto para a Wati (DDI 55)'
+    tela.elementos['coletados-lista'].textContent,
+    '552121660000  |  5511987654321',
+    'painel de coletados mostra os números prontos para a Wati'
 );
 
 console.log('OK - testes de CNPJ (dígito, normalização, telefone e ligação com o painel).');

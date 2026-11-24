@@ -75,7 +75,7 @@ header.top {
 .top-nav button:hover { color: #fff; background: rgba(255,255,255,0.05); }
 .top-nav button.active { background: var(--green); color: #000; box-shadow: 0 0 20px var(--green-glow); }
 
-/* MENU AGRUPADO: Início · Puxadores · Envio · Auditoria */
+/* MENU AGRUPADO: Início · Contatos · Listas · Envio · Sistema */
 .nav-grupo { position: relative; }
 .nav-grupo > .nav-grupo-btn { display: inline-flex; align-items: center; gap: 6px; }
 .nav-seta { font-size: 0.7rem; line-height: 1; opacity: 0.75; transition: transform 0.25s ease; }
@@ -87,7 +87,7 @@ header.top {
     position: absolute;
     top: calc(100% + 10px);
     left: 0;
-    min-width: 200px;
+    min-width: 230px;
     display: none;
     flex-direction: column;
     gap: 2px;
@@ -99,8 +99,17 @@ header.top {
     z-index: 45;
 }
 .nav-grupo.aberto > .nav-submenu { display: flex; animation: navSubmenuAbrir 0.16s ease-out; }
-.nav-submenu button { width: 100%; text-align: left; padding: 10px 12px; border-radius: 10px; white-space: nowrap; }
+.nav-submenu button { width: 100%; text-align: left; padding: 9px 12px; border-radius: 10px; white-space: normal; line-height: 1.2; }
+.nav-submenu button small { display: block; margin-top: 3px; font-size: 0.68rem; font-weight: 500; color: var(--text-muted); letter-spacing: 0.1px; }
+.nav-submenu button.active small { color: rgba(0, 0, 0, 0.62); }
 .nav-submenu button.active { background: var(--green); color: #000; box-shadow: 0 0 16px var(--green-glow); }
+
+/* Em telas menores o topo quebra em duas linhas em vez de espremer os itens. */
+@media (max-width: 1240px) {
+    .top-nav button { padding: 9px 12px; font-size: 0.8rem; }
+    .logo { font-size: 1.15rem; }
+    .logo-img { height: 28px; }
+}
 
 @keyframes navSubmenuAbrir {
     from { opacity: 0; transform: translateY(-6px); }
@@ -384,6 +393,27 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .listas-grid .screen-panel { padding: 22px; }
 .listas-grid .table-container { margin-top: 0; }
 
+/* Planilha pronta (revisão/importação) fica recolhida dentro da tela Listas */
+.lista-importar {
+    margin-top: 22px;
+    border: 1px dashed rgba(0, 255, 128, 0.25);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: rgba(0, 255, 128, 0.03);
+}
+.lista-importar > summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.86rem;
+    color: var(--green);
+    list-style: none;
+    padding: 4px 0;
+}
+.lista-importar > summary::-webkit-details-marker { display: none; }
+.lista-importar > summary::before { content: '▸ '; }
+.lista-importar[open] > summary::before { content: '▾ '; }
+.lista-importar[open] > summary { margin-bottom: 6px; }
+
 .lista-texto { min-height: 150px; resize: vertical; line-height: 1.5; }
 .file-row { display: flex; flex-direction: column; gap: 6px; }
 .file-row .btn-mini { align-self: flex-start; }
@@ -518,13 +548,20 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .validar-card.ignorado strong { color: #ffc107; }
 .validar-card.duplicado strong { color: #b98cff; }
 
+/* Consultar CPF (extrator) */
+.telefone-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; margin: 2px 6px 2px 0; font-size: 0.85rem; color: #fff; }
+.telefone-chip .btn-mini { padding: 2px 6px; margin: 0; }
+
 /* Lista Suja */
 .suja-tabs .btn-mini { padding: 8px 14px; border-radius: 10px; }
 .suja-tabs .btn-mini.active { background: var(--green); color: #04120a; border-color: transparent; font-weight: 700; }
 .suja-bruto { margin: 0; padding: 8px; font-size: 0.72rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; max-width: 460px; max-height: 160px; overflow: auto; }
+
 @media (max-width: 980px) {
     body { height: auto; min-height: 100vh; overflow: auto; }
     .app-container { width: 100%; height: auto; min-height: 100vh; }
+    header.top { flex-wrap: wrap; row-gap: 8px; }
+    .top-nav { order: 3; width: 100%; justify-content: center; flex-wrap: wrap; }
     .conversas-layout { flex-direction: column; height: auto; }
     .painel-contatos { width: 100%; max-height: 280px; }
     .chat-area { min-height: 460px; }
