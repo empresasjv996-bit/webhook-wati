@@ -112,6 +112,7 @@ function irPara(view) {
         canais: 'Canais',
         logs: 'Logs',
         auditoria: 'Auditoria',
+        validar: 'Validar listas',
         usuarios: 'Usuários'
     };
 
@@ -1310,6 +1311,244 @@ async function verificarNumerosLista() {
     } finally {
         if (botao) botao.disabled = false;
     }
+}
+
+/* ---------------------------------------------------------
+   VALIDAR LISTAS (somente formato: DDI 55, DDD e 9º dígito)
+   Não consulta serviço externo e não confirma se a linha existe.
+   --------------------------------------------------------- */
+let validacaoLista = { resultados: [], resumo: null };
+
+/* Extrai o telefone de uma linha colada. Aceita "telefone", "telefone;nome",
+   "nome;telefone" e separadores ; , Tab |. */
+function telefoneDaLinhaValidacao(linha) {
+    const limpa = String(linha || '').replace(/^\uFEFF/, '').trim();
+    if (!limpa) return '';
+
+    const partes = limpa.split(/[;,\t|]/).map((parte) => parte.trim()).filter(Boolean);
+    const comNumero = partes.find((parte) => apenasNumeros(parte).length >= 8);
+
+    return comNumero || limpa;
+}
+
+function entradasValidacao() {
+    const caixa = $('validar-texto');
+    if (!caixa) return [];
+
+    return String(caixa.value || '')
+        .replace(/\uFEFF/g, '')
+        .split(/\r?\n/)
+        .map((linha) => linha.trim())
+        .filter(Boolean)
+        .filter((linha) => !/^telefone\b/i.test(linha.replace(/["']/g, '')))
+        .map((linha) => ({ linha, valor: telefoneDaLinhaValidacao(linha) }))
+        .filter((item) => apenasNumeros(item.valor).length >= 8);
+}
+
+function cartaoValidacao(valor, rotulo, classe) {
+    return '<div class="validar-card ' + (classe || '') + '"><strong>' + valor + '</strong><span>' + rotulo + '</span></div>';
+}
+
+function renderizarValidacaoLista() {
+    const resultados = validacaoLista.resultados || [];
+    const resumo = validacaoLista.resumo || {};
+    const caixa = $('validar-resumo');
+    const corpo = $('tabela-validar');
+
+    const validos = resultados.filter((item) => item.valido && !item.ignoradoFixo);
+    const ok = validos.filter((item) => item.status !== 'completado').length;
+    const completados = validos.filter((item) => item.status === 'completado').length;
+    const invalidos = resultados.filter((item) => !item.valido).length;
+    const fixos = resultados.filter((item) => item.ignoradoFixo).length;
+
+    if (caixa) {
+        caixa.innerHTML = [
+            cartaoValidacao(ok, 'válidos', 'ok'),
+            cartaoValidacao(completados, 'completados', 'completado'),
+            cartaoValidacao(invalidos, 'inválidos', 'invalido'),
+            cartaoValidacao(fixos, 'fixos ignorados', 'ignorado'),
+            cartaoValidacao(resumo.duplicados || 0, 'duplicados', 'duplicado')
+        ].join('');
+    }
+
+    if (!corpo) return;
+
+    if (!resultados.length) {
+        corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum número analisado.</td></tr>';
+        return;
+    }
+
+    const limite = resultados.slice(0, 1000);
+
+    corpo.innerHTML = limite.map((item) => {
+        const classe = item.ignoradoFixo ? 'status-pensando' : (item.valido ? 'status-vendido' : 'status-nao-quis');
+        const rotulo = item.ignoradoFixo ? 'ignorado' : (item.valido ? (item.status === 'completado' ? 'completado' : 'válido') : 'inválido');
+
+        return '<tr>' +
+            '<td>' + escaparHtml(item.linha || item.original || '-') + '</td>' +
+            '<td><span class="status-badge ' + classe + '">' + rotulo + '</span></td>' +
+            '<td>' + (item.wati || '-') + '</td>' +
+            '<td>' + (item.formatado || '-') + '</td>' +
+            '<td>' + (item.tipo || '-') + '</td>' +
+            '<td>' + escaparHtml(item.motivo || '') + '</td>' +
+            '</tr>';
+    }).join('');
+
+    if (resultados.length > limite.length) {
+        corpo.innerHTML += '<tr><td colspan="6" class="vazio">Mostrando 1000 de ' + resultados.length + '. O .csv traz todos.</td></tr>';
+    }
+}
+
+async function validarListaTelefones() {
+    const entradas = entradasValidacao();
+    if (!entradas.length) { toast('Cole pelo menos um telefone (com DDD ou use o DDD padrão).', 'erro'); return; }
+
+    const campoDdd = $('validar-ddd');
+    const dddPadrao = apenasNumeros(campoDdd ? campoDdd.value : '').slice(0, 2);
+    const deduplicar = !$('validar-deduplicar') || $('validar-deduplicar').checked;
+    const somenteCelular = !!($('validar-so-celular') && $('validar-so-celular').checked);
+
+    const vistos = new Set();
+    const unicos = [];
+    let duplicados = 0;
+
+    entradas.forEach((item) => {
+        const chave = apenasNumeros(item.valor);
+        if (deduplicar && vistos.has(chave)) { duplicados += 1; return; }
+        vistos.add(chave);
+        unicos.push(item);
+    });
+
+    if (unicos.length > 5000) {
+        toast('Máximo de 5000 números por vez. Divida a lista em partes.', 'erro');
+        return;
+    }
+
+    const progresso = $('validar-progresso');
+    if (progresso) progresso.textContent = 'Validando ' + unicos.length + ' número(s)...';
+
+    try {
+        const resposta = await fetch('/api/telefones/verificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefones: unicos.map((item) => item.valor), dddPadrao })
+        });
+
+        const retorno = await resposta.json().catch(() => ({}));
+        if (!resposta.ok || !retorno.success) throw new Error(retorno.message || ('HTTP ' + resposta.status));
+
+        const resultados = (retorno.resultados || []).map((item, posicao) => {
+            const linha = unicos[posicao] ? unicos[posicao].linha : item.original;
+            const ignoradoFixo = somenteCelular && item.valido && item.tipo === 'fixo';
+
+            return Object.assign({}, item, {
+                linha,
+                ignoradoFixo,
+                motivo: ignoradoFixo ? 'fixo ignorado (somente celulares)' : item.motivo
+            });
+        });
+
+        validacaoLista = {
+            resultados,
+            resumo: Object.assign({}, retorno.resumo || {}, { duplicados })
+        };
+
+        renderizarValidacaoLista();
+
+        const validos = resultados.filter((item) => item.valido && !item.ignoradoFixo).length;
+        const invalidos = resultados.filter((item) => !item.valido).length;
+        const partes = [
+            unicos.length + ' analisado(s)',
+            validos + ' pronto(s)',
+            invalidos + ' inválido(s)'
+        ];
+        if (duplicados) partes.push(duplicados + ' duplicado(s) removido(s)');
+
+        if (progresso) progresso.textContent = partes.join(' · ') + '.';
+        toast(partes.join(' · '), invalidos ? 'erro' : undefined);
+    } catch (erro) {
+        if (progresso) progresso.textContent = erro.message || 'Não foi possível validar a lista.';
+        toast(erro.message || 'Não foi possível validar a lista.', 'erro');
+    }
+}
+
+function resultadosValidosValidacao() {
+    return (validacaoLista.resultados || []).filter((item) => item.valido && !item.ignoradoFixo);
+}
+
+function baixarValidacaoLista() {
+    const validos = resultadosValidosValidacao();
+    if (!validos.length) { toast('Nenhum número válido para baixar. Valide a lista primeiro.', 'erro'); return; }
+
+    const linhas = ['telefone;formatado;tipo;status'];
+    validos.forEach((item) => {
+        linhas.push([item.wati, item.formatado, item.tipo, item.status === 'completado' ? 'completado' : 'ok'].join(';'));
+    });
+
+    const blob = new Blob(['\uFEFF' + linhas.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+    link.href = url;
+    link.download = 'validacao-' + carimbo + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast(validos.length + ' número(s) válido(s) no .csv.');
+}
+
+async function copiarValidosValidacao() {
+    const validos = resultadosValidosValidacao();
+    if (!validos.length) { toast('Nenhum número válido para copiar.', 'erro'); return; }
+
+    const texto = validos.map((item) => item.wati).join('\n');
+
+    try {
+        await navigator.clipboard.writeText(texto);
+        toast(validos.length + ' número(s) copiado(s).');
+    } catch (falha) {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        toast(validos.length + ' número(s) copiado(s).');
+    }
+}
+
+function usarValidacaoNaLista() {
+    const validos = resultadosValidosValidacao();
+    if (!validos.length) { toast('Nenhum número válido para importar.', 'erro'); return; }
+
+    const caixa = $('lista-texto');
+    if (caixa) caixa.value = ['telefone'].concat(validos.map((item) => item.wati)).join('\n');
+
+    irPara('listas');
+    analisarLista();
+    toast(validos.length + ' número(s) levado(s) para a importação de listas.');
+}
+
+function limparValidacaoListas() {
+    ['validar-texto', 'validar-ddd'].forEach((id) => {
+        const campo = $(id);
+        if (campo) campo.value = '';
+    });
+
+    const deduplicar = $('validar-deduplicar');
+    if (deduplicar) deduplicar.checked = true;
+
+    const soCelular = $('validar-so-celular');
+    if (soCelular) soCelular.checked = false;
+
+    const progresso = $('validar-progresso');
+    if (progresso) progresso.textContent = '';
+
+    validacaoLista = { resultados: [], resumo: null };
+    renderizarValidacaoLista();
 }
 
 async function salvarLista() {

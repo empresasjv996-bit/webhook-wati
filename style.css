@@ -472,6 +472,17 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 /* =========================================================
    RESPONSIVO
    ========================================================= */
+/* Validar listas */
+.validar-resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.validar-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; text-align: center; }
+.validar-card strong { display: block; font-size: 1.2rem; color: #fff; }
+.validar-card span { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.validar-card.ok strong { color: var(--green); }
+.validar-card.completado strong { color: #4da3ff; }
+.validar-card.invalido strong { color: #ff5c5c; }
+.validar-card.ignorado strong { color: #ffc107; }
+.validar-card.duplicado strong { color: #b98cff; }
+
 @media (max-width: 980px) {
     body { height: auto; min-height: 100vh; overflow: auto; }
     .app-container { width: 100%; height: auto; min-height: 100vh; }
