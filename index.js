@@ -19,7 +19,42 @@ const { validarCnpj, formatarCnpj, normalizarEmpresa } = require('./cnpj');
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(__dirname));
+/* ---------------------------------------------------------
+   ARQUIVOS ESTÁTICOS (lista branca)
+   Antes era express.static(__dirname), então /index.js, /db.js,
+   /package.json e as pastas listas/, downloads/ e backups/ saíam
+   pela web sem login. Agora só o front do painel é público.
+   --------------------------------------------------------- */
+const ARQUIVOS_PUBLICOS = new Set([
+    'index.html',
+    'app.js',
+    'style.css',
+    'login.html',
+    'login.css',
+    'colaborador.html',
+    'colaborador.css',
+    'colaborador.js',
+    'logo-qgc.png.jpeg',
+    'favicon.ico'
+]);
+
+const estaticoPublico = express.static(__dirname, {
+    index: 'index.html',
+    dotfiles: 'deny',
+    fallthrough: true
+});
+
+app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+
+    const caminho = String(req.path || '/').replace(/^\/+/, '');
+
+    // "/" continua entregando o index.html; qualquer outro caminho precisa
+    // estar na lista branca (subpastas e código do servidor caem no 404).
+    if (caminho && !ARQUIVOS_PUBLICOS.has(caminho)) return next();
+
+    return estaticoPublico(req, res, next);
+});
 
 /* ---------------------------------------------------------
    PROTEÇÃO DAS ROTAS DE API
