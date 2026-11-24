@@ -277,4 +277,60 @@ fizer muitas ações por sessão, vale ampliar o allowlist em `permissions.allow
 Isso reduz o número de ações que precisam de classificação (e de prompts, caso a Anthropic remova o
 fallback numa versão futura).
 
+## 12. Paridade de ferramentas com o Claude
+
+Auditoria feita com `claude -p --output-format stream-json --verbose` (mensagem `system/init`, que lista
+as ferramentas reais da sessão) rodando dentro de `C:\Users\ronal\pentest-lab`.
+
+### Ferramentas: idênticas
+
+```
+Task, Bash, CronCreate, CronDelete, CronList, DesignSync, Edit, EnterWorktree, ExitWorktree,
+Glob, Grep, ListAgents, McpTaskCheck, Monitor, NotebookEdit, PushNotification, Read,
+ReportFindings, ScheduleWakeup, SendMessage, Skill, TaskStop, ToolSearch, WebFetch,
+WebSearch, Workflow, Write, Yield                                    → 28 ferramentas
+```
+
+Também carregam: **19 skills**, 5 agentes (`claude`, `Explore`, `general-purpose`, `Plan`,
+`statusline-setup`) e os 4 plugins builtin. O campo `served_by_anthropic` fica `false` — é esperado,
+só indica que a inferência não passa pela Anthropic.
+
+### O que realmente estava diferente (e foi corrigido)
+
+| Problema encontrado | Correção |
+|-|-|
+| Modelo `deepseek-flash` em tudo — fraco para cadeias de tool-use | `ANTHROPIC_MODEL`, `DEFAULT_OPUS/SONNET` e `CLAUDE_CODE_SUBAGENT_MODEL` → `deepseek-v4-pro`; `HAIKU` segue `deepseek-flash` (barato) |
+| `ferramentas.md` (guia Kaido, 35 KB) **nunca era carregado** | `@ferramentas.md` no topo de `pentest-lab/CLAUDE.md` (import de memória) |
+| Nenhuma memória global: fora da pasta `pentest-lab` o CLI não sabia que era a APT01 | criado `C:\Users\ronal\.claude\CLAUDE.md` (equipe, estilo, pasta de saída, ponteiros para `ferramentas.md` e para o `meu-webhook`) |
+| Regras `Write(./workspace/**)`, `Write(./skills/**)`, `Write(./plugins/**)` **nunca valeram** — o CLI avisa: *"only Edit(path) rules are [matched] — Use Edit(...) instead"* | trocadas por `Edit(./workspace/**)`, `Edit(./skills/**)`, `Edit(./plugins/**)` em `pentest-lab/.claude/settings.json` |
+
+### Testes de comprovação
+
+| Teste | Resultado |
+|-|-|
+| `claude -p "Use a ferramenta Bash para rodar: echo ok-tools"` | `ok-tools` (2 turnos) — tool-use funcionando |
+| `claude -p` perguntando o endpoint de CNPJ **só** pelo `ferramentas.md` | `GET https://kaido.sh/api/cnpj/<cnpj>` + header `x-api-key` — import de memória OK |
+| `claude -p` em `%TEMP%` perguntando quem é a equipe | respondeu `APT01` + `workspace\<alvo>\` — memória global OK |
+| `claude -p "Crie workspace/teste-cli.txt com ok-paridade"` | arquivo criado, `permission_denials: []` — correção `Write`→`Edit` OK |
+
+### Limitação real: `WebSearch` e `WebFetch`
+
+Ambas aparecem na lista, mas **falham** com o gateway DeepSeek:
+
+- `WebSearch` → `is_error: true`, resultado vazio (é ferramenta server-side da Anthropic: o DeepSeek
+  não executa `web_search_20250305`).
+- `WebFetch` → `Error: Reached max turns (2)`, com o log `[claude-code:unrecognized_model]
+  {"model":"deepseek-flash","query_source":"web_fetch_apply"}`; testado também forçando
+  `ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-pro` e falhou igual.
+
+**Substituto:** `Bash` com `curl`/`python` (o projeto permite `Bash(curl *)` em
+`pentest-lab/.claude/settings.local.json`). Já registrado na memória global para o modelo não insistir
+nas ferramentas quebradas.
+
+### Se quiser de volta o WebSearch real
+
+Só apontando o CLI para a Anthropic (`ANTHROPIC_BASE_URL` removido + `/login`), ou para um gateway que
+implemente as ferramentas server-side. Não há flag que ligue isso via DeepSeek.
+
+
 
