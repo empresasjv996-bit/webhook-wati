@@ -384,6 +384,34 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
     .mapa-linha { grid-template-columns: 1fr; }
 }
 
+/* Template aprovado da Wati (campanhas) */
+.template-seletor { display: flex; gap: 8px; align-items: center; }
+.template-seletor .form-control { flex: 1; min-width: 0; }
+.template-preview {
+    background: rgba(0, 255, 128, 0.05); border: 1px dashed rgba(0, 255, 128, 0.3);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 16px;
+    color: #e8ffe8; font-size: 0.82rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+}
+.template-parametros { display: flex; flex-direction: column; gap: 8px; }
+.template-parametro {
+    display: grid; grid-template-columns: 74px minmax(130px, 160px) minmax(0, 1fr);
+    gap: 8px; align-items: center;
+    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px;
+}
+.template-parametro .form-control { padding: 8px 10px; font-size: 0.78rem; }
+.template-parametro [data-fixo] { grid-column: 3; }
+.template-variavel {
+    font-family: var(--font); font-size: 0.76rem; font-weight: 800; color: var(--green);
+    background: rgba(0, 255, 128, 0.1); border: 1px solid rgba(0, 255, 128, 0.25);
+    border-radius: 8px; padding: 5px 8px; text-align: center;
+    overflow: hidden; text-overflow: ellipsis;
+}
+
+@media (max-width: 560px) {
+    .template-parametro { grid-template-columns: 74px minmax(0, 1fr); }
+    .template-parametro [data-fixo] { grid-column: 1 / -1; }
+}
+
 /* =========================================================
    CAMPANHAS
    ========================================================= */

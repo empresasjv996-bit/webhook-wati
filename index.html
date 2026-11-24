@@ -350,7 +350,7 @@
 
                         <div class="form-group">
                             <label>Lista de contatos</label>
-                            <select id="campanha-lista" class="form-control">
+                            <select id="campanha-lista" class="form-control" onchange="carregarAtributosListaCampanha()">
                                 <option value="">Carregando listas...</option>
                             </select>
                         </div>
@@ -366,6 +366,37 @@
                         </div>
 
                         <div class="form-group">
+                            <label>Tipo de envio</label>
+                            <select id="campanha-canal" class="form-control" onchange="alterarCanalCampanha()">
+                                <option value="texto">Texto livre (sessão de 24h)</option>
+                                <option value="template">Template aprovado na Wati</option>
+                            </select>
+                        </div>
+
+                        <div id="campanha-bloco-template" class="oculto">
+                            <div class="form-group">
+                                <label>Template aprovado (somente APPROVED)</label>
+                                <div class="template-seletor">
+                                    <select id="campanha-template" class="form-control" onchange="renderizarParametrosTemplate()">
+                                        <option value="">Carregando templates...</option>
+                                    </select>
+                                    <button type="button" class="btn-mini" onclick="carregarTemplatesCampanha(true)">↻</button>
+                                </div>
+                                <small id="campanha-template-status" class="mapa-ajuda" style="margin-top: 6px; display: block;"></small>
+                            </div>
+
+                            <div id="campanha-template-preview" class="template-preview oculto"></div>
+
+                            <div class="form-group">
+                                <label>Variáveis do template</label>
+                                <div id="campanha-parametros" class="template-parametros"></div>
+                                <small style="color: var(--text-muted); font-size: 0.72rem; display: block; margin-top: 6px;">
+                                    Escolha de onde vem cada variável: um atributo importado na lista ou um valor fixo.
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="campanha-bloco-mensagem">
                             <label>Mensagem</label>
                             <textarea id="campanha-mensagem" class="form-control lista-texto" placeholder="Olá {{nome}}, temos uma novidade para você..."></textarea>
                         </div>
@@ -382,8 +413,9 @@
 
                         <button class="btn-primary" style="margin-top: 18px" onclick="criarCampanha(this)">Criar campanha</button>
                         <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 12px; line-height: 1.5;">
-                            O envio começa sozinho. Use <code>{{nome}}</code> para o nome do contato.
-                            Fora da janela de 24h do WhatsApp, a Wati só aceita <strong>template aprovado</strong>.
+                            O envio começa sozinho. No texto livre, use <code>{{nome}}</code> para o nome do contato.
+                            Fora da janela de 24h do WhatsApp, a Wati só aceita <strong>template aprovado</strong> —
+                            escolha o template acima e ligue cada variável a uma coluna da lista.
                         </p>
                     </div>
 

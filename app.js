@@ -128,7 +128,7 @@ function irPara(view) {
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
     if (view === 'canais') { carregarCanais(); carregarWebhook(); }
-    if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); }
+    if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); alterarCanalCampanha(); }
     if (view === 'wati') iniciarAtividadeWati();
     if (view === 'logs') carregarLogs();
     if (view === 'auditoria') carregarAuditoria();
@@ -1553,6 +1553,220 @@ async function copiarWebhook() {
 let filtroLogs = '';
 let vendedoresDisponiveis = [];
 let vendedoresCarregados = false;
+let templatesCampanha = [];
+let templatesCampanhaCarregados = false;
+let atributosListaCampanha = [];
+let mapaVariaveisCampanha = {};
+
+/* Troca entre texto livre e template aprovado (Wati) */
+function alterarCanalCampanha() {
+    const canal = (($('campanha-canal') || {}).value) || 'texto';
+    const blocoTemplate = $('campanha-bloco-template');
+    const blocoMensagem = $('campanha-bloco-mensagem');
+
+    if (blocoTemplate) blocoTemplate.classList.toggle('oculto', canal !== 'template');
+    if (blocoMensagem) blocoMensagem.classList.toggle('oculto', canal === 'template');
+
+    if (canal === 'template') {
+        carregarTemplatesCampanha();
+        carregarAtributosListaCampanha();
+    }
+}
+
+function chaveTemplate(template) {
+    return template ? `${template.nome}|${template.idioma || ''}` : '';
+}
+
+function templateSelecionado() {
+    const select = $('campanha-template');
+    const indice = select ? parseInt(select.value, 10) : NaN;
+    if (!Number.isInteger(indice) || indice < 0) return null;
+    return templatesCampanha[indice] || null;
+}
+
+async function carregarTemplatesCampanha(forcar) {
+    const select = $('campanha-template');
+    const status = $('campanha-template-status');
+    if (!select) return;
+
+    if (templatesCampanhaCarregados && !forcar) return;
+
+    const anterior = chaveTemplate(templateSelecionado());
+
+    if (status) status.textContent = 'Consultando templates na Wati...';
+    select.innerHTML = '<option value="">Carregando templates...</option>';
+
+    try {
+        const resposta = await fetch('/api/wati/templates' + (forcar ? '?atualizar=1' : ''));
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+
+        templatesCampanha = Array.isArray(dados.templates) ? dados.templates : [];
+        templatesCampanhaCarregados = true;
+
+        if (!templatesCampanha.length) {
+            select.innerHTML = '<option value="">Nenhum template encontrado</option>';
+            if (status) status.textContent = dados.aviso || 'A Wati não devolveu templates para esta conta.';
+            renderizarParametrosTemplate();
+            return;
+        }
+
+        const aprovados = templatesCampanha.filter((t) => t.aprovado);
+
+        if (!aprovados.length) {
+            select.innerHTML = '<option value="">Nenhum template aprovado</option>';
+            if (status) {
+                status.textContent = templatesCampanha.length + ' template(s) na conta, nenhum aprovado ainda.'
+                    + (dados.demo ? ' · modo demo' : '');
+            }
+            renderizarParametrosTemplate();
+            return;
+        }
+
+        // Só templates APPROVED podem ser disparados; o value é o índice na
+        // lista completa, então nome + idioma ficam preservados.
+        select.innerHTML = '<option value="">Selecione o template...</option>' + templatesCampanha.map((template, indice) => {
+            if (!template.aprovado) return '';
+            const idioma = template.idioma ? ' (' + template.idioma + ')' : '';
+            return `<option value="${indice}">${escaparHtml(template.nome + idioma)}</option>`;
+        }).join('');
+
+        const indiceAnterior = templatesCampanha.findIndex((template) =>
+            template.aprovado && chaveTemplate(template) === anterior
+        );
+        if (indiceAnterior >= 0) select.value = String(indiceAnterior);
+
+        if (status) {
+            status.textContent = aprovados.length + ' template(s) aprovado(s)' + (dados.demo ? ' · modo demo' : '') + '.';
+        }
+    } catch (erro) {
+        templatesCampanha = [];
+        templatesCampanhaCarregados = false;
+        select.innerHTML = '<option value="">Erro ao carregar templates</option>';
+        if (status) status.textContent = 'Não foi possível consultar os templates da Wati. ' + (erro.message || '');
+    }
+
+    renderizarParametrosTemplate();
+}
+
+async function carregarAtributosListaCampanha() {
+    const listaId = (($('campanha-lista') || {}).value) || '';
+    atributosListaCampanha = [];
+
+    if (!listaId) {
+        renderizarParametrosTemplate();
+        return;
+    }
+
+    try {
+        const resposta = await fetch('/api/listas/' + encodeURIComponent(listaId) + '/atributos');
+        let dados = {};
+        try { dados = await resposta.json(); } catch (erro) { dados = {}; }
+        atributosListaCampanha = (resposta.ok && Array.isArray(dados.atributos)) ? dados.atributos : [];
+    } catch (erro) {
+        atributosListaCampanha = [];
+    }
+
+    renderizarParametrosTemplate();
+}
+
+/* Prévia com os valores já ligados: valor fixo aparece direto; atributo
+   aparece entre « » porque muda de contato para contato. */
+function montarPreviewTemplate(template) {
+    const variaveis = Array.isArray(template.variaveis) ? template.variaveis : [];
+
+    return String(template.corpo || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (achado, bruto) => {
+        let chave = String(bruto).trim();
+
+        if (/^\d+$/.test(chave)) {
+            const indice = parseInt(chave, 10) - 1;
+            if (variaveis[indice]) chave = String(variaveis[indice]);
+        }
+
+        const estado = mapaVariaveisCampanha[chave];
+        if (!estado || !estado.valor) return achado;
+        return estado.origem === 'fixo' ? estado.valor : `«${estado.valor}»`;
+    });
+}
+
+function renderizarParametrosTemplate() {
+    const caixa = $('campanha-parametros');
+    if (!caixa) return;
+
+    const template = templateSelecionado();
+    const preview = $('campanha-template-preview');
+
+    if (preview) {
+        preview.classList.toggle('oculto', !template);
+        preview.textContent = template
+            ? (montarPreviewTemplate(template) || 'A Wati não devolveu o corpo deste template.')
+            : '';
+    }
+
+    if (!template) {
+        caixa.innerHTML = '<p class="mapa-ajuda">Escolha um template para ver as variáveis.</p>';
+        return;
+    }
+
+    const variaveis = Array.isArray(template.variaveis) ? template.variaveis : [];
+
+    if (!variaveis.length) {
+        caixa.innerHTML = '<p class="mapa-ajuda">Este template não tem variáveis — é só criar a campanha.</p>';
+        return;
+    }
+
+    caixa.innerHTML = variaveis.map((variavel) => {
+        const chave = String(variavel);
+        return `
+            <div class="template-parametro" data-variavel="${escaparHtml(chave)}">
+                <span class="template-variavel">{{${escaparHtml(chave)}}}</span>
+                <select class="form-control" data-origem>
+                    <option value="atributo">Atributo da lista</option>
+                    <option value="fixo">Valor fixo</option>
+                </select>
+                <select class="form-control" data-atributo></select>
+                <input class="form-control oculto" data-fixo type="text" placeholder="valor fixo">
+            </div>`;
+    }).join('');
+
+    Array.from(caixa.querySelectorAll('.template-parametro')).forEach((linha) => {
+        const variavel = linha.dataset.variavel;
+        const seletorOrigem = linha.querySelector('[data-origem]');
+        const seletorAtributo = linha.querySelector('[data-atributo]');
+        const campoFixo = linha.querySelector('[data-fixo]');
+        const estado = mapaVariaveisCampanha[variavel] || {};
+
+        const sugestao = atributosListaCampanha.find((a) =>
+            String(a.nome).toLowerCase() === variavel.toLowerCase()
+        );
+
+        seletorAtributo.innerHTML = '<option value="">Escolha o atributo...</option>' + atributosListaCampanha.map((a) =>
+            `<option value="${escaparHtml(a.nome)}">${escaparHtml(a.nome)} (${Number(a.comValor) || 0})</option>`
+        ).join('');
+
+        seletorOrigem.value = estado.origem || (atributosListaCampanha.length ? 'atributo' : 'fixo');
+        seletorAtributo.value = estado.origem !== 'fixo' && estado.valor ? estado.valor : (sugestao ? sugestao.nome : '');
+        campoFixo.value = estado.origem === 'fixo' ? (estado.valor || '') : '';
+
+        function sincronizar() {
+            const origem = seletorOrigem.value;
+            seletorAtributo.classList.toggle('oculto', origem !== 'atributo');
+            campoFixo.classList.toggle('oculto', origem !== 'fixo');
+
+            mapaVariaveisCampanha[variavel] = {
+                origem,
+                valor: origem === 'fixo' ? campoFixo.value.trim() : seletorAtributo.value
+            };
+
+            if (preview) preview.textContent = montarPreviewTemplate(template);
+        }
+
+        seletorOrigem.onchange = sincronizar;
+        seletorAtributo.onchange = sincronizar;
+        campoFixo.oninput = sincronizar;
+        sincronizar();
+    });
+}
 
 async function carregarVendedoresCampanha() {
     const select = $('campanha-vendedor');
@@ -1613,6 +1827,7 @@ async function carregarListasCampanha() {
         const listas = await resposta.json();
         if (!Array.isArray(listas) || !listas.length) {
             select.innerHTML = '<option value="">Nenhuma lista importada</option>';
+            carregarAtributosListaCampanha();
             return;
         }
 
@@ -1622,6 +1837,7 @@ async function carregarListasCampanha() {
         ).join('');
 
         if (anterior) select.value = anterior;
+        carregarAtributosListaCampanha();
     } catch (erro) {
         select.innerHTML = '<option value="">Erro ao carregar listas</option>';
     }
@@ -1635,6 +1851,9 @@ function cartaoCampanha(campanha) {
     const percentual = total ? Math.min(100, Math.round((feitos / total) * 100)) : 0;
     const status = String(campanha.status || '');
     const mensagem = String(campanha.mensagem || '');
+    const ehTemplate = campanha.canal === 'template';
+    const templateNome = String(campanha.template_nome || '');
+    const resumoMensagem = (ehTemplate ? '📋 ' + (templateNome || 'Template') + ' · ' : '') + mensagem;
 
     const botoes = [];
     if (status === 'ativa') botoes.push('<button class="btn-mini" data-acao="pausar">⏸ Pausar</button>');
@@ -1647,7 +1866,7 @@ function cartaoCampanha(campanha) {
             <div class="campanha-head">
                 <div class="campanha-titulo">
                     <h4>${escaparHtml(campanha.nome || 'Campanha')}</h4>
-                    <small>${escaparHtml(mensagem.slice(0, 90))}${mensagem.length > 90 ? '…' : ''}</small>
+                    <small>${escaparHtml(resumoMensagem.slice(0, 110))}${resumoMensagem.length > 110 ? '…' : ''}</small>
                 </div>
                 <span class="campanha-status ${escaparHtml(status)}">${escaparHtml(rotuloStatusCampanha(status))}</span>
             </div>
@@ -1709,13 +1928,41 @@ async function carregarCampanhas() {
 async function criarCampanha(botao) {
     const nome = (($('campanha-nome') || {}).value || '').trim();
     const listaId = ($('campanha-lista') || {}).value || '';
+    const canal = ($('campanha-canal') || {}).value || 'texto';
     const mensagem = (($('campanha-mensagem') || {}).value || '').trim();
     const intervalo = ($('campanha-intervalo') || {}).value || '8000';
     const vendedorEmail = ($('campanha-vendedor') || {}).value || '';
 
     if (!nome) { toast('Informe o nome da campanha.', 'erro'); return; }
     if (!listaId) { toast('Escolha a lista de contatos.', 'erro'); return; }
-    if (!mensagem) { toast('Escreva a mensagem da campanha.', 'erro'); return; }
+    if (canal === 'texto' && !mensagem) { toast('Escreva a mensagem da campanha.', 'erro'); return; }
+
+    let template = null;
+    let parametros = [];
+
+    if (canal === 'template') {
+        template = templateSelecionado();
+
+        if (!template) { toast('Escolha o template aprovado da Wati.', 'erro'); return; }
+        if (!template.aprovado) { toast('Esse template ainda não foi aprovado pela Wati.', 'erro'); return; }
+
+        const variaveis = Array.isArray(template.variaveis) ? template.variaveis : [];
+        const semValor = variaveis.filter((variavel) => {
+            const estado = mapaVariaveisCampanha[variavel];
+            return !estado || !estado.valor;
+        });
+
+        if (semValor.length) {
+            toast('Ligue a(s) variável(is) ' + semValor.map((v) => '{{' + v + '}}').join(', ') + ' do template.', 'erro');
+            return;
+        }
+
+        parametros = variaveis.map((variavel) => ({
+            nome: variavel,
+            origem: mapaVariaveisCampanha[variavel].origem,
+            valor: mapaVariaveisCampanha[variavel].valor
+        }));
+    }
 
     const textoOriginal = botao ? botao.textContent : '';
     if (botao) { botao.disabled = true; botao.textContent = 'Criando...'; }
@@ -1724,7 +1971,17 @@ async function criarCampanha(botao) {
         const resposta = await fetch('/api/campanhas', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, listaId, mensagem, intervalo: Number(intervalo), vendedorEmail })
+            body: JSON.stringify({
+                nome,
+                listaId,
+                mensagem,
+                intervalo: Number(intervalo),
+                vendedorEmail,
+                canal,
+                templateNome: template ? template.nome : '',
+                templateIdioma: template ? template.idioma : '',
+                parametros
+            })
         });
 
         let dados = {};
@@ -1736,6 +1993,7 @@ async function criarCampanha(botao) {
         }
 
         toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`
+            + (dados.templateNome ? ` Template: ${dados.templateNome}.` : '')
             + (dados.vendedorNome ? ` Leads direcionados para ${dados.vendedorNome}.` : ''));
         if ($('campanha-nome')) $('campanha-nome').value = '';
         if ($('campanha-mensagem')) $('campanha-mensagem').value = '';

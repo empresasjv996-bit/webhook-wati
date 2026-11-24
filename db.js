@@ -75,6 +75,10 @@ function criarBancoPostgres() {
                     nome TEXT NOT NULL,
                     lista_id INTEGER,
                     mensagem TEXT NOT NULL,
+                    canal TEXT NOT NULL DEFAULT 'texto',
+                    template_nome TEXT,
+                    template_idioma TEXT,
+                    template_parametros JSONB NOT NULL DEFAULT '[]'::jsonb,
                     intervalo_ms INTEGER NOT NULL DEFAULT 8000,
                     status TEXT NOT NULL DEFAULT 'ativa',
                     total INTEGER NOT NULL DEFAULT 0,
@@ -91,6 +95,8 @@ function criarBancoPostgres() {
                     campanha_id INTEGER NOT NULL REFERENCES campanhas (id) ON DELETE CASCADE,
                     telefone TEXT NOT NULL,
                     nome TEXT,
+                    mensagem TEXT,
+                    parametros JSONB NOT NULL DEFAULT '[]'::jsonb,
                     status TEXT NOT NULL DEFAULT 'pendente',
                     erro TEXT,
                     enviado_em TIMESTAMPTZ
@@ -116,6 +122,14 @@ function criarBancoPostgres() {
                 // destino da campanha (vendedor que recebe os leads)
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_email TEXT',
                 'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT',
+                // canal da campanha: "texto" (sessão) ou "template" (aprovado na Wati)
+                "ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS canal TEXT NOT NULL DEFAULT 'texto'",
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_nome TEXT',
+                'ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_idioma TEXT',
+                "ALTER TABLE campanhas ADD COLUMN IF NOT EXISTS template_parametros JSONB NOT NULL DEFAULT '[]'::jsonb",
+                // valores já resolvidos por contato (template) + texto final do envio
+                "ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS parametros JSONB NOT NULL DEFAULT '[]'::jsonb",
+                'ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS mensagem TEXT',
                 `CREATE TABLE IF NOT EXISTS auditoria (
                     id SERIAL PRIMARY KEY,
                     ator TEXT,
@@ -532,16 +546,27 @@ function criarBancoPostgres() {
         },
 
         /* ---------------- CAMPANHAS ---------------- */
-        async criarCampanha({ nome, listaId, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome }) {
+        async criarCampanha({
+            nome, listaId, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome,
+            canal, templateNome, templateIdioma, templateParametros
+        }) {
             const cliente = await pool.connect();
             try {
                 await cliente.query('BEGIN');
 
                 const { rows } = await cliente.query(
-                    `INSERT INTO campanhas (nome, lista_id, mensagem, intervalo_ms, total, status, vendedor_email, vendedor_nome, proximo_envio_em)
-                     VALUES ($1, $2, $3, $4, $5, 'ativa', $6, $7, NOW())
+                    `INSERT INTO campanhas (nome, lista_id, mensagem, canal, template_nome, template_idioma,
+                                            template_parametros, intervalo_ms, total, status,
+                                            vendedor_email, vendedor_nome, proximo_envio_em)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'ativa', $10, $11, NOW())
                      RETURNING id`,
-                    [nome, listaId || null, mensagem, intervaloMs, contatos.length, vendedorEmail || null, vendedorNome || null]
+                    [
+                        nome, listaId || null, mensagem,
+                        canal === 'template' ? 'template' : 'texto',
+                        templateNome || null, templateIdioma || null,
+                        JSON.stringify(Array.isArray(templateParametros) ? templateParametros : []),
+                        intervaloMs, contatos.length, vendedorEmail || null, vendedorNome || null
+                    ]
                 );
                 const id = rows[0].id;
 
@@ -550,12 +575,19 @@ function criarBancoPostgres() {
                     const parte = contatos.slice(i, i + tamanho);
                     const valores = [];
                     const linhas = parte.map((contato, indice) => {
-                        const base = indice * 3;
-                        valores.push(id, contato.telefone, contato.nome || null);
-                        return `($${base + 1}, $${base + 2}, $${base + 3})`;
+                        const base = indice * 5;
+                        valores.push(
+                            id,
+                            contato.telefone,
+                            contato.nome || null,
+                            contato.mensagem || null,
+                            JSON.stringify(Array.isArray(contato.parametros) ? contato.parametros : [])
+                        );
+                        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}::jsonb)`;
                     });
                     await cliente.query(
-                        `INSERT INTO campanha_envios (campanha_id, telefone, nome) VALUES ${linhas.join(', ')}`,
+                        `INSERT INTO campanha_envios (campanha_id, telefone, nome, mensagem, parametros)
+                         VALUES ${linhas.join(', ')}`,
                         valores
                     );
                 }
@@ -572,7 +604,8 @@ function criarBancoPostgres() {
 
         async listarCampanhas() {
             const { rows } = await pool.query(
-                `SELECT c.id, c.nome, c.mensagem, c.intervalo_ms, c.status, c.total, c.enviados, c.falhas,
+                `SELECT c.id, c.nome, c.mensagem, c.canal, c.template_nome, c.template_idioma,
+                        c.intervalo_ms, c.status, c.total, c.enviados, c.falhas,
                         c.vendedor_email, c.vendedor_nome,
                         c.criado_em, c.atualizado_em,
                         (SELECT COUNT(*)::int FROM campanha_envios e
@@ -619,7 +652,9 @@ function criarBancoPostgres() {
         async proximoEnvioPendente() {
             const { rows } = await pool.query(
                 `SELECT e.id AS envio_id, e.telefone, e.nome,
+                        e.mensagem AS envio_mensagem, e.parametros AS envio_parametros,
                         c.id AS campanha_id, c.nome AS campanha, c.mensagem,
+                        c.canal, c.template_nome, c.template_idioma,
                         c.vendedor_email, c.vendedor_nome
                    FROM campanha_envios e
                    JOIN campanhas c ON c.id = e.campanha_id
@@ -1143,13 +1178,20 @@ function criarBancoMemoria() {
         },
 
         /* ---------------- CAMPANHAS ---------------- */
-        async criarCampanha({ nome, listaId: idLista, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome }) {
+        async criarCampanha({
+            nome, listaId: idLista, mensagem, intervaloMs, contatos, vendedorEmail, vendedorNome,
+            canal, templateNome, templateIdioma, templateParametros
+        }) {
             const id = campanhaId++;
             campanhas.push({
                 id,
                 nome,
                 lista_id: idLista || null,
                 mensagem,
+                canal: canal === 'template' ? 'template' : 'texto',
+                template_nome: templateNome || null,
+                template_idioma: templateIdioma || null,
+                template_parametros: Array.isArray(templateParametros) ? templateParametros : [],
                 intervalo_ms: intervaloMs,
                 vendedor_email: vendedorEmail || null,
                 vendedor_nome: vendedorNome || null,
@@ -1168,6 +1210,8 @@ function criarBancoMemoria() {
                     campanha_id: id,
                     telefone: contato.telefone,
                     nome: contato.nome || null,
+                    mensagem: contato.mensagem || null,
+                    parametros: Array.isArray(contato.parametros) ? contato.parametros : [],
                     status: 'pendente',
                     erro: null,
                     enviado_em: null
@@ -1237,9 +1281,14 @@ function criarBancoMemoria() {
                 envio_id: envio.id,
                 telefone: envio.telefone,
                 nome: envio.nome,
+                envio_mensagem: envio.mensagem || null,
+                envio_parametros: Array.isArray(envio.parametros) ? envio.parametros.slice() : [],
                 campanha_id: campanha.id,
                 campanha: campanha.nome,
                 mensagem: campanha.mensagem,
+                canal: campanha.canal || 'texto',
+                template_nome: campanha.template_nome || null,
+                template_idioma: campanha.template_idioma || null,
                 vendedor_email: campanha.vendedor_email || null,
                 vendedor_nome: campanha.vendedor_nome || null
             };

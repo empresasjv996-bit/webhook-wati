@@ -486,6 +486,428 @@ async function salvarContatoNaWati({ telefone, nome, atributos }) {
     return { ok: false, message: `A Wati recusou (${tentativas.join(' | ')}).` };
 }
 
+/* ---------------------------------------------------------
+   TEMPLATES APROVADOS NA WATI
+   ---------------------------------------------------------
+   A Wati guarda o corpo com as variáveis ({{1}}, {{2}} ou {{nome}})
+   e o envio precisa receber cada valor pelo NOME da variável.
+   Lemos a lista de templates (v3 e, se a conta ainda não tiver a v3,
+   a v1) e normalizamos tudo para o painel montar o formulário. */
+
+const TEMPLATES_DEMO = [
+    {
+        nome: 'teste_painel',
+        idioma: 'pt_BR',
+        status: 'APPROVED',
+        categoria: 'MARKETING',
+        corpo: 'Olá {{1}}, temos uma novidade sobre {{2}}.',
+        variaveis: ['1', '2'],
+        aprovado: true
+    },
+    {
+        nome: 'boas_vindas',
+        idioma: 'pt_BR',
+        status: 'APPROVED',
+        categoria: 'UTILITY',
+        corpo: 'Olá {{nome}}, seu cadastro foi recebido com sucesso.',
+        variaveis: ['nome'],
+        aprovado: true
+    }
+];
+
+const CACHE_TEMPLATES_MS = 5 * 60 * 1000;
+let cacheTemplates = { quando: 0, resultado: null };
+
+/* Nomes das variáveis: tudo entre {{ }} nos textos + nomes extras
+   (customParams da própria Wati, que cobrem cabeçalho/mídia). */
+function extrairVariaveisTemplate(corpo, extras) {
+    const nomes = [];
+
+    function adicionar(nome) {
+        const limpo = String(nome == null ? '' : nome).trim();
+        if (!limpo || limpo.length > 40) return;
+        if (!/^[A-Za-z0-9_. -]+$/.test(limpo)) return;
+        if (!nomes.includes(limpo)) nomes.push(limpo);
+    }
+
+    String(corpo || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (achado, nome) => {
+        adicionar(nome);
+        return achado;
+    });
+
+    (Array.isArray(extras) ? extras : []).forEach(adicionar);
+
+    return nomes;
+}
+
+function listaDeTemplates(dados) {
+    if (Array.isArray(dados)) return dados;
+    if (!dados || typeof dados !== 'object') return [];
+
+    const campos = ['messageTemplates', 'templates', 'data', 'items', 'results', 'content'];
+
+    for (const campo of campos) {
+        const valor = dados[campo];
+        if (Array.isArray(valor)) return valor;
+        if (valor && typeof valor === 'object') {
+            const interno = listaDeTemplates(valor);
+            if (interno.length) return interno;
+        }
+    }
+
+    return [];
+}
+
+/* Aceita o formato v1 (messageTemplates[].body + customParams) e o v3
+   (body/header/footer/buttons + custom_params). O que o envio usa é o NOME
+   de cada parâmetro, então é ele que precisa chegar ao painel. */
+function normalizarTemplateWati(item) {
+    if (!item || typeof item !== 'object') return null;
+
+    const nome = String(valorAninhado(item, ['name', 'template_name', 'templateName', 'elementName']) || '').trim();
+    if (!nome) return null;
+
+    const status = String(valorAninhado(item, ['status', 'templateStatus', 'approvalStatus', 'state']) || '').trim();
+    const categoria = String(valorAninhado(item, ['category', 'templateCategory']) || '').trim();
+
+    // v3 devolve language_option { key, value, text }; v1 devolve a sigla direto.
+    const opcaoIdioma = item.language_option || item.languageOption || (item.template && item.template.language_option);
+    const idioma = String(
+        valorAninhado(item, ['language', 'languageCode', 'language_code', 'lang'])
+        || valorAninhado(opcaoIdioma, ['value', 'key', 'text'])
+        || ''
+    ).trim();
+
+    let corpo = String(valorAninhado(item, ['body', 'bodyText', 'body_text', 'content', 'message']) || '').trim();
+
+    if (!corpo) {
+        const listas = [item.components, item.template && item.template.components, item.data && item.data.components]
+            .filter(Array.isArray);
+
+        for (const componentes of listas) {
+            const bloco = componentes.find((componente) => {
+                const tipo = String((componente && (componente.type || componente.Type || componente.componentType)) || '');
+                return /body/i.test(tipo);
+            });
+
+            if (bloco) {
+                corpo = String(valorAninhado(bloco, ['text', 'body', 'content', 'value']) || '').trim();
+                if (corpo) break;
+            }
+        }
+    }
+
+    // Todo texto que pode trazer {{variavel}}: corpo, cabeçalho (texto/link de
+    // mídia dinâmica), rodapé e URL de botão.
+    const textos = [corpo];
+    const cabecalho = item.header && typeof item.header === 'object' ? item.header : null;
+
+    if (cabecalho) {
+        textos.push(cabecalho.text, cabecalho.link, cabecalho.fileName, cabecalho.filename);
+    }
+    if (item.footer) textos.push(typeof item.footer === 'string' ? item.footer : item.footer.text);
+    if (Array.isArray(item.buttons)) {
+        item.buttons.forEach((botao) => {
+            if (!botao || typeof botao !== 'object') return;
+            textos.push(valorAninhado(botao, ['text', 'url', 'url_original']));
+            textos.push(valorAninhado(botao.parameter, ['url', 'url_original', 'text']));
+        });
+    }
+
+    // Nomes reais dos parâmetros (custom_params). A ordem é a mesma das
+    // posições {{1}}, {{2}}... do texto.
+    const nomesParametros = [];
+    ['custom_params', 'customParams', 'params', 'parameters', 'templateParams', 'variables'].forEach((campo) => {
+        const lista = item[campo];
+        if (!Array.isArray(lista)) return;
+
+        lista.forEach((parametro) => {
+            if (parametro == null) return;
+
+            const nomeParametro = typeof parametro === 'string'
+                ? parametro
+                : valorAninhado(parametro, ['name', 'paramName', 'param_name', 'key']);
+
+            const limpo = String(nomeParametro == null ? '' : nomeParametro).trim();
+            if (limpo && !nomesParametros.includes(limpo)) nomesParametros.push(limpo);
+        });
+    });
+
+    const variaveis = nomesParametros.slice();
+
+    function adicionarVariavel(valor) {
+        const limpo = String(valor == null ? '' : valor).trim();
+        if (!limpo || limpo.length > 40) return;
+        if (!/^[A-Za-z0-9_. -]+$/.test(limpo)) return;
+        if (!variaveis.includes(limpo)) variaveis.push(limpo);
+    }
+
+    // Mídia dinâmica no cabeçalho: header_param_mapping.param_name.
+    const nomeCabecalho = String(
+        valorAninhado(cabecalho && cabecalho.header_param_mapping, ['param_name', 'paramName', 'name']) || ''
+    ).trim();
+    if (nomeCabecalho) adicionarVariavel(nomeCabecalho);
+
+    // Placeholders nomeados que não vieram nos custom_params ainda precisam ser
+    // ligados no painel. Os numéricos já estão cobertos pelos nomes na mesma
+    // ordem; só sobram posições além da quantidade de nomes (ex.: URL de botão).
+    extrairVariaveisTemplate(textos.filter(Boolean).join('\n'), []).forEach((variavel) => {
+        if (/^\d+$/.test(variavel)) {
+            if (parseInt(variavel, 10) > nomesParametros.length) adicionarVariavel(variavel);
+            return;
+        }
+        adicionarVariavel(variavel);
+    });
+
+    const statusMinusculo = status.toLowerCase();
+
+    return {
+        nome,
+        idioma,
+        status,
+        categoria,
+        corpo,
+        variaveis,
+        aprovado: !statusMinusculo || /approv|aprovad/.test(statusMinusculo) || statusMinusculo === 'active'
+    };
+}
+
+const TAMANHO_PAGINA_TEMPLATES = 100;
+const MAX_PAGINAS_TEMPLATES = 10;
+const CACHE_TEMPLATES_FALHA_MS = 60 * 1000;
+
+/* A Wati pagina a listagem. Lemos todas as páginas (com teto de segurança)
+   para não perder templates aprovados antigos. */
+async function paginarTemplatesWati(montarUrl) {
+    const itens = [];
+    let motivo = '';
+
+    for (let pagina = 1; pagina <= MAX_PAGINAS_TEMPLATES; pagina++) {
+        const resposta = await watiRequisicao(montarUrl(pagina), 'GET');
+
+        if (!watiSucesso(resposta)) {
+            motivo = descreverErroWati(resposta);
+            break;
+        }
+
+        const lote = listaDeTemplates(resposta.dados);
+        itens.push(...lote);
+
+        if (lote.length < TAMANHO_PAGINA_TEMPLATES) break;
+
+        const total = Number(valorAninhado(resposta.dados, ['total', 'count', 'totalCount'])) || 0;
+        if (total && itens.length >= total) break;
+    }
+
+    return { itens, motivo };
+}
+
+async function buscarTemplatesWati() {
+    const tentativas = [];
+
+    const v3 = await paginarTemplatesWati(
+        (pagina) => `${WATI_HOST}/api/ext/v3/messageTemplates?page_number=${pagina}&page_size=${TAMANHO_PAGINA_TEMPLATES}`
+    );
+    if (v3.itens.length) return { via: 'v3', itens: v3.itens };
+
+    tentativas.push('v3 ' + (v3.motivo || 'sem templates'));
+
+    // Contas que ainda não enxergam os templates na v3.
+    const v1 = await paginarTemplatesWati(
+        (pagina) => `${watiBase()}/api/v1/getMessageTemplates?pageSize=${TAMANHO_PAGINA_TEMPLATES}&pageNumber=${pagina}`
+    );
+    if (v1.itens.length) return { via: 'v1', itens: v1.itens };
+
+    tentativas.push('v1 ' + (v1.motivo || 'sem templates'));
+
+    return { via: '', itens: [], tentativas };
+}
+
+async function listarTemplatesWati(forcar) {
+    if (banco.modoDemo) {
+        return {
+            ok: true,
+            demo: true,
+            via: 'demo',
+            total: TEMPLATES_DEMO.length,
+            aprovados: TEMPLATES_DEMO.filter((t) => t.aprovado).length,
+            templates: TEMPLATES_DEMO.map((t) => Object.assign({}, t, { variaveis: t.variaveis.slice() }))
+        };
+    }
+
+    if (!watiConfigurada()) {
+        return {
+            ok: false,
+            templates: [],
+            total: 0,
+            aprovados: 0,
+            aviso: 'WATI_TOKEN e/ou WATI_NUMERO não configurados no Environment do Render.'
+        };
+    }
+
+    const idadeCache = Date.now() - cacheTemplates.quando;
+    const validadeCache = cacheTemplates.resultado && cacheTemplates.resultado.ok
+        ? CACHE_TEMPLATES_MS
+        : CACHE_TEMPLATES_FALHA_MS;
+
+    if (!forcar && cacheTemplates.resultado && idadeCache < validadeCache) {
+        return cacheTemplates.resultado;
+    }
+
+    const busca = await buscarTemplatesWati();
+
+    const vistos = new Set();
+    const templates = [];
+
+    busca.itens.forEach((item) => {
+        const normalizado = normalizarTemplateWati(item);
+        if (!normalizado) return;
+
+        const chave = `${normalizado.nome}|${normalizado.idioma}`.toLowerCase();
+        if (vistos.has(chave)) return;
+
+        vistos.add(chave);
+        templates.push(normalizado);
+    });
+
+    templates.sort((a, b) => {
+        if (a.aprovado !== b.aprovado) return a.aprovado ? -1 : 1;
+        return a.nome.localeCompare(b.nome) || String(a.idioma).localeCompare(String(b.idioma));
+    });
+
+    const aprovados = templates.filter((t) => t.aprovado).length;
+
+    const resultado = templates.length
+        ? { ok: true, via: busca.via, templates, total: templates.length, aprovados }
+        : {
+            ok: false,
+            templates: [],
+            total: 0,
+            aprovados: 0,
+            aviso: `Não foi possível listar os templates da Wati (${(busca.tentativas || []).join(' | ') || 'resposta vazia'}).`
+        };
+
+    cacheTemplates = { quando: Date.now(), resultado };
+    return resultado;
+}
+
+/* Avalia a resposta da v3: HTTP 200 pode vir com success:false e, mesmo com
+   success:true, um destinatário pode ter erro. */
+function avaliarEnvioTemplate(resposta) {
+    if (!resposta) return { aceito: false, motivo: 'sem resposta', podeTentarV1: true };
+    if (!resposta.ok) return { aceito: false, motivo: descreverErroWati(resposta), podeTentarV1: true };
+
+    const dados = resposta.dados;
+    if (!dados || typeof dados !== 'object') {
+        return { aceito: false, motivo: 'resposta sem JSON', podeTentarV1: true };
+    }
+
+    if (dados.success === false || dados.result === false) {
+        return {
+            aceito: false,
+            motivo: String(dados.error || dados.message || 'a Wati recusou o envio'),
+            podeTentarV1: true
+        };
+    }
+
+    const destinatarios = Array.isArray(dados.recipients) ? dados.recipients : [];
+    const comErro = destinatarios.find((item) => item && Array.isArray(item.errors) && item.errors.length);
+
+    if (comErro) {
+        return {
+            aceito: false,
+            motivo: comErro.errors.join('; '),
+            // A v3 respondeu de forma definitiva para este destinatário; repetir
+            // na v1 só serviria para duplicar a mensagem.
+            podeTentarV1: false
+        };
+    }
+
+    return { aceito: true, motivo: '', semDestinatarios: destinatarios.length === 0 };
+}
+
+/* Envio de template aprovado com os valores já resolvidos por contato. */
+async function enviarTemplateWati({ telefone, templateNome, parametros, campanha, envioId }) {
+    if (banco.modoDemo) return { ok: true, demo: true };
+
+    if (!watiConfigurada()) {
+        return { ok: false, message: 'API da Wati não configurada no servidor.' };
+    }
+
+    const numero = String(telefone || '').replace(/\D/g, '');
+    if (!numero) return { ok: false, message: 'Telefone inválido.' };
+
+    const nomeTemplate = String(templateNome || '').trim();
+    if (!nomeTemplate) return { ok: false, message: 'Campanha sem template definido.' };
+
+    const lista = (Array.isArray(parametros) ? parametros : []).map((item) => ({
+        name: String((item && item.name) || ''),
+        value: String((item && item.value) == null ? '' : item.value)
+    })).filter((item) => item.name);
+
+    const rotulo = String(campanha || 'campanha').replace(/[^\w-]+/g, '_').slice(0, 60) || 'campanha';
+    const localId = `campanha-${rotulo}-${envioId || numero}`.slice(0, 120);
+    const tentativas = [];
+
+    // 1) v3 (recomendada pela Wati)
+    let resposta = await watiRequisicao(`${WATI_HOST}/api/ext/v3/messageTemplates/send`, 'POST', {
+        template_name: nomeTemplate,
+        broadcast_name: rotulo,
+        recipients: [{
+            target: numero,
+            local_message_id: localId,
+            custom_params: lista
+        }]
+    });
+
+    const avaliacao = avaliarEnvioTemplate(resposta);
+
+    if (avaliacao.aceito) {
+        if (avaliacao.semDestinatarios) {
+            return {
+                ok: true,
+                via: 'v3',
+                aviso: 'A Wati aceitou o envio, mas não devolveu o resultado deste destinatário. Confirme pelo webhook.'
+            };
+        }
+        return { ok: true, via: 'v3' };
+    }
+
+    tentativas.push('v3: ' + avaliacao.motivo);
+
+    // 2) v1 (contas que ainda não têm os templates na v3). Só quando a v3
+    // falhou inteira — erro de destinatário na v3 não deve ser repetido.
+    if (avaliacao.podeTentarV1) {
+        resposta = await watiRequisicao(
+            `${watiBase()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(numero)}`,
+            'POST',
+            {
+                template_name: nomeTemplate,
+                broadcast_name: rotulo,
+                // A v1 recebe só os valores, na ordem das variáveis.
+                parameters: lista.map((item) => item.value)
+            }
+        );
+
+        if (watiSucesso(resposta)) return { ok: true, via: 'v1' };
+        tentativas.push('v1: ' + descreverErroWati(resposta));
+    }
+
+    return { ok: false, message: `A Wati recusou o template (${tentativas.join(' | ')}).` };
+}
+
+/* Lista de templates aprovados para o formulário de campanhas.
+   ?atualizar=1 ignora o cache de 5 minutos. */
+app.get('/api/wati/templates', exigirAdmin, async (req, res) => {
+    try {
+        const resultado = await listarTemplatesWati(req.query.atualizar === '1');
+        res.json(resultado);
+    } catch (erro) {
+        console.error('Erro ao listar templates da Wati:', erro.message);
+        res.status(500).json({ ok: false, templates: [], aviso: 'Erro ao consultar os templates da Wati.' });
+    }
+});
+
 app.get('/api/canais', (req, res) => {
     res.json([
         {
@@ -803,6 +1225,45 @@ app.get('/api/listas', async (req, res) => {
     }
 });
 
+/* Atributos disponíveis na lista (para ligar cada variável do template
+   a uma coluna importada, ex.: {{1}} -> atributo "1" ou "nome"). */
+app.get('/api/listas/:id/atributos', async (req, res) => {
+    try {
+        const contatos = await banco.obterContatosLista(req.params.id);
+        const contagem = new Map();
+        let comNome = 0;
+
+        contatos.forEach((contato) => {
+            if (String((contato && contato.nome) || '').trim()) comNome += 1;
+
+            const atributos = (contato && contato.atributos) || {};
+            Object.keys(atributos).forEach((chave) => {
+                if (!String(atributos[chave] == null ? '' : atributos[chave]).trim()) return;
+                contagem.set(chave, (contagem.get(chave) || 0) + 1);
+            });
+        });
+
+        const atributos = [];
+
+        if (comNome) {
+            atributos.push({ nome: 'nome', comValor: comNome, semValor: contatos.length - comNome, tipo: 'campo' });
+        }
+
+        atributos.push({ nome: 'telefone', comValor: contatos.length, semValor: 0, tipo: 'campo' });
+
+        Array.from(contagem.entries())
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .forEach(([nome, comValor]) => {
+                atributos.push({ nome, comValor, semValor: contatos.length - comValor, tipo: 'atributo' });
+            });
+
+        res.json({ total: contatos.length, atributos });
+    } catch (error) {
+        console.error('Erro ao listar atributos da lista:', error.message);
+        res.status(500).json({ success: false, message: 'Erro ao ler os atributos da lista.' });
+    }
+});
+
 app.post('/api/listas', async (req, res) => {
     const { nome, contatos } = req.body || {};
 
@@ -1115,14 +1576,34 @@ async function processarCampanhas() {
             if (!item) break;
             if (!(await banco.reservarEnvio(item.envio_id))) continue;
 
-            // Personalização: {{nome}} vira o nome do contato vindo da lista
-            const nomeContato = String(item.nome || '').trim();
-            const textoFinal = String(item.mensagem || '')
-                .replace(/\{\{\s*nome\s*\}\}/gi, nomeContato)
-                .replace(/ {2,}/g, ' ')
-                .trim();
+            let textoFinal = '';
+            let resultado;
 
-            const resultado = await enviarViaWati(item.telefone, textoFinal);
+            if (item.canal === 'template') {
+                // Template aprovado: os valores já foram resolvidos na criação
+                textoFinal = String(item.envio_mensagem || item.mensagem || '').trim();
+                resultado = await enviarTemplateWati({
+                    telefone: item.telefone,
+                    templateNome: item.template_nome,
+                    parametros: item.envio_parametros,
+                    campanha: item.campanha,
+                    envioId: item.envio_id
+                });
+            } else {
+                // Personalização: {{nome}} vira o nome do contato vindo da lista
+                const nomeContato = String(item.nome || '').trim();
+                textoFinal = String(item.envio_mensagem || item.mensagem || '')
+                    .replace(/\{\{\s*nome\s*\}\}/gi, nomeContato)
+                    .replace(/ {2,}/g, ' ')
+                    .trim();
+
+                resultado = await enviarViaWati(item.telefone, textoFinal);
+            }
+
+            if (resultado.ok && resultado.aviso) {
+                console.warn(`Campanha ${item.campanha} -> ${item.telefone}: ${resultado.aviso}`);
+            }
+
             await banco.concluirEnvio(item.envio_id, item.campanha_id, resultado.ok, resultado.message);
 
             if (resultado.ok) {
@@ -1177,14 +1658,66 @@ app.get('/api/campanhas', async (req, res) => {
     }
 });
 
-app.post('/api/campanhas', exigirAdmin, async (req, res) => {
-    const { nome, listaId, mensagem, intervalo, vendedorEmail } = req.body || {};
+/* Valor de um atributo/campo do contato para preencher uma variável. */
+function valorDoContato(contato, referencia) {
+    const chave = normalizarAtributo(referencia);
+    if (!chave) return '';
 
-    if (!nome || !String(nome).trim()) {
+    if (chave === 'nome' || chave === 'name') return String((contato && contato.nome) || '').trim();
+    if (chave === 'telefone' || chave === 'phone' || chave === 'numero') {
+        return String((contato && contato.telefone) || '').trim();
+    }
+
+    const atributos = (contato && contato.atributos) || {};
+    if (atributos[chave] != null && String(atributos[chave]).trim()) return String(atributos[chave]).trim();
+
+    const achado = Object.keys(atributos).find((nome) => normalizarAtributo(nome) === chave);
+    return achado ? String(atributos[achado] == null ? '' : atributos[achado]).trim() : '';
+}
+
+/* Prévia do que o contato vai receber (o texto em si vai na campanha,
+   os valores vão em custom_params). Quando o corpo usa {{1}}, {{2}}...
+   ligamos cada posição ao nome do parâmetro na mesma ordem. */
+function renderizarMensagemTemplate(corpo, parametros, variaveis) {
+    const lista = Array.isArray(parametros) ? parametros : [];
+    const nomes = Array.isArray(variaveis) ? variaveis : [];
+    const mapa = {};
+
+    lista.forEach((item) => { mapa[item.name] = item.value; });
+
+    return String(corpo || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (achado, bruto) => {
+        const chave = String(bruto).trim();
+        let nome = chave;
+
+        if (/^\d+$/.test(chave)) {
+            const indice = parseInt(chave, 10) - 1;
+            if (nomes[indice]) nome = String(nomes[indice]);
+            else if (lista[indice] && lista[indice].name) nome = lista[indice].name;
+        }
+
+        if (mapa[nome] === undefined) return achado;
+        return mapa[nome] || `[${nome}]`;
+    });
+}
+
+app.post('/api/campanhas', exigirAdmin, async (req, res) => {
+    const {
+        nome, listaId, mensagem, intervalo, vendedorEmail,
+        canal, templateNome, templateIdioma, parametros
+    } = req.body || {};
+
+    const canalEscolhido = canal === 'template' ? 'template' : 'texto';
+    const nomeCampanha = String(nome || '').trim();
+    const textoMensagem = String(mensagem || '').trim();
+
+    if (!nomeCampanha) {
         return res.status(400).json({ success: false, message: 'Informe um nome para a campanha.' });
     }
-    if (!mensagem || !String(mensagem).trim()) {
+    if (canalEscolhido === 'texto' && !textoMensagem) {
         return res.status(400).json({ success: false, message: 'Escreva a mensagem da campanha.' });
+    }
+    if (canalEscolhido === 'template' && !String(templateNome || '').trim()) {
+        return res.status(400).json({ success: false, message: 'Escolha o template aprovado da Wati.' });
     }
     if (!listaId) {
         return res.status(400).json({ success: false, message: 'Escolha a lista de contatos.' });
@@ -1210,21 +1743,135 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
         // 3 segundos no mínimo (proteção contra bloqueio do WhatsApp), 2 minutos no máximo
         const intervaloMs = Math.min(Math.max(parseInt(intervalo, 10) || 8000, 3000), 120000);
 
+        let contatosParaEnvio = contatos;
+        let mensagemCampanha = textoMensagem;
+        let templateEscolhido = null;
+        let templateParametros = [];
+
+        if (canalEscolhido === 'template') {
+            const resultadoTemplates = await listarTemplatesWati(false);
+
+            if (!resultadoTemplates.templates.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: resultadoTemplates.aviso || 'Nenhum template encontrado na Wati.'
+                });
+            }
+
+            const nomeAlvo = String(templateNome).trim().toLowerCase();
+            const idiomaAlvo = String(templateIdioma || '').trim().toLowerCase();
+
+            templateEscolhido = resultadoTemplates.templates.find((t) =>
+                t.nome.toLowerCase() === nomeAlvo && (!idiomaAlvo || String(t.idioma || '').toLowerCase() === idiomaAlvo)
+            ) || resultadoTemplates.templates.find((t) => t.nome.toLowerCase() === nomeAlvo);
+
+            if (!templateEscolhido) {
+                return res.status(400).json({
+                    success: false,
+                    message: `O template "${templateNome}" não está entre os templates da Wati. Atualize a lista de templates.`
+                });
+            }
+
+            if (!templateEscolhido.aprovado) {
+                return res.status(400).json({
+                    success: false,
+                    message: `O template "${templateEscolhido.nome}" está com status ${templateEscolhido.status || 'desconhecido'} e não pode ser enviado.`
+                });
+            }
+
+            // Cada variável precisa de uma origem: atributo da lista ou valor fixo
+            const informados = {};
+            (Array.isArray(parametros) ? parametros : []).forEach((item) => {
+                const chave = String((item && item.nome) || '').trim();
+                if (!chave) return;
+
+                informados[chave] = {
+                    origem: item.origem === 'fixo' ? 'fixo' : 'atributo',
+                    valor: String(item.valor == null ? '' : item.valor).trim()
+                };
+            });
+
+            const semMapeamento = templateEscolhido.variaveis.filter((variavel) => {
+                const mapa = informados[variavel];
+                return !mapa || !mapa.valor;
+            });
+
+            if (semMapeamento.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Ligue cada variável do template: ' + semMapeamento.map((v) => '{{' + v + '}}').join(', ') + '.'
+                });
+            }
+
+            const faltandoAtributo = new Map();
+
+            contatosParaEnvio = contatos.map((contato) => {
+                const valores = templateEscolhido.variaveis.map((variavel) => {
+                    const mapa = informados[variavel];
+                    let valor;
+
+                    if (mapa.origem === 'fixo') {
+                        valor = mapa.valor;
+                    } else {
+                        valor = valorDoContato(contato, mapa.valor);
+
+                        if (!valor) {
+                            const registro = faltandoAtributo.get(mapa.valor) || { total: 0, exemplo: '' };
+                            registro.total += 1;
+                            if (!registro.exemplo) registro.exemplo = contato.telefone;
+                            faltandoAtributo.set(mapa.valor, registro);
+                        }
+                    }
+
+                    return { name: variavel, value: valor };
+                });
+
+                return Object.assign({}, contato, {
+                    parametros: valores,
+                    mensagem: renderizarMensagemTemplate(templateEscolhido.corpo, valores, templateEscolhido.variaveis)
+                });
+            });
+
+            if (faltandoAtributo.size) {
+                const detalhes = Array.from(faltandoAtributo.entries()).map(([atributo, info]) =>
+                    `${info.total} contato(s) sem o atributo "${atributo}" (ex.: ${info.exemplo})`
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message: 'Complete a lista antes de disparar: ' + detalhes.join('; ') + '.'
+                });
+            }
+
+            templateParametros = templateEscolhido.variaveis.map((variavel) => ({
+                nome: variavel,
+                origem: informados[variavel].origem,
+                valor: informados[variavel].valor
+            }));
+
+            mensagemCampanha = templateEscolhido.corpo || textoMensagem || ('Template ' + templateEscolhido.nome);
+        }
+
         const campanha = await banco.criarCampanha({
-            nome: String(nome).trim(),
+            nome: nomeCampanha,
             listaId: parseInt(listaId, 10) || null,
-            mensagem: String(mensagem).trim(),
+            mensagem: mensagemCampanha,
             intervaloMs,
-            contatos,
+            contatos: contatosParaEnvio,
             vendedorEmail: vendedor ? vendedor.email : null,
-            vendedorNome: vendedor ? vendedor.nome : null
+            vendedorNome: vendedor ? vendedor.nome : null,
+            canal: canalEscolhido,
+            templateNome: templateEscolhido ? templateEscolhido.nome : null,
+            templateIdioma: templateEscolhido ? templateEscolhido.idioma : null,
+            templateParametros
         });
 
         emitirEvento('campanha', { id: campanha.id, criada: true, total: campanha.total });
         await banco.registrarAuditoria(
             req.user && req.user.nome,
             'campanha criada',
-            `${campanha.id} - ${String(nome).trim()} (${campanha.total} contatos, ${intervaloMs} ms)`
+            `${campanha.id} - ${nomeCampanha} (${campanha.total} contatos, ${intervaloMs} ms`
+                + (templateEscolhido ? `, template ${templateEscolhido.nome}` : ', texto livre') + ')'
                 + (vendedor ? ` -> ${vendedor.nome} (${vendedor.email})` : ' -> sem direcionamento')
         );
 
@@ -1233,6 +1880,8 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             id: campanha.id,
             total: campanha.total,
             intervaloMs,
+            canal: canalEscolhido,
+            templateNome: templateEscolhido ? templateEscolhido.nome : null,
             vendedorEmail: vendedor ? vendedor.email : null,
             vendedorNome: vendedor ? vendedor.nome : null
         });
@@ -1608,8 +2257,17 @@ async function iniciarServidor() {
     });
 }
 
-iniciarServidor().catch((erro) => {
-    console.error('Falha ao iniciar o servidor:', erro.message);
-    process.exitCode = 1;
-});
+if (require.main === module) {
+    iniciarServidor().catch((erro) => {
+        console.error('Falha ao iniciar o servidor:', erro.message);
+        process.exitCode = 1;
+    });
+}
+
+/* Helpers puros expostos para testes dos formatos de template da Wati. */
+module.exports = {
+    extrairVariaveisTemplate,
+    normalizarTemplateWati,
+    renderizarMensagemTemplate
+};
 
