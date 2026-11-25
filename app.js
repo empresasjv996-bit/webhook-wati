@@ -2999,7 +2999,7 @@ async function criarCampanha(botao) {
     const listaId = ($('campanha-lista') || {}).value || '';
     const canal = ($('campanha-canal') || {}).value || 'texto';
     const mensagem = (($('campanha-mensagem') || {}).value || '').trim();
-    const intervalo = ($('campanha-intervalo') || {}).value || '8000';
+    const intervalo = ($('campanha-intervalo') || {}).value || '5000';
     const vendedorEmail = ($('campanha-vendedor') || {}).value || '';
 
     if (!nome) { toast('Informe o nome da campanha.', 'erro'); return; }
@@ -3062,6 +3062,7 @@ async function criarCampanha(botao) {
         }
 
         toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`
+            + (dados.loteTemplate > 1 ? ` Os ${dados.loteTemplate} primeiros saem numa campanha só na Wati.` : '')
             + (dados.templateNome ? ` Template: ${dados.templateNome}.` : '')
             + (dados.vendedorNome ? ` Leads direcionados para ${dados.vendedorNome}.` : ''));
         if ($('campanha-nome')) $('campanha-nome').value = '';

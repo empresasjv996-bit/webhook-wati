@@ -868,109 +868,251 @@ async function listarTemplatesWati(forcar) {
     return resultado;
 }
 
+/* Telefone de um item de "recipients" na resposta da v3 (a Wati não é
+   consistente no nome do campo). */
+function numeroDaRespostaWati(item) {
+    if (!item || typeof item !== 'object') return '';
+
+    const bruto = item.target ?? item.whatsapp_number ?? item.whatsappNumber
+        ?? item.phone_number ?? item.phoneNumber ?? item.wa_id ?? item.waId
+        ?? item.number ?? item.phone;
+
+    return bruto == null ? '' : String(bruto).replace(/\D/g, '');
+}
+
 /* Avalia a resposta da v3: HTTP 200 pode vir com success:false e, mesmo com
-   success:true, um destinatário pode ter erro. */
+   success:true, destinatários podem ter erro. Os erros por número ficam em
+   porNumero para o envio em lote saber exatamente quem falhou. */
 function avaliarEnvioTemplate(resposta) {
-    if (!resposta) return { aceito: false, motivo: 'sem resposta', podeTentarV1: true };
-    if (!resposta.ok) return { aceito: false, motivo: descreverErroWati(resposta), podeTentarV1: true };
+    const falha = (motivo, podeTentarV1) => ({
+        aceito: false,
+        motivo,
+        podeTentarV1,
+        semDestinatarios: false,
+        porNumero: {}
+    });
+
+    if (!resposta) return falha('sem resposta', true);
+    if (!resposta.ok) return falha(descreverErroWati(resposta), true);
 
     const dados = resposta.dados;
-    if (!dados || typeof dados !== 'object') {
-        return { aceito: false, motivo: 'resposta sem JSON', podeTentarV1: true };
-    }
+    if (!dados || typeof dados !== 'object') return falha('resposta sem JSON', true);
 
     if (dados.success === false || dados.result === false) {
-        return {
-            aceito: false,
-            motivo: String(dados.error || dados.message || 'a Wati recusou o envio'),
-            podeTentarV1: true
-        };
+        return falha(String(dados.error || dados.message || 'a Wati recusou o envio'), true);
     }
 
     const destinatarios = Array.isArray(dados.recipients) ? dados.recipients : [];
-    const comErro = destinatarios.find((item) => item && Array.isArray(item.errors) && item.errors.length);
+    const porNumero = {};
+    const motivos = [];
 
-    if (comErro) {
+    destinatarios.forEach((item) => {
+        if (!item || !Array.isArray(item.errors) || !item.errors.length) return;
+
+        const motivo = item.errors
+            .map((erro) => (erro && (erro.message || erro.error)) || erro)
+            .join('; ');
+        const numero = numeroDaRespostaWati(item);
+
+        if (numero) porNumero[numero] = motivo;
+        motivos.push(motivo);
+    });
+
+    if (motivos.length) {
         return {
             aceito: false,
-            motivo: comErro.errors.join('; '),
-            // A v3 respondeu de forma definitiva para este destinatário; repetir
-            // na v1 só serviria para duplicar a mensagem.
-            podeTentarV1: false
+            motivo: motivos.join('; '),
+            // A v3 respondeu de forma definitiva para estes destinatários;
+            // repetir na v1 só serviria para duplicar a mensagem.
+            podeTentarV1: false,
+            semDestinatarios: false,
+            porNumero
         };
     }
 
-    return { aceito: true, motivo: '', semDestinatarios: destinatarios.length === 0 };
+    return {
+        aceito: true,
+        motivo: '',
+        podeTentarV1: false,
+        semDestinatarios: destinatarios.length === 0,
+        porNumero
+    };
 }
 
-/* Envio de template aprovado com os valores já resolvidos por contato. */
-async function enviarTemplateWati({ telefone, templateNome, parametros, campanha, envioId }) {
-    if (banco.modoDemo) return { ok: true, demo: true };
-
-    if (!watiConfigurada()) {
-        return { ok: false, message: 'API da Wati não configurada no servidor.' };
-    }
-
-    const numero = String(telefone || '').replace(/\D/g, '');
-    if (!numero) return { ok: false, message: 'Telefone inválido.' };
-
-    const nomeTemplate = String(templateNome || '').trim();
-    if (!nomeTemplate) return { ok: false, message: 'Campanha sem template definido.' };
-
-    const lista = (Array.isArray(parametros) ? parametros : []).map((item) => ({
+/* Valores do template no formato que a v3 espera. */
+function normalizarParametrosTemplate(parametros) {
+    return (Array.isArray(parametros) ? parametros : []).map((item) => ({
         name: String((item && item.name) || ''),
         value: String((item && item.value) == null ? '' : item.value)
     })).filter((item) => item.name);
+}
 
-    const rotulo = String(campanha || 'campanha').replace(/[^\w-]+/g, '_').slice(0, 60) || 'campanha';
-    const localId = `campanha-${rotulo}-${envioId || numero}`.slice(0, 120);
+/* Nome do broadcast na Wati — é ele que dá nome à campanha no painel dela.
+   Todos os contatos de uma campanha usam o mesmo rótulo. */
+function rotuloBroadcastWati(campanha) {
+    return String(campanha || 'campanha').replace(/[^\w-]+/g, '_').slice(0, 60) || 'campanha';
+}
+
+/* Um destinatário por contato, já com o local_message_id que a Wati devolve
+   no webhook (permite casar o evento com o envio do painel). */
+function montarDestinatariosTemplate(destinatarios, campanha) {
+    const rotulo = rotuloBroadcastWati(campanha);
+
+    return (Array.isArray(destinatarios) ? destinatarios : [])
+        .map((item) => {
+            const numero = String((item && item.telefone) || '').replace(/\D/g, '');
+            if (!numero) return null;
+
+            return {
+                numero,
+                localId: `campanha-${rotulo}-${(item && item.envioId) || numero}`.slice(0, 120),
+                parametros: normalizarParametrosTemplate(item && item.parametros)
+            };
+        })
+        .filter(Boolean);
+}
+
+/* Corpo da requisição da v3: TODOS os contatos vão numa lista só, porque a
+   Wati cria uma campanha por requisição (um envio por contato viraria uma
+   campanha de 1 destinatário para cada mensagem no painel dela). */
+function corpoEnvioTemplateWati(templateNome, rotulo, fila) {
+    return {
+        template_name: String(templateNome || '').trim(),
+        broadcast_name: rotulo,
+        recipients: (Array.isArray(fila) ? fila : []).map((item) => ({
+            target: item.numero,
+            local_message_id: item.localId,
+            custom_params: item.parametros
+        }))
+    };
+}
+
+/* Envio de template aprovado em LOTE: os valores já vêm resolvidos contato a
+   contato e o lote inteiro sai numa requisição (uma campanha na Wati).
+   Devolve { ok, via, resultados: [{ telefone, ok, message, aviso }], message }. */
+async function enviarTemplateWatiLote({ templateNome, campanha, destinatarios }) {
+    const rotulo = rotuloBroadcastWati(campanha);
+    const fila = montarDestinatariosTemplate(destinatarios, campanha);
+
+    if (!fila.length) {
+        return { ok: false, via: '', resultados: [], message: 'Nenhum telefone válido para envio.' };
+    }
+
+    const falharTodos = (motivo) => ({
+        ok: false,
+        via: '',
+        message: motivo,
+        resultados: fila.map((item) => ({ telefone: item.numero, ok: false, message: motivo, aviso: '' }))
+    });
+
+    if (banco.modoDemo) {
+        return {
+            ok: true,
+            via: 'demo',
+            message: '',
+            resultados: fila.map((item) => ({ telefone: item.numero, ok: true, message: '', aviso: '' }))
+        };
+    }
+
+    if (!watiConfigurada()) return falharTodos('API da Wati não configurada no servidor.');
+
+    const nomeTemplate = String(templateNome || '').trim();
+    if (!nomeTemplate) return falharTodos('Campanha sem template definido.');
+
+    const resultados = fila.map((item) => ({ telefone: item.numero, ok: false, message: 'Sem retorno da Wati.', aviso: '' }));
     const tentativas = [];
 
-    // 1) v3 (recomendada pela Wati)
-    let resposta = await watiRequisicao(`${WATI_HOST}/api/ext/v3/messageTemplates/send`, 'POST', {
-        template_name: nomeTemplate,
-        broadcast_name: rotulo,
-        recipients: [{
-            target: numero,
-            local_message_id: localId,
-            custom_params: lista
-        }]
-    });
+    // 1) v3 (recomendada pela Wati): o lote inteiro numa requisição
+    const resposta = await watiRequisicao(
+        `${WATI_HOST}/api/ext/v3/messageTemplates/send`,
+        'POST',
+        corpoEnvioTemplateWati(nomeTemplate, rotulo, fila)
+    );
 
     const avaliacao = avaliarEnvioTemplate(resposta);
 
     if (avaliacao.aceito) {
-        if (avaliacao.semDestinatarios) {
-            return {
-                ok: true,
-                via: 'v3',
-                aviso: 'A Wati aceitou o envio, mas não devolveu o resultado deste destinatário. Confirme pelo webhook.'
-            };
-        }
-        return { ok: true, via: 'v3' };
+        const aviso = avaliacao.semDestinatarios
+            ? 'A Wati aceitou o envio, mas não devolveu o resultado destes destinatários. Confirme pelo webhook.'
+            : '';
+
+        resultados.forEach((item) => {
+            item.ok = true;
+            item.message = '';
+            item.aviso = aviso;
+        });
+
+        return { ok: true, via: 'v3', message: '', resultados };
     }
 
     tentativas.push('v3: ' + avaliacao.motivo);
 
-    // 2) v1 (contas que ainda não têm os templates na v3). Só quando a v3
-    // falhou inteira — erro de destinatário na v3 não deve ser repetido.
     if (avaliacao.podeTentarV1) {
-        resposta = await watiRequisicao(
-            `${watiBase()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(numero)}`,
-            'POST',
-            {
-                template_name: nomeTemplate,
-                broadcast_name: rotulo,
-                // A v1 recebe só os valores, na ordem das variáveis.
-                parameters: lista.map((item) => item.value)
-            }
-        );
+        // 2) v1 (contas que ainda não enxergam os templates na v3). Só quando a
+        // v3 falhou inteira — erro de destinatário na v3 não pode ser repetido.
+        for (let i = 0; i < fila.length; i++) {
+            const item = fila[i];
 
-        if (watiSucesso(resposta)) return { ok: true, via: 'v1' };
-        tentativas.push('v1: ' + descreverErroWati(resposta));
+            const respostaV1 = await watiRequisicao(
+                `${watiBase()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(item.numero)}`,
+                'POST',
+                {
+                    template_name: nomeTemplate,
+                    broadcast_name: rotulo,
+                    // A v1 recebe só os valores, na ordem das variáveis.
+                    parameters: item.parametros.map((parametro) => parametro.value)
+                }
+            );
+
+            if (watiSucesso(respostaV1)) {
+                resultados[i].ok = true;
+                resultados[i].message = '';
+                resultados[i].aviso = 'Enviado pela v1: nesse caminho a Wati pode mostrar uma campanha por contato.';
+            } else {
+                resultados[i].ok = false;
+                resultados[i].message = `A Wati recusou o template (v1: ${descreverErroWati(respostaV1)}).`;
+            }
+
+            // respiro curto entre as chamadas da v1 (uma por contato)
+            if (i < fila.length - 1) await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+
+        const aceitos = resultados.filter((item) => item.ok).length;
+
+        return {
+            ok: aceitos === resultados.length,
+            via: 'v1',
+            message: aceitos === resultados.length ? '' : `${resultados.length - aceitos} contato(s) recusado(s) pela v1.`,
+            resultados
+        };
     }
 
-    return { ok: false, message: `A Wati recusou o template (${tentativas.join(' | ')}).` };
+    // A v3 respondeu destinatário por destinatário: quem deu erro fica como
+    // falha e o resto conta como enviado (repetir duplicaria a mensagem).
+    const recusados = avaliacao.porNumero || {};
+    const identificados = Object.keys(recusados).length > 0;
+
+    resultados.forEach((item) => {
+        const motivo = recusados[item.telefone];
+
+        if (!identificados) {
+            item.ok = false;
+            item.message = `A Wati recusou o lote (${tentativas.join(' | ')}).`;
+            return;
+        }
+
+        item.ok = !motivo;
+        item.message = motivo ? `A Wati recusou este contato: ${motivo}` : '';
+    });
+
+    const falhas = resultados.filter((item) => !item.ok).length;
+
+    return {
+        ok: falhas === 0,
+        via: 'v3',
+        message: falhas ? `A Wati recusou ${falhas} contato(s) do lote.` : '',
+        resultados
+    };
 }
 
 /* Lista de templates aprovados para o formulário de campanhas.
@@ -2038,9 +2180,48 @@ app.get('/api/auditoria', exigirAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// CAMPANHAS (fila de envio com intervalo entre mensagens)
+// CAMPANHAS (fila de envio com intervalo entre lotes)
 // ---------------------------------------------------------
 let processandoCampanhas = false;
+
+/* Quantos contatos de template vão juntos numa requisição da Wati. A Wati
+   cria UMA campanha por requisição, então o lote inteiro sai de uma vez (é
+   isso que evita o painel dela mostrar "campanha" de 1 contato por mensagem).
+   Ajuste com a variável WATI_LOTE_TEMPLATE no Render, se precisar. */
+const LOTE_TEMPLATE = Math.min(Math.max(parseInt(process.env.WATI_LOTE_TEMPLATE, 10) || 200, 1), 500);
+
+/* Efeitos colaterais de um envio aceito: direciona o lead ao vendedor da
+   campanha, grava a mensagem no histórico e avisa o painel em tempo real. */
+async function registrarEnvioBemSucedido(item, textoFinal) {
+    // Direciona o lead ANTES de gravar a mensagem: assim o colaborador já
+    // enxerga a conversa quando o painel receber o evento em tempo real.
+    if (item.vendedor_email) {
+        try {
+            await banco.atribuirVendedor({
+                telefone: item.telefone,
+                nomeContato: item.nome,
+                vendedorEmail: item.vendedor_email,
+                vendedorNome: item.vendedor_nome
+            });
+            emitirEvento('clientes', {
+                telefone: item.telefone,
+                vendedor: item.vendedor_nome || item.vendedor_email
+            });
+        } catch (erro) {
+            console.error('Erro ao direcionar o lead:', erro.message);
+        }
+    }
+
+    await banco.registrarMensagem(item.telefone, 'enviada', textoFinal, {
+        autorEmail: item.criado_por_email || item.vendedor_email || null,
+        autorNome: item.criado_por_nome || item.vendedor_nome || null,
+        campanhaId: item.campanha_id,
+        origem: 'campanha'
+    });
+    await banco.atualizarUltimaMensagem(item.telefone, `Você: ${textoFinal}`);
+
+    emitirEvento('mensagem', { telefone: item.telefone, direcao: 'enviada', texto: textoFinal });
+}
 
 async function processarCampanhas() {
     if (processandoCampanhas) return;
@@ -2050,31 +2231,87 @@ async function processarCampanhas() {
         for (let i = 0; i < 5; i++) {
             const item = await banco.proximoEnvioPendente();
             if (!item) break;
-            if (!(await banco.reservarEnvio(item.envio_id))) continue;
-
-            let textoFinal = '';
-            let resultado;
 
             if (item.canal === 'template') {
-                // Template aprovado: os valores já foram resolvidos na criação
-                textoFinal = String(item.envio_mensagem || item.mensagem || '').trim();
-                resultado = await enviarTemplateWati({
-                    telefone: item.telefone,
-                    templateNome: item.template_nome,
-                    parametros: item.envio_parametros,
-                    campanha: item.campanha,
-                    envioId: item.envio_id
-                });
-            } else {
-                // Personalização: {{nome}} vira o nome do contato vindo da lista
-                const nomeContato = String(item.nome || '').trim();
-                textoFinal = String(item.envio_mensagem || item.mensagem || '')
-                    .replace(/\{\{\s*nome\s*\}\}/gi, nomeContato)
-                    .replace(/ {2,}/g, ' ')
-                    .trim();
+                // Um lote por vez: todos os pendentes desta campanha saem numa
+                // requisição só (uma campanha no painel da Wati).
+                const pendentes = await banco.enviosPendentesCampanha(item.campanha_id, LOTE_TEMPLATE);
+                const reservados = [];
 
-                resultado = await enviarViaWati(item.telefone, textoFinal);
+                for (const envio of pendentes) {
+                    if (reservados.length >= LOTE_TEMPLATE) break;
+                    if (await banco.reservarEnvio(envio.envio_id)) reservados.push(envio);
+                }
+
+                if (!reservados.length) continue;
+
+                let lote;
+
+                try {
+                    lote = await enviarTemplateWatiLote({
+                        templateNome: item.template_nome,
+                        campanha: item.campanha,
+                        destinatarios: reservados.map((reservado) => ({
+                            telefone: reservado.telefone,
+                            parametros: reservado.envio_parametros,
+                            envioId: reservado.envio_id
+                        }))
+                    });
+                } catch (erro) {
+                    // Sem isso o lote reservado ficaria preso em "enviando" e a
+                    // campanha nunca terminaria.
+                    console.error('Erro no envio do lote da campanha:', erro.message);
+                    lote = { ok: false, resultados: [], message: `Falha ao falar com a Wati: ${erro.message}` };
+                }
+
+                // Resultados são conferidos pelo telefone: contato sem número
+                // válido é descartado do lote, o que desalinharia os índices.
+                const porTelefone = new Map();
+                (lote.resultados || []).forEach((resultado) => {
+                    if (resultado && resultado.telefone) porTelefone.set(String(resultado.telefone), resultado);
+                });
+
+                for (const reservado of reservados) {
+                    const numero = String(reservado.telefone || '').replace(/\D/g, '');
+                    const resultado = porTelefone.get(numero)
+                        || { ok: false, message: lote.message || 'Telefone inválido ou sem retorno da Wati.', aviso: '' };
+
+                    const textoFinal = String(reservado.envio_mensagem || item.mensagem || '').trim();
+
+                    if (resultado.ok && resultado.aviso) {
+                        console.warn(`Campanha ${item.campanha} -> ${reservado.telefone}: ${resultado.aviso}`);
+                    }
+
+                    await banco.concluirEnvio(reservado.envio_id, reservado.campanha_id, resultado.ok, resultado.message);
+
+                    if (resultado.ok) {
+                        await registrarEnvioBemSucedido(reservado, textoFinal);
+                    } else {
+                        console.warn(`Campanha ${item.campanha} -> ${reservado.telefone}: ${resultado.message}`);
+                    }
+
+                    emitirEvento('campanha', {
+                        id: reservado.campanha_id,
+                        telefone: reservado.telefone,
+                        ok: resultado.ok,
+                        erro: resultado.message || null
+                    });
+                }
+
+                continue;
             }
+
+            if (!(await banco.reservarEnvio(item.envio_id))) continue;
+
+            // Texto livre (sessão de 24h): vai um por vez, com o intervalo da
+            // campanha entre as mensagens.
+            const nomeContato = String(item.nome || '').trim();
+            const textoFinal = String(item.envio_mensagem || item.mensagem || '')
+                .replace(/\{\{\s*nome\s*\}\}/gi, nomeContato)
+                .replace(/ {2,}/g, ' ')
+                .trim();
+
+            const resultado = await enviarViaWati(item.telefone, textoFinal);
 
             if (resultado.ok && resultado.aviso) {
                 console.warn(`Campanha ${item.campanha} -> ${item.telefone}: ${resultado.aviso}`);
@@ -2083,35 +2320,7 @@ async function processarCampanhas() {
             await banco.concluirEnvio(item.envio_id, item.campanha_id, resultado.ok, resultado.message);
 
             if (resultado.ok) {
-                // Direciona o lead para o vendedor escolhido na campanha ANTES de
-                // gravar a mensagem: assim o colaborador já enxerga a conversa
-                // quando o painel receber o evento em tempo real.
-                if (item.vendedor_email) {
-                    try {
-                        await banco.atribuirVendedor({
-                            telefone: item.telefone,
-                            nomeContato: item.nome,
-                            vendedorEmail: item.vendedor_email,
-                            vendedorNome: item.vendedor_nome
-                        });
-                        emitirEvento('clientes', {
-                            telefone: item.telefone,
-                            vendedor: item.vendedor_nome || item.vendedor_email
-                        });
-                    } catch (erro) {
-                        console.error('Erro ao direcionar o lead:', erro.message);
-                    }
-                }
-
-                await banco.registrarMensagem(item.telefone, 'enviada', textoFinal, {
-                    autorEmail: item.criado_por_email || item.vendedor_email || null,
-                    autorNome: item.criado_por_nome || item.vendedor_nome || null,
-                    campanhaId: item.campanha_id,
-                    origem: 'campanha'
-                });
-                await banco.atualizarUltimaMensagem(item.telefone, `Você: ${textoFinal}`);
-
-                emitirEvento('mensagem', { telefone: item.telefone, direcao: 'enviada', texto: textoFinal });
+                await registrarEnvioBemSucedido(item, textoFinal);
             } else {
                 console.warn(`Campanha ${item.campanha} -> ${item.telefone}: ${resultado.message}`);
             }
@@ -2236,8 +2445,10 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'A lista escolhida está vazia.' });
         }
 
-        // 3 segundos no mínimo (proteção contra bloqueio do WhatsApp), 2 minutos no máximo
-        const intervaloMs = Math.min(Math.max(parseInt(intervalo, 10) || 8000, 3000), 120000);
+        // 3 segundos no mínimo (proteção contra bloqueio do WhatsApp), 2 minutos
+        // no máximo; 5 segundos é o padrão. Nos templates o intervalo vale entre
+        // lotes (o lote inteiro sai numa campanha só na Wati).
+        const intervaloMs = Math.min(Math.max(parseInt(intervalo, 10) || 5000, 3000), 120000);
 
         let contatosParaEnvio = contatos;
         let mensagemCampanha = textoMensagem;
@@ -2379,6 +2590,7 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             total: campanha.total,
             intervaloMs,
             canal: canalEscolhido,
+            loteTemplate: canalEscolhido === 'template' ? Math.min(campanha.total, LOTE_TEMPLATE) : 1,
             templateNome: templateEscolhido ? templateEscolhido.nome : null,
             vendedorEmail: vendedor ? vendedor.email : null,
             vendedorNome: vendedor ? vendedor.nome : null
@@ -2767,6 +2979,11 @@ module.exports = {
     extrairVariaveisTemplate,
     normalizarTemplateWati,
     renderizarMensagemTemplate,
-    valorDoContato
+    valorDoContato,
+    normalizarParametrosTemplate,
+    rotuloBroadcastWati,
+    montarDestinatariosTemplate,
+    corpoEnvioTemplateWati,
+    avaliarEnvioTemplate
 };
 

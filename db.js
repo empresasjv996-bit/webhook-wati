@@ -86,7 +86,7 @@ function criarBancoPostgres() {
                     template_nome TEXT,
                     template_idioma TEXT,
                     template_parametros JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    intervalo_ms INTEGER NOT NULL DEFAULT 8000,
+                    intervalo_ms INTEGER NOT NULL DEFAULT 5000,
                     status TEXT NOT NULL DEFAULT 'ativa',
                     total INTEGER NOT NULL DEFAULT 0,
                     enviados INTEGER NOT NULL DEFAULT 0,
@@ -140,6 +140,8 @@ function criarBancoPostgres() {
                 // valores já resolvidos por contato (template) + texto final do envio
                 "ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS parametros JSONB NOT NULL DEFAULT '[]'::jsonb",
                 'ALTER TABLE campanha_envios ADD COLUMN IF NOT EXISTS mensagem TEXT',
+                // intervalo padrão de 5 segundos (era 8) também nos bancos já criados
+                'ALTER TABLE campanhas ALTER COLUMN intervalo_ms SET DEFAULT 5000',
                 `CREATE TABLE IF NOT EXISTS auditoria (
                     id SERIAL PRIMARY KEY,
                     ator TEXT,
@@ -699,6 +701,26 @@ function criarBancoPostgres() {
                   LIMIT 1`
             );
             return rows[0] || null;
+        },
+
+        /* Pendentes de uma campanha para sair tudo numa requisição só (a Wati
+           cria uma campanha por requisição, então o lote precisa ir junto).
+           Traz os dados da campanha (vendedor/autor) que o worker usa depois
+           do envio, igual ao proximoEnvioPendente(). */
+        async enviosPendentesCampanha(campanhaId, limite) {
+            const { rows } = await pool.query(
+                `SELECT e.id AS envio_id, e.campanha_id, e.telefone, e.nome,
+                        e.mensagem AS envio_mensagem, e.parametros AS envio_parametros,
+                        c.mensagem, c.vendedor_email, c.vendedor_nome,
+                        c.criado_por_email, c.criado_por_nome
+                   FROM campanha_envios e
+                   JOIN campanhas c ON c.id = e.campanha_id
+                  WHERE e.campanha_id = $1 AND e.status = 'pendente'
+                  ORDER BY e.id ASC
+                  LIMIT $2`,
+                [campanhaId, Math.max(1, parseInt(limite, 10) || 1)]
+            );
+            return rows;
         },
 
         async reservarEnvio(envioId) {
@@ -1369,7 +1391,7 @@ function criarBancoMemoria() {
                 template_nome: templateNome || null,
                 template_idioma: templateIdioma || null,
                 template_parametros: Array.isArray(templateParametros) ? templateParametros : [],
-                intervalo_ms: intervaloMs,
+                intervalo_ms: intervaloMs || 5000,
                 vendedor_email: vendedorEmail || null,
                 vendedor_nome: vendedorNome || null,
                 criado_por_email: criadoPorEmail || null,
@@ -1480,6 +1502,31 @@ function criarBancoMemoria() {
             if (!envio || envio.status !== 'pendente') return false;
             envio.status = 'enviando';
             return true;
+        },
+
+        /* Mesmo contrato do Postgres: pendentes de uma campanha, em ordem,
+           limitados ao tamanho do lote, com os dados da campanha (vendedor e
+           autor) que o worker usa depois do envio. */
+        async enviosPendentesCampanha(idCampanha, limite) {
+            const tamanho = Math.max(1, parseInt(limite, 10) || 1);
+            const campanha = campanhas.find((c) => String(c.id) === String(idCampanha)) || {};
+
+            return envios
+                .filter((e) => String(e.campanha_id) === String(idCampanha) && e.status === 'pendente')
+                .slice(0, tamanho)
+                .map((e) => ({
+                    envio_id: e.id,
+                    campanha_id: e.campanha_id,
+                    telefone: e.telefone,
+                    nome: e.nome,
+                    envio_mensagem: e.mensagem || null,
+                    envio_parametros: Array.isArray(e.parametros) ? e.parametros.slice() : [],
+                    mensagem: campanha.mensagem || null,
+                    vendedor_email: campanha.vendedor_email || null,
+                    vendedor_nome: campanha.vendedor_nome || null,
+                    criado_por_email: campanha.criado_por_email || null,
+                    criado_por_nome: campanha.criado_por_nome || null
+                }));
         },
 
         async concluirEnvio(id, idCampanha, ok, erro) {

@@ -527,7 +527,7 @@
                 <div class="section-title">
                     <div>
                         <h1>Campanhas</h1>
-                        <p>Disparo em fila: uma mensagem por vez, com intervalo configurável para proteger o número.</p>
+                        <p>Template aprovado sai em lote (uma campanha só na Wati); texto livre vai em fila, uma mensagem por vez, com intervalo configurável.</p>
                     </div>
                     <button class="btn-mini" onclick="carregarCampanhas()">↻ Atualizar</button>
                 </div>
@@ -596,13 +596,17 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Intervalo entre mensagens</label>
+                            <label>Intervalo entre lotes/mensagens</label>
                             <select id="campanha-intervalo" class="form-control">
-                                <option value="8000">8 segundos (recomendado)</option>
+                                <option value="5000">5 segundos (recomendado)</option>
                                 <option value="15000">15 segundos</option>
                                 <option value="30000">30 segundos</option>
                                 <option value="60000">1 minuto</option>
                             </select>
+                            <small style="color: var(--text-muted); font-size: 0.72rem; display: block; margin-top: 6px;">
+                                No template aprovado os contatos saem juntos (uma campanha na Wati) e o intervalo vale
+                                entre lotes acima de 200 contatos. No texto livre vale entre cada mensagem.
+                            </small>
                         </div>
 
                         <button class="btn-primary" style="margin-top: 18px" onclick="criarCampanha(this)">Criar campanha</button>
