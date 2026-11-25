@@ -58,9 +58,13 @@ casos.forEach((caso) => {
 
 const janelaOk = erroJanelaFechada('código 131047: Re-engagement message')
     && erroJanelaFechada('Message failed to send because more than 24 hours have passed')
-    && !erroJanelaFechada('Telefone inválido');
+    && erroJanelaFechada('Ticket has been expired.')
+    && erroJanelaFechada('Ticket has been expired')
+    && erroJanelaFechada('O ticket desta conversa foi fechado')
+    && !erroJanelaFechada('Telefone inválido')
+    && !erroJanelaFechada('Template não encontrado');
 
 if (!janelaOk) falhas++;
-console.log((janelaOk ? 'OK - ' : 'FALHOU - ') + 'detecção da janela de 24h');
+console.log((janelaOk ? 'OK - ' : 'FALHOU - ') + 'detecção da janela de 24h (inclui "Ticket has been expired")');
 
 process.exit(falhas ? 1 : 0);

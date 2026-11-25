@@ -249,6 +249,15 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .message p { word-break: break-word; }
 .message span { display: block; font-size: 0.62rem; color: var(--text-muted); margin-top: 5px; text-align: right; }
 
+/* Reabertura do ticket com template aprovado (Wati: "Ticket has been expired") */
+.template-bar { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.template-bar-titulo { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); white-space: nowrap; }
+.template-bar select { flex: 1; min-width: 0; background: var(--bg-body); border: 1px solid var(--border); padding: 9px 12px; border-radius: 12px; color: #fff; font-size: 0.76rem; outline: none; font-family: var(--font); }
+.template-bar select:focus { border-color: var(--green); }
+.btn-template { background: rgba(0, 255, 128, 0.1); color: var(--green); border: 1px solid rgba(0, 255, 128, 0.35); padding: 9px 14px; border-radius: 12px; font-weight: 700; font-size: 0.76rem; cursor: pointer; transition: 0.2s; white-space: nowrap; font-family: var(--font); }
+.btn-template:hover { background: var(--green); color: #000; }
+.btn-template:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .input-area { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
 .input-area input { flex: 1; background: var(--bg-body); border: 1px solid var(--border); padding: 12px 18px; border-radius: 18px; color: #fff; outline: none; font-family: var(--font); }
 .input-area input:focus { border-color: var(--green); }

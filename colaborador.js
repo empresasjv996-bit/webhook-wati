@@ -13,6 +13,8 @@
     let buscaAtual = '';
     let timerBusca = null;
     let sequenciaLista = 0;
+    let templatesReabertura = null;
+    let fichaAtual = {};
 
     function $(id) { return document.getElementById(id); }
 
@@ -322,6 +324,12 @@
             const chatNome = $('chat-nome');
             if (chatNome && ficha.nome) chatNome.textContent = ficha.nome;
 
+            // Guarda os dados do contato para sugerir os valores do template.
+            fichaAtual = Object.assign({}, (ficha && ficha.atributos) || {});
+            if (ficha && ficha.nome) fichaAtual.nome = ficha.nome;
+            if (ficha && ficha.cnpj) fichaAtual.cnpj = ficha.cnpj;
+            if (ficha && ficha.cpf) fichaAtual.cpf = ficha.cpf;
+
             renderizarAtributosFicha(ficha);
         } catch (erro) {
             console.error('Erro ao carregar ficha:', erro);
@@ -357,6 +365,147 @@
         await carregarFicha(clienteAtivo.telefone);
     }
 
+    /* ---------- Reabrir o ticket com template aprovado ----------
+       A Wati recusa texto livre depois de 24h sem mensagem do cliente
+       ("Ticket has been expired"). Um template aprovado reabre a conversa. */
+
+    async function carregarTemplatesReabertura() {
+        if (templatesReabertura) return templatesReabertura;
+
+        try {
+            const resposta = await fetch('/api/templates-reabertura');
+
+            if (resposta.status === 401) {
+                window.location.href = '/login';
+                return [];
+            }
+
+            const dados = await resposta.json().catch(() => ({}));
+            templatesReabertura = Array.isArray(dados.templates) ? dados.templates : [];
+        } catch (erro) {
+            console.error('Erro ao carregar os templates:', erro);
+            templatesReabertura = [];
+        }
+
+        preencherSelectTemplates();
+        return templatesReabertura;
+    }
+
+    function resumoTemplate(template) {
+        const texto = String((template && template.corpo) || '').replace(/\s+/g, ' ').trim();
+        return texto.length > 55 ? texto.substring(0, 52) + '...' : texto;
+    }
+
+    function preencherSelectTemplates() {
+        const select = $('select-template');
+        if (!select) return;
+
+        const lista = templatesReabertura || [];
+        const atual = select.value;
+
+        select.innerHTML = '<option value="">'
+            + (lista.length ? 'Reabrir ticket com template...' : 'Nenhum template aprovado na Wati')
+            + '</option>'
+            + lista.map((template, indice) => (
+                '<option value="' + indice + '">' + escaparHtml(template.nome)
+                + (template.idioma ? ' (' + escaparHtml(template.idioma) + ')' : '')
+                + (resumoTemplate(template) ? ' — ' + escaparHtml(resumoTemplate(template)) : '')
+                + '</option>'
+            )).join('');
+
+        if (atual && select.querySelector('option[value="' + atual + '"]')) select.value = atual;
+    }
+
+    /* Valor sugerido para cada variável do template, a partir da ficha. */
+    function sugestaoDaVariavel(variavel) {
+        const chave = String(variavel || '').toLowerCase();
+        const dados = fichaAtual || {};
+        const nome = (clienteAtivo && clienteAtivo.nome) || dados.nome || '';
+
+        if (chave === 'nome' || chave === 'name' || chave === 'primeiro_nome' || chave === '1') return nome;
+        if (chave === 'telefone' || chave === 'phone' || chave === 'numero') return (clienteAtivo && clienteAtivo.telefone) || '';
+        if (/razao/.test(chave)) return String(dados.razao_social || '');
+        if (/fantasia|empresa/.test(chave)) return String(dados.nome_fantasia || dados.razao_social || '');
+        if (/cnpj/.test(chave)) return String(dados.cnpj || '');
+        if (/cpf/.test(chave)) return String(dados.cpf || '');
+        if (/cidade/.test(chave)) return String(dados.cidade || '');
+        if (/uf|estado/.test(chave)) return String(dados.uf || '');
+
+        const direto = dados[chave];
+        return direto == null ? '' : String(direto);
+    }
+
+    async function enviarTemplateReabertura() {
+        if (!clienteAtivo) {
+            alert('Selecione um contato antes de enviar o template.');
+            return;
+        }
+
+        const lista = await carregarTemplatesReabertura();
+
+        if (!lista.length) {
+            alert('Nenhum template aprovado encontrado na Wati. Peça ao administrador para conferir os templates.');
+            return;
+        }
+
+        const select = $('select-template');
+        const template = lista[parseInt(select && select.value, 10)];
+
+        if (!template) {
+            alert('Escolha um template na lista "Reabrir ticket com template".');
+            return;
+        }
+
+        const variaveis = Array.isArray(template.variaveis) ? template.variaveis : [];
+        const parametros = [];
+
+        for (let i = 0; i < variaveis.length; i++) {
+            const valor = prompt(
+                'Valor de {{' + variaveis[i] + '}} no template ' + template.nome + ':',
+                sugestaoDaVariavel(variaveis[i])
+            );
+
+            if (valor === null) return; // cancelou
+
+            parametros.push(valor.trim());
+        }
+
+        const resumo = variaveis.length
+            ? variaveis.map((variavel, i) => '{{' + variavel + '}} = ' + (parametros[i] || '(vazio)')).join('\n')
+            : 'template sem variáveis';
+
+        if (!confirm('Enviar "' + template.nome + '" para ' + clienteAtivo.nome + '?\n\n' + resumo)) return;
+
+        const botao = document.querySelector('.btn-template');
+        if (botao) botao.disabled = true;
+
+        try {
+            const resposta = await fetch('/api/enviar-template', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    telefone: clienteAtivo.telefone,
+                    template: template.nome,
+                    parametros
+                })
+            });
+
+            const dados = await resposta.json().catch(() => ({}));
+            if (!resposta.ok || dados.success === false) {
+                throw new Error(mensagemDoErro(dados, 'A Wati recusou o template.'));
+            }
+
+            if (select) select.value = '';
+            await carregarMensagens(clienteAtivo.telefone, true);
+            await carregarClientes(true, true);
+            alert('Template enviado. O ticket está aberto de novo: já pode escrever para o cliente.');
+        } catch (erro) {
+            alert(mensagemDoErro(erro, 'Erro ao enviar o template.'));
+        } finally {
+            if (botao) botao.disabled = false;
+        }
+    }
+
     async function enviarMensagem() {
         const input = $('input-mensagem');
         if (!input || !clienteAtivo) return;
@@ -367,6 +516,8 @@
         const botao = document.querySelector('.input-area button');
         if (botao) botao.disabled = true;
 
+        let pedirTemplate = false;
+
         try {
             const resposta = await fetch('/api/enviar-mensagem', {
                 method: 'POST',
@@ -376,7 +527,9 @@
 
             const dados = await resposta.json().catch(() => ({}));
             if (!resposta.ok || dados.success === false) {
-                throw new Error(mensagemDoErro(dados, 'A Wati recusou o envio.'));
+                const erro = new Error(mensagemDoErro(dados, 'A Wati recusou o envio.'));
+                erro.janelaFechada = Boolean(dados.janelaFechada);
+                throw erro;
             }
 
             input.value = '';
@@ -384,9 +537,16 @@
             await carregarClientes(true, true);
         } catch (erro) {
             alert(mensagemDoErro(erro, 'Erro ao enviar a mensagem.'));
+
+            // Ticket vencido: aponta o colaborador para a barra do template.
+            if (erro && erro.janelaFechada) {
+                await carregarTemplatesReabertura();
+                pedirTemplate = true;
+            }
         } finally {
             if (botao) botao.disabled = false;
-            input.focus();
+            const foco = pedirTemplate ? $('select-template') : input;
+            if (foco) foco.focus();
         }
     }
 
@@ -417,6 +577,7 @@
         // Funções chamadas pelos onclick do HTML
         window.enviarMensagem = enviarMensagem;
         window.finalizarAtendimento = finalizarAtendimento;
+        window.enviarTemplateReabertura = enviarTemplateReabertura;
 
         document.querySelectorAll('.filters button').forEach((botao) => {
             botao.addEventListener('click', () => {
@@ -448,6 +609,7 @@
 
         carregarUsuario();
         carregarClientes(false);
+        carregarTemplatesReabertura();
 
         // Atualização periódica (o SSE é restrito ao admin)
         setInterval(async () => {

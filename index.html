@@ -195,6 +195,13 @@
                             </div>
                         </div>
                         <div class="messages" id="messages"></div>
+                        <div class="template-bar">
+                            <span class="template-bar-titulo">Ticket vencido?</span>
+                            <select id="select-template" aria-label="Template aprovado para reabrir a conversa">
+                                <option value="">Carregando templates...</option>
+                            </select>
+                            <button type="button" class="btn-template" onclick="enviarTemplateReabertura()">Enviar template</button>
+                        </div>
                         <div class="input-area">
                             <input id="message" type="text" placeholder="Digite uma mensagem...">
                             <button onclick="sendMessage()">➤</button>

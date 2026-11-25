@@ -518,8 +518,9 @@ function achatarErroWati(valor, nivel) {
 }
 
 /* A Meta só aceita texto livre até 24h depois da última mensagem do cliente.
-   Fora disso a Wati recusa com 131047 / 470 ("Re-engagement message") — no
-   caso típico dos contatos que só receberam a campanha e nunca responderam. */
+   Fora disso a Wati recusa com 131047 / 470 ("Re-engagement message") ou com
+   "Ticket has been expired" (o ticket de atendimento venceu) — o caso típico
+   dos contatos que só receberam a campanha e nunca responderam. */
 function erroJanelaFechada(motivo) {
     const texto = String(motivo || '').toLowerCase();
 
@@ -531,11 +532,13 @@ function erroJanelaFechada(motivo) {
         || texto.includes('24h')
         || texto.includes('janela de 24')
         || texto.includes('outside the allowed window')
-        || texto.includes('message failed to send because more than 24 hours');
+        || texto.includes('message failed to send because more than 24 hours')
+        || (texto.includes('ticket') && (texto.includes('expir') || texto.includes('vencid') || texto.includes('fechad')));
 }
 
-const ORIENTACAO_JANELA_FECHADA = 'O WhatsApp só permite texto livre até 24h depois da última mensagem do cliente. '
-    + 'Peça para o cliente responder algo (ou envie um template aprovado pela tela Envio) e depois responda por aqui.';
+const ORIENTACAO_JANELA_FECHADA = 'A conversa deste cliente está sem ticket aberto (o WhatsApp libera texto livre só até 24h '
+    + 'depois da última mensagem dele). Peça para o cliente responder qualquer coisa ou reabra o ticket na barra '
+    + '"Ticket vencido?", acima do campo de mensagem, enviando um template aprovado; depois disso a conversa volta ao normal.';
 
 function descreverErroWati(resposta) {
     if (!resposta) return 'sem resposta';
@@ -2074,7 +2077,9 @@ async function enviarViaWati(telefone, texto) {
         }
 
         const fechada = erroJanelaFechada(motivo);
-        const mensagem = `A Wati recusou o envio (HTTP ${resposta.status}): ${motivo}.`
+        // A Wati já termina o motivo com ponto final ("Ticket has been expired.").
+        const motivoLimpo = motivo.replace(/[\s.;]+$/, '');
+        const mensagem = `A Wati recusou o envio (HTTP ${resposta.status}): ${motivoLimpo}.`
             + (fechada ? ` ${ORIENTACAO_JANELA_FECHADA}` : '');
 
         return { ok: false, message: mensagem, janelaFechada: fechada };
@@ -2131,6 +2136,139 @@ app.post('/api/enviar-mensagem', async (req, res) => {
 
     if (resultado.demo) console.log(`[DEMO] Mensagem simulada -> ${telefone}: ${texto}`);
     return res.json({ success: true, demo: !!resultado.demo });
+});
+
+/* ---------------------------------------------------------
+   REABRIR O TICKET COM TEMPLATE
+   Depois de 24h sem mensagem do cliente a Wati recusa texto
+   livre ("Ticket has been expired"). Um template aprovado
+   abre o ticket de novo e a conversa volta ao normal.
+   --------------------------------------------------------- */
+
+/* Templates aprovados que o painel pode oferecer no chat. Vale para
+   colaborador também: sem isso ele não tem como reabrir o atendimento. */
+app.get('/api/templates-reabertura', async (req, res) => {
+    try {
+        const resultado = await listarTemplatesWati(false);
+
+        const templates = (resultado.templates || [])
+            .filter((template) => template.aprovado)
+            .map((template) => ({
+                nome: template.nome,
+                idioma: template.idioma || '',
+                corpo: template.corpo || '',
+                variaveis: Array.isArray(template.variaveis) ? template.variaveis.slice() : []
+            }));
+
+        res.json({ ok: true, templates, aviso: resultado.aviso || '' });
+    } catch (erro) {
+        console.error('Erro ao listar templates de reabertura:', erro.message);
+        res.status(500).json({ ok: false, templates: [], aviso: 'Erro ao consultar os templates da Wati.' });
+    }
+});
+
+/* Envio de UM template para UM contato (reabertura do ticket pelo chat).
+   Os valores chegam na ordem das variáveis do template. */
+app.post('/api/enviar-template', async (req, res) => {
+    const { telefone, template, parametros } = req.body || {};
+
+    if (!telefone || !String(template || '').trim()) {
+        return res.status(400).json({ success: false, message: 'Informe o contato e o template.' });
+    }
+
+    const ator = req.user && req.user.nome;
+    const numero = String(telefone).replace(/\D/g, '');
+
+    try {
+        const acesso = await verificarDonoDoCliente(req, numero || telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+    } catch (erro) {
+        console.error('Erro ao validar o dono do contato (template):', erro.message);
+        return res.status(500).json({ success: false, message: 'Erro ao validar o contato.' });
+    }
+
+    if (!banco.modoDemo && !watiConfigurada()) {
+        return res.status(500).json({ success: false, message: 'API da Wati não configurada no servidor.' });
+    }
+
+    try {
+        const resultado = await listarTemplatesWati(false);
+        const nomeAlvo = String(template).trim().toLowerCase();
+
+        const alvo = (resultado.templates || []).find((item) =>
+            item.aprovado && item.nome.toLowerCase() === nomeAlvo
+        );
+
+        if (!alvo) {
+            return res.status(400).json({
+                success: false,
+                message: `O template "${template}" não está aprovado na Wati. Atualize a lista de templates e tente de novo.`
+            });
+        }
+
+        const nomes = Array.isArray(alvo.variaveis) ? alvo.variaveis : [];
+        const valores = (Array.isArray(parametros) ? parametros : [])
+            .map((valor) => String(valor == null ? '' : valor).trim());
+
+        if (valores.length !== nomes.length) {
+            return res.status(400).json({
+                success: false,
+                message: `O template ${alvo.nome} tem ${nomes.length} variável(is); foram enviados ${valores.length} valor(es).`
+            });
+        }
+
+        // Mesmo formato do envio em campanha (custom_params por nome).
+        const pares = nomes.map((nome, indice) => ({ name: nome, value: valores[indice] }));
+
+        const envio = await enviarTemplateWatiLote({
+            templateNome: alvo.nome,
+            campanha: `reabertura_${numero || 'contato'}`,
+            destinatarios: [{
+                telefone: numero,
+                parametros: pares,
+                envioId: `reab-${Date.now()}`
+            }]
+        });
+
+        if (!envio.ok) {
+            const detalheDoContato = envio.resultados && envio.resultados[0] && envio.resultados[0].message;
+            const motivoBruto = detalheDoContato || envio.message || 'A Wati recusou o template.';
+            // Pode vir objeto aninhado da Wati: o painel nunca deve mostrar "[object Object]".
+            const motivo = achatarErroWati(motivoBruto) || 'A Wati recusou o template.';
+
+            await banco.registrarAuditoria(ator, 'template recusado', `${numero}: ${motivo}`);
+            console.warn(`Template ${alvo.nome} recusado para ${numero}: ${motivo}`);
+
+            return res.status(502).json({ success: false, message: motivo });
+        }
+
+        const texto = renderizarMensagemTemplate(alvo.corpo, pares, alvo.variaveis).trim()
+            || `[Template ${alvo.nome} enviado]`;
+
+        try {
+            await banco.atualizarUltimaMensagem(numero, `Você: ${texto}`);
+            await banco.registrarMensagem(numero, 'enviada', texto, {
+                autorEmail: req.user && req.user.email,
+                autorNome: req.user && req.user.nome,
+                origem: 'template'
+            });
+            emitirEvento('mensagem', { telefone: numero, direcao: 'enviada', texto });
+            await banco.registrarAuditoria(ator, 'template enviado', `${numero}: ${alvo.nome}`);
+        } catch (erro) {
+            console.error('Erro ao salvar o template enviado:', erro.message);
+            return res.json({
+                success: true,
+                template: alvo.nome,
+                texto,
+                aviso: 'Template enviado, mas o histórico não foi salvo.'
+            });
+        }
+
+        return res.json({ success: true, template: alvo.nome, texto });
+    } catch (erro) {
+        console.error('Erro ao enviar o template de reabertura:', erro.message);
+        return res.status(500).json({ success: false, message: 'Erro ao enviar o template pela Wati.' });
+    }
 });
 
 app.post('/api/finalizar', async (req, res) => {
