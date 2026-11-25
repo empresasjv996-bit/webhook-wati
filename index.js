@@ -3121,14 +3121,28 @@ function interpretarEventoWati(payload) {
     ).substring(0, 60);
 
     const dono = valorAninhado(payload, ['owner']);
+    const status = valorAninhado(payload, ['statusString', 'status', 'messageStatus']);
+
+    let texto = valorAninhado(payload, ['text', 'body', 'caption', 'messageText']);
+
+    /* Quando a Wati recusa uma mensagem, o motivo vem no payload
+       (failureReason, reason, errors[0].message...). Guardamos em `texto`
+       para a tela "Atividade Wati" mostrar por que a campanha falhou. */
+    if (!texto && /fail|erro|error/i.test(String(status || ''))) {
+        texto = achatarErroWati(valorAninhado(payload, ['failureReason', 'failedReason', 'reason', 'error', 'errors']))
+            || achatarErroWati(valorAninhado(payload, ['message']));
+    }
+
+    // Alguns payloads mandam o texto como objeto; o historico precisa de string.
+    if (texto && typeof texto === 'object') texto = achatarErroWati(texto);
 
     return {
         tipo,
         telefone: telefoneDoEvento(valorAninhado(payload, ['waId', 'wa_id', 'phoneNumber', 'phone_number', 'telefone'])),
         nome: valorAninhado(payload, ['senderName', 'sender_name', 'fullName', 'full_name', 'name']),
         campanha: valorAninhado(payload, ['campaignName', 'campaign_name', 'campaignTitle', 'broadcastName', 'templateName']),
-        texto: valorAninhado(payload, ['text', 'body', 'caption', 'messageText']),
-        status: valorAninhado(payload, ['statusString', 'status', 'messageStatus']),
+        texto,
+        status,
         whatsappMessageId: valorAninhado(payload, ['whatsappMessageId', 'whatsapp_message_id', 'messageId', 'message_id']),
         atributos: atributosDoEvento(payload),
         enviadaPeloNegocio: String(dono).toLowerCase() === 'true'
