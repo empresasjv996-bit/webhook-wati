@@ -7,13 +7,6 @@
 (function () {
     'use strict';
 
-    const STATUS_LABEL = {
-        vendido: 'Vendido',
-        pensando: 'Pensando',
-        'nao-quis': 'Não Quis',
-        finalizado: 'Finalizado'
-    };
-
     let clienteAtivo = null;
     let clientesCache = [];
     let filtroAtual = 'ativos';
@@ -48,6 +41,29 @@
         const data = new Date(valor);
         if (isNaN(data.getTime())) return '';
         return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    /* O servidor pode devolver o motivo da recusa como texto ou como objeto
+       (erros da Wati/Meta vêm aninhados). Sem isso o alert virava
+       "[object Object]" e escondia a causa real da falha. */
+    function mensagemDoErro(dados, padrao) {
+        const valores = dados ? [dados.message, dados.erro, dados.error, dados.aviso] : [];
+
+        for (let i = 0; i < valores.length; i++) {
+            const valor = valores[i];
+
+            if (typeof valor === 'string' && valor.trim()) return valor.trim();
+            if (typeof valor === 'number') return String(valor);
+
+            if (valor && typeof valor === 'object') {
+                try {
+                    const texto = JSON.stringify(valor);
+                    if (texto && texto !== '{}') return texto;
+                } catch (erro) { /* cai no padrão */ }
+            }
+        }
+
+        return padrao;
     }
 
     function iniciais(nome) {
@@ -190,16 +206,9 @@
                     <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
                     <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
                 </div>
-                <span class="owner">${escaparHtml(STATUS_LABEL[cliente.status] || cliente.status || '-')}</span>
             `;
             item.addEventListener('click', () => abrirCliente(cliente));
             lista.appendChild(item);
-        });
-    }
-
-    function marcarStatusAtivo(status) {
-        document.querySelectorAll('.status-btn').forEach((botao) => {
-            botao.classList.toggle('active', !!status && botao.dataset.status === status);
         });
     }
 
@@ -219,7 +228,6 @@
         const area = $('mensagens');
         if (area) area.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:20px;">Nenhuma conversa selecionada.</p>';
 
-        marcarStatusAtivo('pensando');
         marcarItemAtivo();
     }
 
@@ -240,7 +248,6 @@
 
             if (manterSelecao && atual) {
                 clienteAtivo.nome = atual.nome;
-                clienteAtivo.status = atual.status;
                 marcarItemAtivo();
                 return;
             }
@@ -307,8 +314,6 @@
             const ficha = await resposta.json();
             if (!clienteAtivo || clienteAtivo.telefone !== telefone) return;
 
-            clienteAtivo.status = ficha.status || clienteAtivo.status;
-
             const nome = $('ficha-nome');
             if (nome) nome.textContent = ficha.nome || clienteAtivo.nome || '-';
             const fone = $('ficha-telefone');
@@ -317,7 +322,6 @@
             const chatNome = $('chat-nome');
             if (chatNome && ficha.nome) chatNome.textContent = ficha.nome;
 
-            marcarStatusAtivo(ficha.status || 'pensando');
             renderizarAtributosFicha(ficha);
         } catch (erro) {
             console.error('Erro ao carregar ficha:', erro);
@@ -329,8 +333,7 @@
 
         clienteAtivo = {
             telefone: cliente.telefone,
-            nome: cliente.nome || 'Contato',
-            status: cliente.status || 'pensando'
+            nome: cliente.nome || 'Contato'
         };
 
         marcarItemAtivo();
@@ -350,34 +353,8 @@
         const listaAtributos = $('ficha-atributos');
         if (listaAtributos) listaAtributos.innerHTML = '<li><span>Carregando...</span></li>';
 
-        marcarStatusAtivo(clienteAtivo.status);
         await carregarMensagens(clienteAtivo.telefone, true);
         await carregarFicha(clienteAtivo.telefone);
-    }
-
-    async function mudarStatus(status) {
-        if (!clienteAtivo) return;
-
-        const anterior = clienteAtivo.status;
-        clienteAtivo.status = status;
-        marcarStatusAtivo(status);
-
-        try {
-            const resposta = await fetch('/api/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ telefone: clienteAtivo.telefone, status })
-            });
-
-            const dados = await resposta.json().catch(() => ({}));
-            if (!resposta.ok || dados.success === false) throw new Error(dados.message || ('HTTP ' + resposta.status));
-
-            await carregarClientes(true, true);
-        } catch (erro) {
-            clienteAtivo.status = anterior;
-            marcarStatusAtivo(anterior);
-            alert(erro.message || 'Não foi possível salvar o status.');
-        }
     }
 
     async function enviarMensagem() {
@@ -398,13 +375,15 @@
             });
 
             const dados = await resposta.json().catch(() => ({}));
-            if (!resposta.ok || dados.success === false) throw new Error(dados.message || 'A Wati recusou o envio.');
+            if (!resposta.ok || dados.success === false) {
+                throw new Error(mensagemDoErro(dados, 'A Wati recusou o envio.'));
+            }
 
             input.value = '';
             await carregarMensagens(clienteAtivo.telefone, true);
             await carregarClientes(true, true);
         } catch (erro) {
-            alert(erro.message || 'Erro ao enviar a mensagem.');
+            alert(mensagemDoErro(erro, 'Erro ao enviar a mensagem.'));
         } finally {
             if (botao) botao.disabled = false;
             input.focus();
@@ -423,18 +402,19 @@
             });
 
             const dados = await resposta.json().catch(() => ({}));
-            if (!resposta.ok || dados.success === false) throw new Error(dados.message || 'Não foi possível finalizar.');
+            if (!resposta.ok || dados.success === false) {
+                throw new Error(mensagemDoErro(dados, 'Não foi possível finalizar.'));
+            }
 
             clienteAtivo = null;
             await carregarClientes(false);
         } catch (erro) {
-            alert(erro.message || 'Erro ao finalizar o atendimento.');
+            alert(mensagemDoErro(erro, 'Erro ao finalizar o atendimento.'));
         }
     }
 
     function iniciar() {
         // Funções chamadas pelos onclick do HTML
-        window.mudarStatus = mudarStatus;
         window.enviarMensagem = enviarMensagem;
         window.finalizarAtendimento = finalizarAtendimento;
 

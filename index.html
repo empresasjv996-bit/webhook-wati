@@ -94,27 +94,6 @@
                     <p>Controle de desempenho e monitoramento do sistema em tempo real.</p>
                 </div>
 
-                <div class="team-performance-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3 style="font-size: 1.2rem; color: #fff;">Desempenho da Equipe (Hoje)</h3>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Atualizado do Banco de Dados</span>
-                    </div>
-                    
-                    <div class="team-performance-list">
-                        <div class="seller-row">
-                            <div class="seller-name">
-                                <div class="avatar" style="width: 30px; height: 30px; font-size: 0.8rem; background: rgba(255,255,255,0.1);">C</div>
-                                Claudio
-                            </div>
-                            <div class="seller-stats">
-                                <span class="status-badge status-vendido" id="admin-vendidos">0 Vendidos</span>
-                                <span class="status-badge status-pensando" id="admin-pensando">0 Pensando</span>
-                                <span class="status-badge status-nao-quis" id="admin-nao-quis">0 Não Quis</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="bento-grid">
                     <div class="card card-large" onclick="irParaConversas()">
                         <div class="card-icon">🎧</div>
@@ -182,13 +161,19 @@
                         <button class="btn-mini" onclick="baixarBackupConversas()" title="Baixar todas as conversas em JSON">⬇ Backup</button>
                         <button class="btn-mini danger" onclick="limparConversasDoPainel()" title="Apagar o histórico de todas as conversas">🧹 Limpar histórico</button>
                         <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
-                        <button class="btn-mini" onclick="carregarConversas()">↻ Atualizar</button>
+                        <button class="btn-mini" onclick="atualizarConversas()">↻ Atualizar</button>
                     </div>
                 </div>
 
                 <div class="conversas-layout">
                     <aside class="painel-contatos">
                         <input id="pesquisa-conversas" class="form-control" type="text" placeholder="Pesquisar contato..." onkeyup="pesquisarClientes(this.value)">
+                        <div class="filtro-conversas">
+                            <label for="filtro-conversas-vendedor">👤 Analisar conversas de</label>
+                            <select id="filtro-conversas-vendedor" class="form-control" title="Mostrar só as conversas do colaborador escolhido" onchange="filtrarConversasPorVendedor(this.value)">
+                                <option value="">Todos os colaboradores</option>
+                            </select>
+                        </div>
                         <div class="filtros">
                             <button class="active" onclick="filtrarConversas('ativos', this)">Aguardando</button>
                             <button onclick="filtrarConversas('todos', this)">Todos</button>
@@ -236,14 +221,13 @@
                                     <th>Cliente</th>
                                     <th>Telefone</th>
                                     <th>Última mensagem</th>
-                                    <th>Status</th>
                                     <th>Vendedor</th>
                                     <th>Entrada</th>
                                     <th>Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="tabela-clientes">
-                                <tr><td colspan="7" class="vazio">Carregando clientes...</td></tr>
+                                <tr><td colspan="6" class="vazio">Carregando clientes...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1002,15 +986,6 @@
                     <div class="info-group">
                         <label>Um por linha</label>
                         <textarea id="ficha-outros" class="form-control" placeholder="Nome - CPF"></textarea>
-                    </div>
-                </div>
-
-                <div class="ficha-bloco">
-                    <h3>Status da Negociação</h3>
-                    <div class="status-options">
-                        <button class="status-btn vendido" data-status="vendido" onclick="mudarStatus('vendido')">Vendido (Contato Futuro)</button>
-                        <button class="status-btn pensando" data-status="pensando" onclick="mudarStatus('pensando')">Pensando</button>
-                        <button class="status-btn nao-quis" data-status="nao-quis" onclick="mudarStatus('nao-quis')">Não Quis</button>
                     </div>
                 </div>
 

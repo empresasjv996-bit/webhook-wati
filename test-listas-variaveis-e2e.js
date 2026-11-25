@@ -58,6 +58,48 @@ async function lerJson(resposta) {
         const cookie = String(setCookie || '').split(';')[0];
         assert.ok(cookie, 'cookie de sessão não veio no login');
 
+        /* ---------- filtro "Analisar conversas de" (dono do lead) ---------- */
+        const respostaVendedores = await fetch(BASE + '/api/clientes/vendedores', {
+            headers: { Cookie: cookie }
+        });
+        const colaboradores = await lerJson(respostaVendedores);
+        assert.strictEqual(respostaVendedores.status, 200, JSON.stringify(colaboradores));
+        assert.ok(Array.isArray(colaboradores), 'lista de colaboradores é um array');
+
+        const donoDemo = colaboradores.find((item) => item.email === 'vendedor@qgcteam.com');
+        assert.ok(donoDemo, 'colaborador de exemplo aparece no filtro: ' + JSON.stringify(colaboradores));
+        assert.strictEqual(donoDemo.nome, 'Vendedor Jv', 'nome do colaborador vem preenchido');
+        assert.ok(Number(donoDemo.total) >= 1, 'total de conversas do colaborador é informado');
+
+        const soDoDono = await fetch(BASE + '/api/clientes?status=todos&limite=200&vendedor='
+            + encodeURIComponent('vendedor@qgcteam.com'), { headers: { Cookie: cookie } });
+        const clientesDoDono = await lerJson(soDoDono);
+        assert.strictEqual(soDoDono.status, 200, JSON.stringify(clientesDoDono));
+        assert.ok(Array.isArray(clientesDoDono) && clientesDoDono.length >= 1, 'filtro devolve as conversas do colaborador');
+        assert.ok(clientesDoDono.every((c) => String(c.vendedor_email || '').toLowerCase() === 'vendedor@qgcteam.com'),
+            'só vêm conversas do colaborador escolhido: ' + JSON.stringify(clientesDoDono.map((c) => c.vendedor_email)));
+
+        // A lista de colaboradores é do painel admin: colaborador recebe 403.
+        const loginColaborador = await fetch(BASE + '/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: 'colaborador@qgcteam.com', senha: '123456' })
+        });
+        assert.strictEqual(loginColaborador.status, 200, 'login do colaborador falhou');
+
+        const setCookieColaborador = loginColaborador.headers.getSetCookie
+            ? loginColaborador.headers.getSetCookie()[0]
+            : loginColaborador.headers.get('set-cookie');
+        const cookieColaborador = String(setCookieColaborador || '').split(';')[0];
+
+        const respostaBloqueada = await fetch(BASE + '/api/clientes/vendedores', {
+            headers: { Cookie: cookieColaborador }
+        });
+        assert.strictEqual(respostaBloqueada.status, 403, 'colaborador não usa o filtro de donos');
+
+        console.log('OK - filtro por colaborador devolve só as conversas do dono (' + clientesDoDono.length
+            + ') e é restrito ao admin');
+
         const nomeLista = 'TESTE VARIAVEIS ' + Date.now();
         const criacao = await fetch(BASE + '/api/listas', {
             method: 'POST',

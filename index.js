@@ -474,21 +474,83 @@ async function watiRequisicao(url, metodo, corpo) {
     }
 }
 
+/* A Wati devolve o motivo de várias formas: texto simples, lista ou objeto
+   aninhado com o erro da Cloud API da Meta:
+   { result: false, message: { error: { code: 131047, message: '...' } } }
+   Aqui tudo vira uma frase curta — o painel nunca deve mostrar "[object Object]". */
+function achatarErroWati(valor, nivel) {
+    const profundidade = nivel || 0;
+
+    if (valor === null || valor === undefined) return '';
+    if (typeof valor === 'string') return valor.trim();
+    if (typeof valor === 'number' || typeof valor === 'boolean') return String(valor);
+    if (profundidade > 4) return '';
+
+    if (Array.isArray(valor)) {
+        return valor
+            .map((item) => achatarErroWati(item, profundidade + 1))
+            .filter(Boolean)
+            .join(' | ');
+    }
+
+    if (typeof valor === 'object') {
+        const codigo = valor.code || valor.statusCode || valor.status;
+
+        const detalhe = achatarErroWati(valor.message, profundidade + 1)
+            || achatarErroWati(valor.error, profundidade + 1)
+            || achatarErroWati(valor.info, profundidade + 1)
+            || achatarErroWati(valor.title, profundidade + 1)
+            || achatarErroWati(valor.description, profundidade + 1)
+            || achatarErroWati(valor.detail, profundidade + 1);
+
+        if (codigo && detalhe) return `código ${codigo}: ${detalhe}`;
+        if (detalhe) return detalhe;
+        if (codigo) return `código ${codigo}`;
+
+        try {
+            return JSON.stringify(valor).substring(0, 300);
+        } catch (erro) {
+            return '';
+        }
+    }
+
+    return String(valor);
+}
+
+/* A Meta só aceita texto livre até 24h depois da última mensagem do cliente.
+   Fora disso a Wati recusa com 131047 / 470 ("Re-engagement message") — no
+   caso típico dos contatos que só receberam a campanha e nunca responderam. */
+function erroJanelaFechada(motivo) {
+    const texto = String(motivo || '').toLowerCase();
+
+    return texto.includes('131047')
+        || texto.includes('re-engagement')
+        || texto.includes('reengagement')
+        || texto.includes('re engage')
+        || texto.includes('24 hour')
+        || texto.includes('24h')
+        || texto.includes('janela de 24')
+        || texto.includes('outside the allowed window')
+        || texto.includes('message failed to send because more than 24 hours');
+}
+
+const ORIENTACAO_JANELA_FECHADA = 'O WhatsApp só permite texto livre até 24h depois da última mensagem do cliente. '
+    + 'Peça para o cliente responder algo (ou envie um template aprovado pela tela Envio) e depois responda por aqui.';
+
 function descreverErroWati(resposta) {
     if (!resposta) return 'sem resposta';
 
     const dados = resposta.dados;
-    let detalhe = dados && (dados.message || dados.error);
+    let detalhe = achatarErroWati(dados && (dados.message || dados.error || dados.info));
 
     if (!detalhe && dados && Array.isArray(dados.errors) && dados.errors.length) {
-        const primeiro = dados.errors[0];
-        detalhe = (primeiro && (primeiro.message || primeiro.error)) || primeiro;
+        detalhe = achatarErroWati(dados.errors[0]);
     }
 
-    if (detalhe) return `HTTP ${resposta.status}: ${String(detalhe).substring(0, 140)}`;
+    if (detalhe) return `HTTP ${resposta.status}: ${detalhe.substring(0, 200)}`;
     if (resposta.status) return `HTTP ${resposta.status}`;
 
-    return String(resposta.texto || 'falha de conexão').substring(0, 140);
+    return achatarErroWati(resposta.texto) || 'falha de conexão';
 }
 
 /* A Wati às vezes responde 200 com result:false — não dá para confiar só no HTTP. */
@@ -1463,6 +1525,16 @@ app.get('/api/clientes', async (req, res) => {
     }
 });
 
+// COLABORADORES COM CONVERSAS (filtro "Analisar conversas de" — somente admin)
+app.get('/api/clientes/vendedores', exigirAdmin, async (req, res) => {
+    try {
+        res.json(await banco.listarVendedoresDosLeads());
+    } catch (error) {
+        console.error('Erro em /api/clientes/vendedores:', error.message);
+        res.status(500).json({ error: 'Erro' });
+    }
+});
+
 // RESUMO DO PAINEL (cards + desempenho da equipe)
 app.get('/api/dashboard', exigirAdmin, async (req, res) => {
     try {
@@ -1948,21 +2020,64 @@ async function enviarViaWati(telefone, texto) {
         return { ok: false, message: 'API da Wati não configurada no servidor.' };
     }
 
+    // A Wati espera o número com DDI/DDD, sem máscara e sem "+".
+    const numero = String(telefone || '').replace(/\D/g, '') || String(telefone || '').trim();
+
     try {
-        const url = `${watiBase()}/api/v1/sendSessionMessage/${telefone}?messageText=${encodeURIComponent(texto)}`;
-        const resposta = await fetch(url, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${WATI_TOKEN}` }
-        });
+        const url = `${watiBase()}/api/v1/sendSessionMessage/${encodeURIComponent(numero)}?messageText=${encodeURIComponent(texto)}`;
 
-        const corpo = await resposta.text();
+        let resposta = null;
+        let corpo = '';
         let dados = {};
-        try { dados = corpo ? JSON.parse(corpo) : {}; } catch (erro) { dados = { message: corpo }; }
 
-        if (resposta.ok && (dados.result === true || dados.success === true)) return { ok: true };
+        // Duas tentativas: a Wati costuma responder 429/5xx quando uma
+        // campanha grande está disparando na mesma conta.
+        for (let tentativa = 1; tentativa <= 2; tentativa++) {
+            try {
+                resposta = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${WATI_TOKEN}` }
+                });
+            } catch (erro) {
+                console.error('Erro ao chamar a API da Wati:', erro.message);
+                return { ok: false, message: 'Erro de conexão com a Wati.' };
+            }
 
-        console.error('Wati recusou o envio:', resposta.status, corpo);
-        return { ok: false, message: dados.message || `Wati recusou o envio (HTTP ${resposta.status}).` };
+            corpo = await resposta.text();
+            dados = {};
+            try { dados = corpo ? JSON.parse(corpo) : {}; } catch (erro) { dados = { message: corpo }; }
+
+            if (resposta.ok && dados && (dados.result === true || dados.success === true)) return { ok: true };
+
+            if ((resposta.status === 429 || resposta.status >= 500) && tentativa === 1) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                continue;
+            }
+
+            break;
+        }
+
+        /* O motivo pode vir como texto ou como objeto aninhado da Cloud API.
+           Sem achatar, o painel exibia "[object Object]" e ninguém descobria a causa. */
+        const motivo = (achatarErroWati(dados && dados.message)
+            || achatarErroWati(dados && dados.info)
+            || achatarErroWati(dados && dados.error)
+            || achatarErroWati(dados && dados.errors)
+            || '').substring(0, 300) || `HTTP ${resposta.status}`;
+
+        console.error(`Wati recusou o envio para ${numero} (HTTP ${resposta.status}):`, String(corpo).substring(0, 600));
+
+        // Anexa o código no log e na auditoria para facilitar o suporte da Wati.
+        const codigo = (dados && (dados.code || (dados.error && dados.error.code) || (dados.message && dados.message.error && dados.message.error.code))) || '';
+        if (codigo && !motivo.includes(String(codigo))) {
+            console.error(`Código de erro da Wati/Meta: ${codigo}`);
+        }
+
+        const fechada = erroJanelaFechada(motivo);
+        const mensagem = `A Wati recusou o envio (HTTP ${resposta.status}): ${motivo}.`
+            + (fechada ? ` ${ORIENTACAO_JANELA_FECHADA}` : '');
+
+        return { ok: false, message: mensagem, janelaFechada: fechada };
     } catch (erro) {
         console.error('Erro ao chamar a API da Wati:', erro.message);
         return { ok: false, message: 'Erro de conexão com a Wati.' };
@@ -1991,8 +2106,13 @@ app.post('/api/enviar-mensagem', async (req, res) => {
 
     if (!resultado.ok) {
         await banco.registrarAuditoria(ator, 'envio falhou', `${telefone}: ${resultado.message}`);
+        console.warn(`Envio para ${telefone} recusado: ${resultado.message}`);
         const naoConfigurada = String(resultado.message || '').includes('não configurada');
-        return res.status(naoConfigurada ? 500 : 502).json({ success: false, message: resultado.message });
+        return res.status(naoConfigurada ? 500 : 502).json({
+            success: false,
+            message: resultado.message,
+            janelaFechada: !!resultado.janelaFechada
+        });
     }
 
     try {

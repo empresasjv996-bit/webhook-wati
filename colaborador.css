@@ -83,15 +83,6 @@ header.top {
 .contact-info h4 { font-size: 0.9rem; color: #fff; margin-bottom: 3px; }
 .contact-info p { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contact-item .time { font-size: 0.7rem; color: var(--text-muted); }
-.contact-item .owner {
-    font-size: 0.62rem; font-weight: 700; padding: 3px 8px; border-radius: 999px;
-    border: 1px solid rgba(0, 255, 128, 0.35); color: var(--green);
-    background: rgba(0, 255, 128, 0.08); white-space: nowrap;
-}
-.contact-item .owner.livre {
-    border-color: rgba(255, 255, 255, 0.15); color: var(--text-muted);
-    background: rgba(255, 255, 255, 0.03);
-}
 
 /* 2. CHAT CENTRAL */
 .chat-area {
@@ -135,19 +126,6 @@ header.top {
 .ficha-atributos li span { color: var(--text-muted); }
 .ficha-atributos li strong { color: #fff; font-weight: 600; text-align: right; word-break: break-word; }
 .divider { height: 1px; background: rgba(255,255,255,0.05); margin: 25px 0; }
-
-/* BOTÕES DE STATUS */
-.status-options { display: flex; flex-direction: column; gap: 10px; }
-.status-btn { padding: 12px; border-radius: 12px; font-size: 0.85rem; font-weight: 700; cursor: pointer; border: 1px solid transparent; text-align: left; transition: 0.2s; display: flex; justify-content: space-between; }
-
-.status-btn.vendido { background: rgba(0, 255, 128, 0.05); color: var(--green); border-color: rgba(0, 255, 128, 0.2); }
-.status-btn.vendido:hover, .status-btn.vendido.active { background: var(--green); color: #000; }
-
-.status-btn.pensando { background: rgba(255, 193, 7, 0.05); color: #ffc107; border-color: rgba(255, 193, 7, 0.2); }
-.status-btn.pensando:hover, .status-btn.pensando.active { background: #ffc107; color: #000; }
-
-.status-btn.nao-quis { background: rgba(255, 68, 68, 0.05); color: #ff4444; border-color: rgba(255, 68, 68, 0.2); }
-.status-btn.nao-quis:hover, .status-btn.nao-quis.active { background: #ff4444; color: #fff; }
 
 /* SCROLLBAR */
 ::-webkit-scrollbar { width: 6px; }

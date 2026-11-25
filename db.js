@@ -219,6 +219,22 @@ function criarBancoPostgres() {
             return rows;
         },
 
+        /* Donos (colaboradores) que têm conversas na base — alimenta o filtro
+           "Analisar conversas de" da tela Conversas do painel admin. */
+        async listarVendedoresDosLeads() {
+            const { rows } = await pool.query(
+                `SELECT LOWER(TRIM(vendedor_email)) AS email,
+                        COALESCE(MAX(NULLIF(vendedor_nome, '')), LOWER(TRIM(vendedor_email))) AS nome,
+                        COUNT(*)::int AS total,
+                        (COUNT(*) FILTER (WHERE status <> 'finalizado'))::int AS ativos
+                   FROM clientes
+                  WHERE vendedor_email IS NOT NULL AND TRIM(vendedor_email) <> ''
+                  GROUP BY LOWER(TRIM(vendedor_email))
+                  ORDER BY 2 ASC`
+            );
+            return rows;
+        },
+
         async contarPorStatus() {
             const { rows } = await pool.query('SELECT status, COUNT(*)::int AS total FROM clientes GROUP BY status');
             const counts = { vendido: 0, pensando: 0, 'nao-quis': 0, finalizado: 0 };
@@ -1154,6 +1170,24 @@ function criarBancoMemoria() {
                 status: c.status, criado_em: c.criado_em,
                 vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null
             }));
+        },
+
+        /* Donos (colaboradores) que têm conversas na base — modo demo. */
+        async listarVendedoresDosLeads() {
+            const mapa = new Map();
+
+            clientes.forEach((c) => {
+                const email = String(c.vendedor_email || '').trim().toLowerCase();
+                if (!email) return;
+
+                const atual = mapa.get(email) || { email, nome: email, total: 0, ativos: 0 };
+                if (c.vendedor_nome) atual.nome = c.vendedor_nome;
+                atual.total += 1;
+                if (c.status !== 'finalizado') atual.ativos += 1;
+                mapa.set(email, atual);
+            });
+
+            return Array.from(mapa.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
         },
 
         async contarPorStatus() {

@@ -4,23 +4,10 @@
    tempo real (SSE), som, notificações e pesquisa.
    ========================================================= */
 
-const STATUS_LABEL = {
-    vendido: 'Vendido',
-    pensando: 'Pensando',
-    'nao-quis': 'Não Quis',
-    finalizado: 'Finalizado'
-};
-
-const STATUS_CLASSE = {
-    vendido: 'status-vendido',
-    pensando: 'status-pensando',
-    'nao-quis': 'status-nao-quis',
-    finalizado: 'status-pensando'
-};
-
 let clienteAtivo = null;
 let clientesCache = [];
 let filtroStatus = 'ativos';
+let filtroVendedorConversas = '';
 let buscaAtual = '';
 let fichaTelefone = null;
 let sse = null;
@@ -59,6 +46,29 @@ function formatarData(valor) {
     const data = new Date(valor);
     if (isNaN(data.getTime())) return '';
     return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+/* O servidor pode devolver o motivo da recusa como texto ou como objeto
+   (erros da Wati/Meta vêm aninhados). Sem isso a tela mostrava
+   "[object Object]" e escondia a causa real da falha. */
+function mensagemDoErro(dados, padrao) {
+    const valores = dados ? [dados.message, dados.erro, dados.error, dados.aviso] : [];
+
+    for (let i = 0; i < valores.length; i++) {
+        const valor = valores[i];
+
+        if (typeof valor === 'string' && valor.trim()) return valor.trim();
+        if (typeof valor === 'number') return String(valor);
+
+        if (valor && typeof valor === 'object') {
+            try {
+                const texto = JSON.stringify(valor);
+                if (texto && texto !== '{}') return texto;
+            } catch (erro) { /* cai no padrão */ }
+        }
+    }
+
+    return padrao;
 }
 
 /* Quem enviou: painel, campanha ou Wati (mensagens antigas não têm autor). */
@@ -147,7 +157,7 @@ function irPara(view) {
     fecharGruposNav();
 
     if (view === 'inicio') carregarDashboard();
-    if (view === 'conversas') carregarConversas(true);
+    if (view === 'conversas') { carregarVendedoresConversas(); carregarConversas(true); }
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') { carregarListas(); verificarExtratorPainel(); }
     if (view === 'extrator') verificarExtratorPainel(true);
@@ -374,6 +384,7 @@ async function limparDadosDoPainel() {
         clientesCache = [];
         fecharFicha();
         limparChat();
+        carregarVendedoresConversas();
         carregarConversas();
         carregarDashboard();
         if (typeof carregarTabelaClientes === 'function') carregarTabelaClientes();
@@ -393,15 +404,6 @@ async function carregarDashboard() {
         const resposta = await fetch('/api/dashboard');
         if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
         const dados = await resposta.json();
-
-        const vendidos = $('admin-vendidos');
-        if (vendidos) vendidos.textContent = (dados.vendido || 0) + ' Vendidos';
-
-        const pensando = $('admin-pensando');
-        if (pensando) pensando.textContent = (dados.pensando || 0) + ' Pensando';
-
-        const naoQuis = $('admin-nao-quis');
-        if (naoQuis) naoQuis.textContent = (dados['nao-quis'] || 0) + ' Não Quis';
 
         const conversas = $('total-conversas');
         if (conversas) conversas.textContent = (dados.conversasAtivas || 0) + ' conversa(s) ativa(s)';
@@ -435,6 +437,54 @@ function filtrarConversas(status, botao) {
     carregarConversas(true);
 }
 
+/* Colaboradores que já têm conversas na base (dono do lead).
+   Alimenta o filtro "Analisar conversas de" — rota restrita ao admin.
+   Recarrega a cada abertura da tela para os totais não ficarem velhos. */
+async function carregarVendedoresConversas() {
+    const select = $('filtro-conversas-vendedor');
+    if (!select) return [];
+
+    try {
+        const resposta = await fetch('/api/clientes/vendedores');
+        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+        const dados = await resposta.json();
+        const colaboradores = Array.isArray(dados) ? dados : [];
+
+        select.innerHTML = '<option value="">Todos os colaboradores</option>' + colaboradores.map((item) => {
+            const nome = item.nome || item.email || 'Sem nome';
+            const total = Number(item.total || 0);
+            const rotulo = nome + (total ? ' (' + total + ')' : '');
+            return `<option value="${escaparHtml(item.email)}">${escaparHtml(rotulo)}</option>`;
+        }).join('');
+
+        // mantém o colaborador escolhido, se ele continuar na lista
+        const alvo = String(filtroVendedorConversas || '').trim().toLowerCase();
+        const achado = colaboradores.find((item) => String(item.email || '').trim().toLowerCase() === alvo);
+        select.value = achado ? achado.email : '';
+        filtroVendedorConversas = achado ? achado.email : '';
+
+        return colaboradores;
+    } catch (erro) {
+        console.error('Erro ao carregar colaboradores das conversas:', erro);
+        select.innerHTML = '<option value="">Todos os colaboradores</option>';
+        select.value = '';
+        return [];
+    }
+}
+
+/* Troca o colaborador analisado na tela Conversas. */
+function filtrarConversasPorVendedor(email) {
+    filtroVendedorConversas = String(email || '').trim();
+    carregarConversas(true);
+}
+
+/* Botão Atualizar da tela Conversas: refaz a lista de colaboradores e os contatos. */
+function atualizarConversas() {
+    carregarVendedoresConversas();
+    carregarConversas(true);
+}
+
 async function carregarConversas(manterSelecao) {
     const lista = $('contact-list');
     if (!lista) return;
@@ -446,6 +496,9 @@ async function carregarConversas(manterSelecao) {
             limite: 50
         });
 
+        // Filtro por colaborador (admin). Vazio = todos.
+        if (filtroVendedorConversas) parametros.set('vendedor', filtroVendedorConversas);
+
         const resposta = await fetch('/api/clientes?' + parametros.toString());
         if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
 
@@ -453,7 +506,9 @@ async function carregarConversas(manterSelecao) {
         lista.innerHTML = '';
 
         if (!clientesCache.length) {
-            lista.innerHTML = '<p class="vazio">Nenhum contato encontrado.</p>';
+            lista.innerHTML = filtroVendedorConversas
+                ? '<p class="vazio">Nenhuma conversa desse colaborador.</p>'
+                : '<p class="vazio">Nenhum contato encontrado.</p>';
             return;
         }
 
@@ -469,9 +524,6 @@ async function carregarConversas(manterSelecao) {
                     <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
                     <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
                     <small class="contact-owner">👤 ${escaparHtml(cliente.vendedor_nome || cliente.vendedor_email || 'Sem vendedor')}</small>
-                </div>
-                <div class="contact-meta">
-                    <span class="mini-badge ${STATUS_CLASSE[cliente.status] || ''}">${escaparHtml(STATUS_LABEL[cliente.status] || cliente.status || '-')}</span>
                 </div>
             `;
             lista.appendChild(item);
@@ -504,9 +556,9 @@ function limparChat() {
 
 async function abrirConversa(telefone) {
     const encontrado = clientesCache.find((c) => c.telefone === telefone);
-    const cliente = encontrado || { telefone, nome: 'Contato', status: 'pensando' };
+    const cliente = encontrado || { telefone, nome: 'Contato' };
 
-    clienteAtivo = { telefone: cliente.telefone, nome: cliente.nome, status: cliente.status };
+    clienteAtivo = { telefone: cliente.telefone, nome: cliente.nome };
 
     document.querySelectorAll('.contact-item').forEach((el) => {
         el.classList.toggle('active', el.dataset.telefone === telefone);
@@ -592,7 +644,10 @@ async function enviarMensagem() {
             input.value = '';
             adicionarMensagemNaTela('enviada', texto, 'Você');
         } else {
-            toast(dados.message || 'A Wati recusou o envio.', 'erro');
+            const motivo = mensagemDoErro(dados, 'A Wati recusou o envio.');
+            /* Janela de 24h fechada: o aviso é longo e importante, então usa alert. */
+            if (dados.janelaFechada) alert(motivo);
+            else toast(motivo, 'erro');
         }
     } catch (erro) {
         console.error('Erro ao enviar mensagem:', erro);
@@ -604,32 +659,6 @@ async function enviarMensagem() {
 }
 
 const sendMessage = enviarMensagem;
-
-async function mudarStatus(status) {
-    if (!fichaTelefone) { toast('Abra a ficha de um cliente primeiro.', 'erro'); return; }
-
-    document.querySelectorAll('.status-btn').forEach((botao) => {
-        botao.classList.toggle('active', botao.dataset.status === status);
-    });
-
-    try {
-        const resposta = await fetch('/api/status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ telefone: fichaTelefone, status })
-        });
-
-        if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
-
-        if (clienteAtivo && clienteAtivo.telefone === fichaTelefone) clienteAtivo.status = status;
-        toast('Status atualizado para ' + (STATUS_LABEL[status] || status) + '.');
-        carregarConversas(true);
-        carregarDashboard();
-    } catch (erro) {
-        console.error('Erro ao mudar status:', erro);
-        toast('Não foi possível salvar o status.', 'erro');
-    }
-}
 
 async function finalizarAtendimento() {
     const telefone = clienteAtivo ? clienteAtivo.telefone : fichaTelefone;
@@ -681,7 +710,7 @@ async function carregarTabelaClientes() {
         corpo.innerHTML = '';
 
         if (!clientes.length) {
-            corpo.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum cliente encontrado.</td></tr>';
+            corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum cliente encontrado.</td></tr>';
             return;
         }
 
@@ -691,7 +720,6 @@ async function carregarTabelaClientes() {
                 <td>${escaparHtml(cliente.nome || '-')}</td>
                 <td>${escaparHtml(formatarTelefone(cliente.telefone))}</td>
                 <td>${escaparHtml(cliente.mensagem || '-')}</td>
-                <td><span class="mini-badge ${STATUS_CLASSE[cliente.status] || ''}">${escaparHtml(STATUS_LABEL[cliente.status] || cliente.status || '-')}</span></td>
                 <td>${escaparHtml(cliente.vendedor_nome || '—')}</td>
                 <td>${escaparHtml(formatarData(cliente.criado_em))}</td>
                 <td>
@@ -728,12 +756,6 @@ function preencherCampo(id, valor) {
     if (campo) campo.value = valor === null || valor === undefined ? '' : String(valor);
 }
 
-function marcarStatusAtivo(status) {
-    document.querySelectorAll('.status-btn').forEach((botao) => {
-        botao.classList.toggle('active', !!status && botao.dataset.status === status);
-    });
-}
-
 function abrirFicha(telefone) {
     const alvo = telefone || (clienteAtivo && clienteAtivo.telefone) || fichaTelefone;
     if (!alvo) { toast('Selecione um contato primeiro.', 'erro'); return; }
@@ -755,7 +777,6 @@ function abrirFicha(telefone) {
     ['ficha-cnpj', 'ficha-socio', 'ficha-cpf', 'ficha-responsavel', 'ficha-outros'].forEach((id) => preencherCampo(id, ''));
     const listaAtributos = $('ficha-atributos');
     if (listaAtributos) listaAtributos.innerHTML = '<li><span>Carregando...</span></li>';
-    marcarStatusAtivo(null);
 
     carregarFicha(alvo);
 }
@@ -802,8 +823,6 @@ async function carregarFicha(telefone) {
 
             listaAtributos.innerHTML = itens.length ? itens.join('') : '<li><span>Nenhum atributo importado</span></li>';
         }
-
-        marcarStatusAtivo(ficha.status);
     } catch (erro) {
         console.error('Erro ao carregar ficha:', erro);
         toast('Não foi possível carregar a ficha do cliente.', 'erro');
