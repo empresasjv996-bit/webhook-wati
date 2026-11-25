@@ -505,7 +505,19 @@ function achatarErroWati(valor, nivel) {
 
         if (codigo && detalhe) return `código ${codigo}: ${detalhe}`;
         if (detalhe) return detalhe;
-        if (codigo) return `código ${codigo}`;
+
+        if (codigo) {
+            /* A Wati às vezes devolve só o código — o painel mostrava "código 1"
+               e ninguém sabia o que fazer. Aqui a resposta crua vai junto (a não
+               ser que ela seja só o próprio código, tipo {"code":1}). */
+            let bruto = '';
+            try { bruto = JSON.stringify(valor) || ''; } catch (erro) { bruto = ''; }
+
+            const semCodigo = bruto.replace(/[\s{}"'\[\],:]|code|codigo|error/gi, '');
+            const soCodigo = !semCodigo || semCodigo === String(codigo);
+
+            return soCodigo ? `código ${codigo}` : `código ${codigo} (resposta da Wati: ${bruto.substring(0, 240)})`;
+        }
 
         try {
             return JSON.stringify(valor).substring(0, 300);
@@ -626,6 +638,39 @@ async function salvarContatoNaWati({ telefone, nome, atributos }) {
     }
 
     return { ok: false, message: `A Wati recusou (${tentativas.join(' | ')}).` };
+}
+
+/* A Wati responde HTTP 200 com result:false e a frase "Contact with phone
+   number 5562... not found" quando o contato não existe na conta dela. Nesse
+   caso o certo é criar o contato e repetir o envio uma vez. */
+function contatoInexistenteNaWati(motivo) {
+    const texto = String(motivo || '').toLowerCase();
+
+    return texto.includes('contact with phone number')
+        || texto.includes('contact not found')
+        || texto.includes('contact does not exist')
+        || texto.includes('contato não encontrado')
+        || texto.includes('contato nao encontrado');
+}
+
+/* Garante o contato na Wati antes/depois de um envio: usa o nome da ficha
+   quando existe e nunca derruba a requisição (só loga a falha). */
+async function garantirContatoNaWati(telefone) {
+    const numero = String(telefone || '').replace(/\D/g, '');
+    if (!numero) return { ok: false, message: 'Telefone inválido.' };
+
+    let nome = '';
+    try {
+        const ficha = await banco.obterFicha(numero);
+        nome = String((ficha && (ficha.nome || ficha.socio)) || '').trim().substring(0, 120);
+    } catch (erro) { /* segue sem nome */ }
+
+    const resultado = await salvarContatoNaWati({ telefone: numero, nome });
+
+    if (resultado.ok) console.log(`Contato ${numero} garantido na Wati (${resultado.via || 'ok'}).`);
+    else console.warn(`Não foi possível criar o contato ${numero} na Wati: ${resultado.message}`);
+
+    return resultado;
 }
 
 /* ---------------------------------------------------------
@@ -2026,15 +2071,16 @@ async function enviarViaWati(telefone, texto) {
     // A Wati espera o número com DDI/DDD, sem máscara e sem "+".
     const numero = String(telefone || '').replace(/\D/g, '') || String(telefone || '').trim();
 
-    try {
-        const url = `${watiBase()}/api/v1/sendSessionMessage/${encodeURIComponent(numero)}?messageText=${encodeURIComponent(texto)}`;
+    const url = `${watiBase()}/api/v1/sendSessionMessage/${encodeURIComponent(numero)}?messageText=${encodeURIComponent(texto)}`;
 
+    /* Uma rodada de envio. Repete sozinha em 429/5xx (a Wati costuma responder
+       assim quando uma campanha grande está disparando na mesma conta).
+       Devolve { ok } ou { ok:false, status, motivo } ou { ok:false, conexao }. */
+    const tentarEnvio = async () => {
         let resposta = null;
         let corpo = '';
         let dados = {};
 
-        // Duas tentativas: a Wati costuma responder 429/5xx quando uma
-        // campanha grande está disparando na mesma conta.
         for (let tentativa = 1; tentativa <= 2; tentativa++) {
             try {
                 resposta = await fetch(url, {
@@ -2043,7 +2089,7 @@ async function enviarViaWati(telefone, texto) {
                 });
             } catch (erro) {
                 console.error('Erro ao chamar a API da Wati:', erro.message);
-                return { ok: false, message: 'Erro de conexão com a Wati.' };
+                return { ok: false, conexao: true, message: 'Erro de conexão com a Wati.' };
             }
 
             corpo = await resposta.text();
@@ -2070,19 +2116,46 @@ async function enviarViaWati(telefone, texto) {
 
         console.error(`Wati recusou o envio para ${numero} (HTTP ${resposta.status}):`, String(corpo).substring(0, 600));
 
-        // Anexa o código no log e na auditoria para facilitar o suporte da Wati.
+        // Anexa o código no log para facilitar o suporte da Wati.
         const codigo = (dados && (dados.code || (dados.error && dados.error.code) || (dados.message && dados.message.error && dados.message.error.code))) || '';
         if (codigo && !motivo.includes(String(codigo))) {
             console.error(`Código de erro da Wati/Meta: ${codigo}`);
         }
 
-        const fechada = erroJanelaFechada(motivo);
-        // A Wati já termina o motivo com ponto final ("Ticket has been expired.").
-        const motivoLimpo = motivo.replace(/[\s.;]+$/, '');
-        const mensagem = `A Wati recusou o envio (HTTP ${resposta.status}): ${motivoLimpo}.`
-            + (fechada ? ` ${ORIENTACAO_JANELA_FECHADA}` : '');
+        return { ok: false, status: resposta.status, motivo };
+    };
 
-        return { ok: false, message: mensagem, janelaFechada: fechada };
+    try {
+        let resultado = await tentarEnvio();
+
+        if (resultado.conexao) return { ok: false, message: resultado.message };
+
+        /* Contato fora da conta da Wati: cria (com o nome da ficha) e repete o
+           envio uma vez. Era o "Contact with phone number ... not found" que
+           travava o chat mesmo com o número certo. */
+        if (!resultado.ok && contatoInexistenteNaWati(resultado.motivo)) {
+            const criacao = await garantirContatoNaWati(numero);
+
+            if (criacao.ok) {
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                resultado = await tentarEnvio();
+                if (resultado.conexao) return { ok: false, message: resultado.message };
+            } else {
+                resultado.criacao = criacao;
+            }
+        }
+
+        if (resultado.ok) return { ok: true };
+
+        const fechada = erroJanelaFechada(resultado.motivo);
+        // A Wati já termina o motivo com ponto final ("Ticket has been expired.").
+        const motivoLimpo = String(resultado.motivo || '').replace(/[\s.;]+$/, '') || `HTTP ${resultado.status}`;
+
+        const mensagem = (resultado.criacao && !resultado.criacao.ok)
+            ? `A Wati não encontrou o contato ${numero} e não conseguiu criá-lo (${motivoLimpo}). Confira se o número tem WhatsApp.`
+            : `A Wati recusou o envio (HTTP ${resultado.status}): ${motivoLimpo}.`;
+
+        return { ok: false, message: mensagem + (fechada ? ` ${ORIENTACAO_JANELA_FECHADA}` : ''), janelaFechada: fechada };
     } catch (erro) {
         console.error('Erro ao chamar a API da Wati:', erro.message);
         return { ok: false, message: 'Erro de conexão com a Wati.' };
@@ -2220,7 +2293,7 @@ app.post('/api/enviar-template', async (req, res) => {
         // Mesmo formato do envio em campanha (custom_params por nome).
         const pares = nomes.map((nome, indice) => ({ name: nome, value: valores[indice] }));
 
-        const envio = await enviarTemplateWatiLote({
+        const pedido = {
             templateNome: alvo.nome,
             campanha: `reabertura_${numero || 'contato'}`,
             destinatarios: [{
@@ -2228,7 +2301,24 @@ app.post('/api/enviar-template', async (req, res) => {
                 parametros: pares,
                 envioId: `reab-${Date.now()}`
             }]
-        });
+        };
+
+        let envio = await enviarTemplateWatiLote(pedido);
+        const motivoInicial = envio.ok ? '' : String(
+            (envio.resultados && envio.resultados[0] && envio.resultados[0].message) || envio.message || ''
+        );
+
+        /* Contato que ainda não existe na Wati: cria (com o nome da ficha) e
+           repete o template uma vez — senão o painel só mostrava
+           "Contact with phone number ... not found". */
+        if (!envio.ok && contatoInexistenteNaWati(motivoInicial)) {
+            const criacao = await garantirContatoNaWati(numero);
+
+            if (criacao.ok) {
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                envio = await enviarTemplateWatiLote(pedido);
+            }
+        }
 
         if (!envio.ok) {
             const detalheDoContato = envio.resultados && envio.resultados[0] && envio.resultados[0].message;

@@ -26,9 +26,10 @@ function pegarFuncao(nome) {
 
 const codigo = pegarFuncao('achatarErroWati') + '\n'
     + pegarFuncao('erroJanelaFechada') + '\n'
-    + 'return { achatarErroWati, erroJanelaFechada };';
+    + pegarFuncao('contatoInexistenteNaWati') + '\n'
+    + 'return { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati };';
 
-const { achatarErroWati, erroJanelaFechada } = new Function(codigo)();
+const { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati } = new Function(codigo)();
 
 const casos = [
     {
@@ -43,7 +44,13 @@ const casos = [
     },
     { nome: 'texto simples', entrada: 'Falha simples', esperado: 'Falha simples' },
     { nome: 'vazio', entrada: null, esperado: '' },
-    { nome: 'lista de erros', entrada: [{ message: 'Primeiro' }, { message: 'Segundo' }], esperado: 'Primeiro | Segundo' }
+    { nome: 'lista de erros', entrada: [{ message: 'Primeiro' }, { message: 'Segundo' }], esperado: 'Primeiro | Segundo' },
+    { nome: 'só o código (sem detalhe)', entrada: { code: 1 }, esperado: 'código 1' },
+    {
+        nome: 'só o código com a resposta crua',
+        entrada: { result: false, code: 1 },
+        esperado: 'código 1 (resposta da Wati: {"result":false,"code":1})'
+    }
 ];
 
 let falhas = 0;
@@ -66,5 +73,13 @@ const janelaOk = erroJanelaFechada('código 131047: Re-engagement message')
 
 if (!janelaOk) falhas++;
 console.log((janelaOk ? 'OK - ' : 'FALHOU - ') + 'detecção da janela de 24h (inclui "Ticket has been expired")');
+
+const contatoOk = contatoInexistenteNaWati('Contact with phone number 5562982248765 not found.')
+    && contatoInexistenteNaWati('contact not found')
+    && !contatoInexistenteNaWati('Ticket has been expired.')
+    && !contatoInexistenteNaWati('Telefone inválido');
+
+if (!contatoOk) falhas++;
+console.log((contatoOk ? 'OK - ' : 'FALHOU - ') + 'detecção de contato inexistente na Wati (cria e repete o envio)');
 
 process.exit(falhas ? 1 : 0);

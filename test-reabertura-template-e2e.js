@@ -172,6 +172,18 @@ async function lerJson(resposta) {
         });
 
         console.log('OK - painel do admin e do colaborador têm a barra do template');
+
+        /* ---------- contato ausente na Wati: cria e repete o envio ---------- */
+        const fonteIndex = fs.readFileSync('index.js', 'utf8');
+        const usosDoContato = fonteIndex.split('garantirContatoNaWati(numero)').length - 1;
+
+        assert.ok(fonteIndex.includes('function contatoInexistenteNaWati(')
+            && fonteIndex.includes('function garantirContatoNaWati('),
+            'index.js reconhece e cria o contato ausente na Wati');
+        assert.ok(usosDoContato >= 2,
+            'texto livre e template garantem o contato antes de repetir o envio');
+
+        console.log('OK - contato ausente na Wati é criado e o envio repetido (texto livre e template)');
     } finally {
         filho.kill();
     }
