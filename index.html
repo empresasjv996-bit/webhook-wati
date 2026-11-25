@@ -203,8 +203,12 @@
                             <span class="template-bar-dica">Enviar o template reengaja o cliente, mas o texto livre só volta quando ele responder.</span>
                         </div>
                         <div class="input-area">
+                            <input type="file" id="input-imagem-admin" accept="image/png,image/jpeg,image/webp" hidden
+                                   onchange="enviarImagemSelecionada(this)">
+                            <button type="button" class="btn-anexo" onclick="document.getElementById('input-imagem-admin').click()"
+                                    title="Enviar imagem" aria-label="Enviar imagem">&#128206;</button>
                             <input id="message" type="text" placeholder="Digite uma mensagem...">
-                            <button onclick="sendMessage()">➤</button>
+                            <button type="button" class="btn-enviar" onclick="sendMessage()">&#10148;</button>
                         </div>
                     </section>
                 </div>
@@ -888,6 +892,7 @@
                     <div class="screen-panel">
                         <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Usuários cadastrados</h3>
                         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Alterações de senha valem no próximo login.</p>
+                        <p class="resumo-equipe" id="resumo-equipe">Quem está com o painel aberto agora aparece como Online.</p>
 
                         <div class="table-container">
                             <table>
@@ -897,11 +902,12 @@
                                         <th>E-mail</th>
                                         <th>Perfil</th>
                                         <th>Status</th>
+                                        <th>Acesso</th>
                                         <th></th>
                                     </tr>
                                 </thead>
                                 <tbody id="tabela-usuarios">
-                                    <tr><td colspan="5" class="vazio">Carregando usuários...</td></tr>
+                                    <tr><td colspan="6" class="vazio">Carregando usuários...</td></tr>
                                 </tbody>
                             </table>
                         </div>

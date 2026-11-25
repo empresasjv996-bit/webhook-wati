@@ -76,8 +76,12 @@
                 </div>
 
                 <div class="input-area">
+                    <input type="file" id="input-imagem" accept="image/png,image/jpeg,image/webp" hidden
+                           onchange="enviarImagemSelecionada(this)">
+                    <button type="button" class="btn-anexo" onclick="document.getElementById('input-imagem').click()"
+                            title="Enviar imagem" aria-label="Enviar imagem">&#128206;</button>
                     <input type="text" id="input-mensagem" placeholder="Digite sua mensagem...">
-                    <button onclick="enviarMensagem()" title="Enviar" aria-label="Enviar">&#10148;</button>
+                    <button type="button" class="btn-enviar" onclick="enviarMensagem()" title="Enviar" aria-label="Enviar">&#10148;</button>
                 </div>
             </section>
 

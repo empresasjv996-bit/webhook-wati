@@ -61,6 +61,18 @@ function criarBancoPostgres() {
                 'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS origem TEXT',
                 'CREATE INDEX IF NOT EXISTS idx_mensagens_autor ON mensagens (autor_email)',
                 'CREATE INDEX IF NOT EXISTS idx_mensagens_campanha ON mensagens (campanha_id)',
+                // imagem enviada pelo painel (a foto em si fica na tabela midias)
+                'ALTER TABLE mensagens ADD COLUMN IF NOT EXISTS midia_id INTEGER',
+                `CREATE TABLE IF NOT EXISTS midias (
+                    id SERIAL PRIMARY KEY,
+                    telefone TEXT NOT NULL,
+                    mimetype TEXT NOT NULL,
+                    nome TEXT,
+                    tamanho INTEGER,
+                    dados BYTEA NOT NULL,
+                    criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+                'CREATE INDEX IF NOT EXISTS idx_midias_telefone ON midias (telefone)',
                 `CREATE TABLE IF NOT EXISTS listas (
                     id SERIAL PRIMARY KEY,
                     nome TEXT NOT NULL,
@@ -358,7 +370,7 @@ function criarBancoPostgres() {
 
         async listarMensagens(telefone) {
             const { rows } = await pool.query(
-                `SELECT id, direcao, texto, autor_email, autor_nome, campanha_id, origem, criado_em
+                `SELECT id, direcao, texto, autor_email, autor_nome, campanha_id, origem, midia_id, criado_em
                    FROM mensagens WHERE telefone = $1
                   ORDER BY criado_em ASC, id ASC LIMIT 300`,
                 [telefone]
@@ -370,8 +382,8 @@ function criarBancoPostgres() {
             const dados = extras || {};
             try {
                 await pool.query(
-                    `INSERT INTO mensagens (telefone, direcao, texto, autor_email, autor_nome, campanha_id, origem)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    `INSERT INTO mensagens (telefone, direcao, texto, autor_email, autor_nome, campanha_id, origem, midia_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
                     [
                         telefone,
                         direcao,
@@ -379,10 +391,30 @@ function criarBancoPostgres() {
                         dados.autorEmail || null,
                         dados.autorNome || null,
                         dados.campanhaId || null,
-                        dados.origem || null
+                        dados.origem || null,
+                        dados.midiaId || null
                     ]
                 );
             } catch (erro) { console.error('Erro ao salvar mensagem:', erro.message); }
+        },
+
+        /* Guarda a imagem enviada pelo painel. Fica no banco (BYTEA) para o
+           histórico continuar mostrando a foto em qualquer navegador. */
+        async salvarMidia({ telefone, mimetype, nome, dados }) {
+            const { rows } = await pool.query(
+                `INSERT INTO midias (telefone, mimetype, nome, tamanho, dados)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [telefone, mimetype, nome || null, (dados && dados.length) || 0, dados]
+            );
+            return rows[0] && rows[0].id;
+        },
+
+        async lerMidia(id) {
+            const { rows } = await pool.query(
+                'SELECT id, telefone, mimetype, nome, dados FROM midias WHERE id = $1',
+                [id]
+            );
+            return rows[0] || null;
         },
 
         async atualizarUltimaMensagem(telefone, texto) {
@@ -868,6 +900,7 @@ function criarBancoPostgres() {
                 await cliente.query('BEGIN');
 
                 const removidas = await cliente.query('DELETE FROM mensagens');
+                await cliente.query('DELETE FROM midias');
                 const atualizados = await cliente.query(
                     "UPDATE clientes SET mensagem = '' WHERE COALESCE(mensagem, '') <> ''"
                 );
@@ -926,6 +959,7 @@ function criarBancoPostgres() {
                 await cliente.query('BEGIN');
 
                 const mensagens = await cliente.query('DELETE FROM mensagens');
+                const midias = await cliente.query('DELETE FROM midias');
                 const clientes = await cliente.query('DELETE FROM clientes');
                 const listas = await cliente.query('DELETE FROM listas');
 
@@ -940,6 +974,7 @@ function criarBancoPostgres() {
 
                 return {
                     mensagensRemovidas: mensagens.rowCount,
+                    midiasRemovidas: midias.rowCount,
                     clientesRemovidos: clientes.rowCount,
                     listasRemovidas: listas.rowCount,
                     eventosRemovidos: eventos.rowCount
@@ -1009,6 +1044,7 @@ function criarBancoPostgres() {
 function criarBancoMemoria() {
     const clientes = new Map();
     const mensagens = [];
+    const midias = [];
     const listas = [];
     const usuarios = [
         { id: 1, email: 'admin@qgcteam.com', nome: 'Admin Master', role: 'admin', ativo: true, senha_hash: gerarHash('123456'), criado_em: new Date().toISOString() },
@@ -1021,6 +1057,7 @@ function criarBancoMemoria() {
     const eventosWati = [];
     const configuracoes = new Map();
     let mensagemId = 1;
+    let midiaId = 1;
     let listaId = 1;
     let usuarioId = 4;
     let campanhaId = 1;
@@ -1278,6 +1315,7 @@ function criarBancoMemoria() {
                     id: m.id, direcao: m.direcao, texto: m.texto,
                     autor_email: m.autor_email || null, autor_nome: m.autor_nome || null,
                     campanha_id: m.campanha_id || null, origem: m.origem || null,
+                    midia_id: m.midia_id || null,
                     criado_em: m.criado_em
                 }));
         },
@@ -1293,8 +1331,27 @@ function criarBancoMemoria() {
                 autor_nome: dados.autorNome || null,
                 campanha_id: dados.campanhaId || null,
                 origem: dados.origem || null,
+                midia_id: dados.midiaId || null,
                 criado_em: new Date().toISOString()
             });
+        },
+
+        async salvarMidia({ telefone, mimetype, nome, dados }) {
+            const id = midiaId++;
+            midias.push({
+                id,
+                telefone,
+                mimetype,
+                nome: nome || null,
+                tamanho: (dados && dados.length) || 0,
+                dados: Buffer.isBuffer(dados) ? Buffer.from(dados) : Buffer.from(dados || []),
+                criado_em: new Date().toISOString()
+            });
+            return id;
+        },
+
+        async lerMidia(id) {
+            return midias.find((m) => String(m.id) === String(id)) || null;
         },
 
         async atualizarUltimaMensagem(telefone, texto) {
@@ -1781,6 +1838,7 @@ function criarBancoMemoria() {
         async limparConversas({ incluirEventosWati = true } = {}) {
             const removidas = mensagens.length;
             mensagens.length = 0;
+            midias.length = 0;
 
             let clientesAtualizados = 0;
             clientes.forEach((c) => {
@@ -1820,6 +1878,8 @@ function criarBancoMemoria() {
         async limparDados({ incluirEventosWati = true } = {}) {
             const mensagensRemovidas = mensagens.length;
             mensagens.length = 0;
+            const midiasRemovidas = midias.length;
+            midias.length = 0;
 
             const clientesRemovidos = clientes.size;
             clientes.clear();
@@ -1837,7 +1897,7 @@ function criarBancoMemoria() {
                 }
             }
 
-            return { mensagensRemovidas, clientesRemovidos, listasRemovidas, eventosRemovidos };
+            return { mensagensRemovidas, midiasRemovidas, clientesRemovidos, listasRemovidas, eventosRemovidos };
         },
 
         async registrarAuditoria(ator, acao, detalhe) {

@@ -272,6 +272,20 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .input-area > button { background: var(--green); border: none; width: 44px; height: 44px; border-radius: 50%; font-size: 1rem; cursor: pointer; color: #000; display: flex; justify-content: center; align-items: center; transition: 0.2s; }
 .input-area > button:hover { box-shadow: 0 0 15px var(--green-glow); }
 .input-area > button:disabled { opacity: 0.5; cursor: not-allowed; }
+.input-area .btn-anexo { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.input-area .btn-anexo:hover,
+.input-area .btn-anexo:focus { color: var(--green); border-color: var(--green); box-shadow: none; }
+
+/* Foto enviada pelo painel aparece na bolha da conversa */
+.message .mensagem-imagem { display: block; width: 100%; max-width: 240px; height: auto; border-radius: 12px; margin-bottom: 6px; border: 1px solid var(--border); }
+
+/* Quem está online agora (tela Usuários) */
+.resumo-equipe { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px; }
+.resumo-equipe strong { color: var(--green); }
+.presenca { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.presenca.online { color: var(--green); border-color: rgba(0, 255, 128, 0.4); background: rgba(0, 255, 128, 0.08); }
+.presenca.offline { color: var(--text-muted); }
+.presenca small { font-weight: 400; opacity: 0.75; }
 
 /* =========================================================
    FICHA DO CLIENTE (DRAWER LATERAL)

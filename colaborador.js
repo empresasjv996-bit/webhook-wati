@@ -353,7 +353,10 @@
             mensagens.forEach((msg) => {
                 const bolha = document.createElement('div');
                 bolha.className = 'message ' + (msg.direcao === 'enviada' ? 'sent' : 'received');
-                bolha.innerHTML = '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(rotuloMensagem(msg)) + '</span>';
+                const imagem = msg.midia_id
+                    ? '<img class="mensagem-imagem" src="/api/midias/' + encodeURIComponent(msg.midia_id) + '" alt="Imagem enviada" loading="lazy">'
+                    : '';
+                bolha.innerHTML = imagem + '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(rotuloMensagem(msg)) + '</span>';
                 area.appendChild(bolha);
             });
 
@@ -591,7 +594,7 @@
         const texto = input.value.trim();
         if (!texto) return;
 
-        const botao = document.querySelector('.input-area button');
+        const botao = document.querySelector('.input-area .btn-enviar');
         if (botao) botao.disabled = true;
 
         let pedirTemplate = false;
@@ -625,6 +628,81 @@
         } finally {
             if (botao) botao.disabled = false;
             const foco = pedirTemplate ? $('select-template') : input;
+            if (foco) foco.focus();
+        }
+    }
+
+    /* ---------- Enviar imagem ----------
+       O arquivo vai cru para o servidor (Content-Type = tipo da imagem)
+       com o telefone na query. O texto digitado vira a legenda da foto. */
+    const LIMITE_IMAGEM_MB = 5;
+
+    async function enviarImagemSelecionada(campo) {
+        const arquivo = campo && campo.files && campo.files[0];
+        if (!arquivo) return;
+
+        const limparCampo = () => { if (campo) campo.value = ''; };
+
+        if (!clienteAtivo) {
+            limparCampo();
+            alert('Abra uma conversa antes de enviar a imagem.');
+            return;
+        }
+
+        if (!/^image\/(jpeg|png|webp)$/i.test(arquivo.type || '')) {
+            limparCampo();
+            alert('Formato não aceito. Envie uma foto JPG, PNG ou WEBP.');
+            return;
+        }
+
+        if (arquivo.size > LIMITE_IMAGEM_MB * 1024 * 1024) {
+            limparCampo();
+            alert('A imagem passa de ' + LIMITE_IMAGEM_MB + ' MB. Reduza a foto antes de enviar.');
+            return;
+        }
+
+        const campoTexto = $('input-mensagem');
+        const legenda = campoTexto ? campoTexto.value.trim() : '';
+        const telefone = clienteAtivo.telefone;
+        const botao = document.querySelector('.input-area .btn-enviar');
+        if (botao) botao.disabled = true;
+
+        let pedirTemplate = false;
+
+        try {
+            const parametros = new URLSearchParams({ telefone });
+            if (legenda) parametros.set('legenda', legenda);
+            if (arquivo.name) parametros.set('nome', arquivo.name);
+
+            const resposta = await fetch('/api/enviar-imagem?' + parametros.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': arquivo.type },
+                body: arquivo
+            });
+
+            const dados = await resposta.json().catch(() => ({}));
+            if (!resposta.ok || dados.success === false) {
+                const erro = new Error(mensagemDoErro(dados, 'A Wati recusou o envio da imagem.'));
+                erro.janelaFechada = Boolean(dados.janelaFechada);
+                throw erro;
+            }
+
+            if (campoTexto) campoTexto.value = '';
+            await carregarMensagens(telefone, true);
+            await carregarClientes(true, true);
+        } catch (erro) {
+            // Ticket vencido: a foto também só passa com o cliente respondendo.
+            if (erro && erro.janelaFechada) {
+                avisarTicketVencido(mensagemDoErro(erro, ''));
+                await carregarTemplatesReabertura();
+                pedirTemplate = true;
+            } else {
+                alert(mensagemDoErro(erro, 'Erro ao enviar a imagem.'));
+            }
+        } finally {
+            limparCampo();
+            if (botao) botao.disabled = false;
+            const foco = pedirTemplate ? $('select-template') : campoTexto;
             if (foco) foco.focus();
         }
     }
@@ -689,9 +767,38 @@
         });
     }
 
+    /* ---------- Presença: o admin vê quem está online ----------
+       Um sinal a cada 30s enquanto a aba está visível. Ao esconder a
+       aba avisa na hora que saiu; sem sinal por 90s o admin já mostra
+       offline (a janela é do servidor). */
+    const INTERVALO_PRESENCA_MS = 30000;
+    let timerPresenca = null;
+
+    function sinalDePresenca(ativo) {
+        fetch('/api/presenca', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ativo: ativo !== false }),
+            keepalive: ativo === false
+        }).catch(() => { /* sem rede: o admin mostra offline após a janela */ });
+    }
+
+    function iniciarPresenca() {
+        sinalDePresenca(true);
+
+        if (timerPresenca) clearInterval(timerPresenca);
+        timerPresenca = setInterval(() => {
+            if (document.hidden) return;
+            sinalDePresenca(true);
+        }, INTERVALO_PRESENCA_MS);
+
+        document.addEventListener('visibilitychange', () => sinalDePresenca(!document.hidden));
+    }
+
     function iniciar() {
         // Funções chamadas pelos onclick do HTML
         window.enviarMensagem = enviarMensagem;
+        window.enviarImagemSelecionada = enviarImagemSelecionada;
         window.finalizarAtendimento = finalizarAtendimento;
         window.enviarTemplateReabertura = enviarTemplateReabertura;
 
@@ -728,6 +835,7 @@
         carregarUsuario();
         carregarClientes(false);
         carregarTemplatesReabertura();
+        iniciarPresenca();
 
         // Atualização periódica (o SSE é restrito ao admin)
         setInterval(async () => {

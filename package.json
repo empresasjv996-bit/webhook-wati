@@ -11,7 +11,7 @@
     "verificar": "node verificar-numeros.js",
     "capturar": "node capturar-api.js",
     "mapear": "node mapear-tela.js",
-    "test:e2e": "node test-listas-variaveis-e2e.js && node test-reabertura-template-e2e.js && node test-painel-filas-e2e.js",
+    "test:e2e": "node test-listas-variaveis-e2e.js && node test-reabertura-template-e2e.js && node test-painel-filas-e2e.js && node test-imagem-presenca-e2e.js",
     "postinstall": "prisma skills sync || exit 0"
   },
   "keywords": [],

@@ -166,7 +166,7 @@ function irPara(view) {
     if (view === 'wati') iniciarAtividadeWati();
     if (view === 'logs') carregarLogs();
     if (view === 'auditoria') carregarAuditoria();
-    if (view === 'usuarios') carregarUsuarios();
+    if (view === 'usuarios') { carregarUsuarios(); iniciarAtualizacaoUsuarios(); }
 
     const conteudo = document.querySelector('.content');
     if (conteudo) conteudo.scrollTop = 0;
@@ -661,7 +661,10 @@ async function carregarMensagens(telefone) {
             const bolha = document.createElement('div');
             bolha.className = 'message ' + (msg.direcao === 'enviada' ? 'sent' : 'received');
             const legenda = [rotuloAutor(msg), formatarData(msg.criado_em)].filter(Boolean).join(' · ');
-            bolha.innerHTML = '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(legenda) + '</span>';
+            const imagem = msg.midia_id
+                ? '<img class="mensagem-imagem" src="/api/midias/' + encodeURIComponent(msg.midia_id) + '" alt="Imagem enviada" loading="lazy">'
+                : '';
+            bolha.innerHTML = imagem + '<p>' + escaparHtml(msg.texto) + '</p><span>' + escaparHtml(legenda) + '</span>';
             area.appendChild(bolha);
         });
 
@@ -711,7 +714,7 @@ async function enviarMensagem() {
     const texto = input.value.trim();
     if (!texto) return;
 
-    const botao = document.querySelector('.input-area button');
+    const botao = document.querySelector('.input-area .btn-enviar');
     if (botao) botao.disabled = true;
 
     try {
@@ -747,6 +750,80 @@ async function enviarMensagem() {
 }
 
 const sendMessage = enviarMensagem;
+
+/* ---------------------------------------------------------
+   ENVIAR IMAGEM (chat do admin)
+   Mesma rota do painel do colaborador: o arquivo vai cru, com
+   o telefone na query, e o texto digitado vira a legenda.
+   --------------------------------------------------------- */
+const LIMITE_IMAGEM_MB = 5;
+
+async function enviarImagemSelecionada(campo) {
+    const arquivo = campo && campo.files && campo.files[0];
+    if (!arquivo) return;
+
+    const limparCampo = () => { if (campo) campo.value = ''; };
+
+    if (!clienteAtivo) {
+        limparCampo();
+        toast('Selecione um contato primeiro.', 'erro');
+        return;
+    }
+
+    if (!/^image\/(jpeg|png|webp)$/i.test(arquivo.type || '')) {
+        limparCampo();
+        toast('Formato não aceito. Envie uma foto JPG, PNG ou WEBP.', 'erro');
+        return;
+    }
+
+    if (arquivo.size > LIMITE_IMAGEM_MB * 1024 * 1024) {
+        limparCampo();
+        toast('A imagem passa de ' + LIMITE_IMAGEM_MB + ' MB. Reduza a foto antes de enviar.', 'erro');
+        return;
+    }
+
+    const telefone = clienteAtivo.telefone;
+    const input = $('message');
+    const legenda = input ? input.value.trim() : '';
+    const botao = document.querySelector('.input-area .btn-enviar');
+    if (botao) botao.disabled = true;
+
+    try {
+        const parametros = new URLSearchParams({ telefone });
+        if (legenda) parametros.set('legenda', legenda);
+        if (arquivo.name) parametros.set('nome', arquivo.name);
+
+        const resposta = await fetch('/api/enviar-imagem?' + parametros.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': arquivo.type },
+            body: arquivo
+        });
+
+        const dados = await resposta.json().catch(() => ({}));
+
+        if (resposta.ok && dados.success !== false) {
+            if (input) input.value = '';
+            await carregarMensagens(telefone);
+            carregarConversas(true);
+        } else {
+            const motivo = mensagemDoErro(dados, 'A Wati recusou o envio da imagem.');
+            if (dados.janelaFechada) {
+                avisarTicketVencido(motivo);
+                const select = $('select-template');
+                if (select) select.focus();
+            } else {
+                toast(motivo, 'erro');
+            }
+        }
+    } catch (erro) {
+        console.error('Erro ao enviar imagem:', erro);
+        toast('Erro de conexão ao enviar a imagem.', 'erro');
+    } finally {
+        limparCampo();
+        if (botao) botao.disabled = false;
+        if (input) input.focus();
+    }
+}
 
 /* =========================================================
    REABRIR O TICKET COM TEMPLATE APROVADO
@@ -2574,8 +2651,10 @@ function conectarSSE() {
             notificarDesktop(dados.nome || formatarTelefone(dados.telefone), dados.texto || 'Nova mensagem');
         }
 
-        if (ehConversaAtiva && !jaMostradaNaTela(dados.texto)) {
-            adicionarMensagemNaTela(dados.direcao, dados.texto);
+        if (ehConversaAtiva) {
+            // Imagem: recarrega o histórico para aparecer a foto (não só o texto).
+            if (dados.midiaId) carregarMensagens(dados.telefone);
+            else if (!jaMostradaNaTela(dados.texto)) adicionarMensagemNaTela(dados.direcao, dados.texto);
         }
 
         carregarConversas(true);
@@ -2640,6 +2719,7 @@ function iniciarPainel() {
     ligarMenuAgrupado();
     conectarSSE();
     carregarTemplatesReabertura();
+    iniciarPresencaPainel();
 
     const campoMensagem = $('message');
     if (campoMensagem) {
@@ -3571,11 +3651,13 @@ async function carregarUsuarios() {
 
         const usuarios = await resposta.json();
         if (!Array.isArray(usuarios) || !usuarios.length) {
-            corpo.innerHTML = '<tr><td colspan="5" class="vazio">Nenhum usuário cadastrado.</td></tr>';
+            corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum usuário cadastrado.</td></tr>';
+            atualizarResumoEquipe([]);
             return;
         }
 
         corpo.innerHTML = '';
+        atualizarResumoEquipe(usuarios);
 
         usuarios.forEach((usuario) => {
             const linha = document.createElement('tr');
@@ -3586,11 +3668,12 @@ async function carregarUsuarios() {
                 <td>${escaparHtml(usuario.email || '-')}</td>
                 <td>${usuario.role === 'admin' ? 'Administrador' : 'Colaborador'}</td>
                 <td><span class="mini-badge ${ativo ? 'status-vendido' : 'status-nao-quis'}">${ativo ? 'Ativo' : 'Inativo'}</span></td>
+                <td>${etiquetaPresenca(usuario)}</td>
                 <td>
                     <div class="actions-cell">
-                        <button class="btn-mini" data-acao="status">${ativo ? 'Desativar' : 'Ativar'}</button>
-                        <button class="btn-mini" data-acao="senha">Nova senha</button>
-                        <button class="btn-mini" data-acao="excluir">🗑️</button>
+                        <button class="btn-mini" data-acao="status" type="button">${ativo ? 'Desativar' : 'Ativar'}</button>
+                        <button class="btn-mini" data-acao="senha" type="button">Nova senha</button>
+                        <button class="btn-mini" data-acao="excluir" type="button">🗑️</button>
                     </div>
                 </td>`;
 
@@ -3602,8 +3685,98 @@ async function carregarUsuarios() {
             corpo.appendChild(linha);
         });
     } catch (erro) {
-        corpo.innerHTML = '<tr><td colspan="5" class="vazio">Erro ao carregar usuários.</td></tr>';
+        corpo.innerHTML = '<tr><td colspan="6" class="vazio">Erro ao carregar usuários.</td></tr>';
     }
+}
+
+/* ---------------------------------------------------------
+   QUEM ESTÁ ONLINE (presença)
+   O servidor marca online quem deu sinal nos últimos 90s. O
+   painel manda um sinal a cada 30s e recarrega a tabela a
+   cada 20s enquanto a tela Usuários está aberta.
+   --------------------------------------------------------- */
+const INTERVALO_SINAL_MS = 30000;
+
+let timerSinalPresenca = null;
+let timerTabelaUsuarios = null;
+
+function tempoRelativo(valor) {
+    const data = new Date(valor);
+    if (isNaN(data.getTime())) return '';
+
+    const minutos = Math.floor((Date.now() - data.getTime()) / 60000);
+    if (minutos <= 0) return 'agora';
+    if (minutos === 1) return 'há 1 min';
+    if (minutos < 60) return 'há ' + minutos + ' min';
+
+    const horas = Math.floor(minutos / 60);
+    if (horas === 1) return 'há 1 h';
+    if (horas < 24) return 'há ' + horas + ' h';
+
+    return 'há ' + Math.floor(horas / 24) + ' d';
+}
+
+function etiquetaPresenca(usuario) {
+    if (usuario.online) {
+        const desde = usuario.desde ? ' <small>' + escaparHtml(formatarData(usuario.desde)) + '</small>' : '';
+        return '<span class="presenca online">● Online' + desde + '</span>';
+    }
+
+    const quando = usuario.ultimoSinal ? ' <small>' + escaparHtml(tempoRelativo(usuario.ultimoSinal)) + '</small>' : '';
+    return '<span class="presenca offline">○ Offline' + quando + '</span>';
+}
+
+function atualizarResumoEquipe(usuarios) {
+    const resumo = $('resumo-equipe');
+    if (!resumo) return;
+
+    const total = Array.isArray(usuarios) ? usuarios.length : 0;
+    const online = (usuarios || []).filter((usuario) => usuario.online).length;
+
+    if (!total) {
+        resumo.textContent = 'Nenhum usuário cadastrado.';
+        return;
+    }
+
+    if (!online) {
+        resumo.innerHTML = 'Nenhum colaborador com o painel aberto agora.';
+        return;
+    }
+
+    resumo.innerHTML = '<strong>' + online + '</strong> de ' + total + ' com o painel aberto agora.';
+}
+
+function enviarSinalPresenca(ativo) {
+    fetch('/api/presenca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ativo: ativo !== false }),
+        keepalive: ativo === false
+    }).catch(() => { /* sem rede: o servidor mostra offline após 90s */ });
+}
+
+function iniciarPresencaPainel() {
+    enviarSinalPresenca(true);
+
+    clearInterval(timerSinalPresenca);
+    timerSinalPresenca = setInterval(() => {
+        if (document.hidden) return;
+        enviarSinalPresenca(true);
+    }, INTERVALO_SINAL_MS);
+
+    document.addEventListener('visibilitychange', () => enviarSinalPresenca(!document.hidden));
+}
+
+/* Atualiza a tabela de usuários sozinha enquanto a tela estiver aberta.
+   O próprio intervalo confere se a tela Usuários está visível. */
+function iniciarAtualizacaoUsuarios() {
+    clearInterval(timerTabelaUsuarios);
+    timerTabelaUsuarios = setInterval(() => {
+        if (document.hidden) return;
+
+        const visao = $('view-usuarios');
+        if (visao && !visao.classList.contains('oculto')) carregarUsuarios();
+    }, 20000);
 }
 
 async function criarUsuario(botao) {

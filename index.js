@@ -83,6 +83,76 @@ app.use('/api', (req, res, next) => {
     });
 });
 
+/* ---------------------------------------------------------
+   QUEM ESTÁ ONLINE AGORA (painel do admin)
+   O painel manda um sinal a cada 30s enquanto a aba está
+   visível; sem sinal por 90s o usuário aparece como offline.
+   O controle fica na memória do processo (o painel roda em
+   uma instância só no Render).
+   --------------------------------------------------------- */
+const PRESENCA_JANELA_MS = 90 * 1000;
+const presencas = new Map();
+
+function chavePresenca(usuario) {
+    const email = typeof usuario === 'string' ? usuario : (usuario && usuario.email);
+    return String(email || '').trim().toLowerCase();
+}
+
+function marcarPresenca(usuario) {
+    const chave = chavePresenca(usuario);
+    if (!chave) return null;
+
+    const agora = Date.now();
+    const atual = presencas.get(chave) || {};
+    const registro = {
+        email: chave,
+        nome: (usuario && usuario.nome) || atual.nome || chave,
+        role: (usuario && usuario.role) || atual.role || 'colaborador',
+        desde: atual.desde || agora,
+        ultimoSinal: agora,
+        ausente: false
+    };
+
+    presencas.set(chave, registro);
+    return registro;
+}
+
+/* A aba foi escondida ou o usuário saiu: fica offline na hora, mas guarda
+   quando foi visto pela última vez (o admin mostra "visto há X min"). */
+function marcarAusente(usuario) {
+    const chave = chavePresenca(usuario);
+    const atual = presencas.get(chave);
+    if (!chave || !atual) return null;
+
+    const registro = Object.assign({}, atual, { ausente: true, ultimoSinal: Date.now() });
+    presencas.set(chave, registro);
+    return registro;
+}
+
+/* Online = deu sinal (login, heartbeat) nos últimos 90s e não avisou que saiu. */
+function presencaDoUsuario(usuario) {
+    const registro = presencas.get(chavePresenca(usuario));
+    if (!registro) return { online: false, desde: null, ultimoSinal: null };
+
+    return {
+        online: !registro.ausente && (Date.now() - registro.ultimoSinal <= PRESENCA_JANELA_MS),
+        desde: new Date(registro.desde).toISOString(),
+        ultimoSinal: new Date(registro.ultimoSinal).toISOString()
+    };
+}
+
+/* Lê a sessão do cookie mesmo em rotas abertas (ex.: /api/logout). */
+function usuarioDoCookie(req) {
+    const token = req.cookies && req.cookies.qgc_token;
+    if (!token) return null;
+
+    try {
+        return jwt.verify(token, JWT_SECRET);
+    } catch (erro) {
+        return null;
+    }
+}
+
 const PORT = process.env.PORT || 3000;
 
 // ---------------------------------------------------------
@@ -284,14 +354,45 @@ app.post('/api/login', async (req, res) => {
 
     const token = jwt.sign({ email: emailLimpo, role, nome }, JWT_SECRET, { expiresIn: '8h' });
     res.cookie('qgc_token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+    marcarPresenca({ email: emailLimpo, role, nome });
     await banco.registrarAuditoria(nome, 'login', emailLimpo);
     return res.json({ success: true, role, nome });
 });
 
 app.post('/api/logout', async (req, res) => {
-    if (req.user && req.user.nome) await banco.registrarAuditoria(req.user.nome, 'logout', req.user.email);
+    /* /api/logout é rota aberta (o guard não preenche req.user), então a
+       sessão é lida direto do cookie para marcar o usuário como offline. */
+    const sessao = req.user || usuarioDoCookie(req);
+
+    if (sessao) {
+        marcarAusente(sessao);
+        try { await banco.registrarAuditoria(sessao.nome, 'logout', sessao.email); } catch (erro) { /* auditoria é opcional */ }
+    }
+
     res.clearCookie('qgc_token');
     res.redirect('/login');
+});
+
+/* Sinal de presença do painel (colaborador e admin). O front chama a cada
+   30s enquanto a aba está visível; { ativo: false } marca como offline. */
+app.post('/api/presenca', (req, res) => {
+    if (!req.user) {
+        return res.status(401).json({ success: false, online: false, message: 'Sessão expirada. Faça login novamente.' });
+    }
+
+    if (req.body && req.body.ativo === false) {
+        marcarAusente(req.user);
+        return res.json({ success: true, online: false, janela: PRESENCA_JANELA_MS });
+    }
+
+    const registro = marcarPresenca(req.user);
+    return res.json({
+        success: true,
+        online: true,
+        nome: registro.nome,
+        desde: new Date(registro.desde).toISOString(),
+        janela: PRESENCA_JANELA_MS
+    });
 });
 
 function verificarToken(rolePermitida) {
@@ -2242,6 +2343,234 @@ app.post('/api/enviar-mensagem', async (req, res) => {
 });
 
 /* ---------------------------------------------------------
+   ENVIAR IMAGEM PELO CHAT (colaborador e admin)
+   O navegador manda os bytes crus (Content-Type = tipo da
+   imagem) e o servidor repassa à Wati em multipart
+   (/api/v1/sendSessionFile). Não precisa hospedar a foto em
+   lugar nenhum: a Wati guarda e entrega no WhatsApp.
+   A foto também fica no banco (tabela midias) para aparecer
+   no histórico da conversa.
+   --------------------------------------------------------- */
+const EXTENSAO_IMAGEM = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+const TIPOS_IMAGEM = new Set(Object.keys(EXTENSAO_IMAGEM));
+const LIMITE_IMAGEM_BYTES = 5 * 1024 * 1024;
+
+async function enviarImagemViaWati(telefone, { dados, mimetype, nome, legenda }) {
+    if (banco.modoDemo) return { ok: true, demo: true };
+
+    if (!watiConfigurada()) {
+        console.error('WATI_TOKEN ou WATI_NUMERO não configurados no Render!');
+        return { ok: false, message: 'API da Wati não configurada no servidor.' };
+    }
+
+    const numero = String(telefone || '').replace(/\D/g, '') || String(telefone || '').trim();
+
+    const parametros = new URLSearchParams();
+    if (legenda) parametros.set('caption', String(legenda).substring(0, 1000));
+    const consulta = parametros.toString();
+    const url = `${watiBase()}/api/v1/sendSessionFile/${encodeURIComponent(numero)}${consulta ? '?' + consulta : ''}`;
+
+    const nomeArquivo = nome || ('imagem' + (EXTENSAO_IMAGEM[mimetype] || '.jpg'));
+
+    /* Mesma lógica do texto: repete em 429/5xx e confere o corpo da resposta. */
+    const tentarEnvio = async () => {
+        let resposta = null;
+        let corpo = '';
+        let recebido = {};
+
+        for (let tentativa = 1; tentativa <= 2; tentativa++) {
+            try {
+                const formulario = new FormData();
+                formulario.append('file', new Blob([dados], { type: mimetype }), nomeArquivo);
+
+                resposta = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${WATI_TOKEN}` },
+                    body: formulario
+                });
+            } catch (erro) {
+                console.error('Erro ao chamar a API da Wati (imagem):', erro.message);
+                return { ok: false, conexao: true, message: 'Erro de conexão com a Wati.' };
+            }
+
+            corpo = await resposta.text();
+            recebido = {};
+            try { recebido = corpo ? JSON.parse(corpo) : {}; } catch (erro) { recebido = { message: corpo }; }
+
+            const recusado = recebido.result === false || recebido.success === false;
+            if (resposta.ok && !recusado) return { ok: true };
+
+            if ((resposta.status === 429 || resposta.status >= 500) && tentativa === 1) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                continue;
+            }
+
+            break;
+        }
+
+        const motivo = (achatarErroWati(recebido && recebido.message)
+            || achatarErroWati(recebido && recebido.info)
+            || achatarErroWati(recebido && recebido.error)
+            || achatarErroWati(recebido && recebido.errors)
+            || '').substring(0, 300) || `HTTP ${resposta.status}`;
+
+        console.error(`Wati recusou a imagem para ${numero} (HTTP ${resposta.status}):`, String(corpo).substring(0, 600));
+        return { ok: false, status: resposta.status, motivo };
+    };
+
+    try {
+        let resultado = await tentarEnvio();
+
+        if (resultado.conexao) return { ok: false, message: resultado.message };
+
+        // Contato fora da conta da Wati: cria e tenta mais uma vez.
+        if (!resultado.ok && contatoInexistenteNaWati(resultado.motivo)) {
+            const criacao = await garantirContatoNaWati(numero);
+
+            if (criacao.ok) {
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                resultado = await tentarEnvio();
+                if (resultado.conexao) return { ok: false, message: resultado.message };
+            } else {
+                resultado.criacao = criacao;
+            }
+        }
+
+        if (resultado.ok) return { ok: true };
+
+        const fechada = erroJanelaFechada(resultado.motivo);
+        const motivoLimpo = String(resultado.motivo || '').replace(/[\s.;]+$/, '') || `HTTP ${resultado.status}`;
+
+        const mensagem = (resultado.criacao && !resultado.criacao.ok)
+            ? `A Wati não encontrou o contato ${numero} e não conseguiu criá-lo (${motivoLimpo}). Confira se o número tem WhatsApp.`
+            : `A Wati recusou o envio da imagem (HTTP ${resultado.status}): ${motivoLimpo}.`;
+
+        return { ok: false, message: mensagem + (fechada ? ` ${ORIENTACAO_JANELA_FECHADA}` : ''), janelaFechada: fechada };
+    } catch (erro) {
+        console.error('Erro ao chamar a API da Wati (imagem):', erro.message);
+        return { ok: false, message: 'Erro de conexão com a Wati.' };
+    }
+}
+
+/* ---------------------------------------------------------
+   ROTAS DA IMAGEM: envio pelo chat e leitura do histórico
+   --------------------------------------------------------- */
+/* Lê o corpo cru da imagem (sem base64: o arquivo vai como veio do navegador). */
+const parserImagem = express.raw({
+    type: Array.from(TIPOS_IMAGEM),
+    limit: LIMITE_IMAGEM_BYTES
+});
+
+app.post('/api/enviar-imagem', (req, res, next) => {
+    parserImagem(req, res, (erro) => {
+        if (!erro) return next();
+
+        const grande = erro && (erro.type === 'entity.too.large' || erro.status === 413);
+        return res.status(grande ? 413 : 400).json({
+            success: false,
+            message: grande
+                ? 'A imagem passa de 5 MB. Reduza a foto antes de enviar.'
+                : 'Formato de imagem não aceito. Use JPG, PNG ou WEBP.'
+        });
+    });
+}, async (req, res) => {
+    const telefone = String((req.query && req.query.telefone) || '').trim();
+    const legenda = String((req.query && req.query.legenda) || '').trim().substring(0, 1000);
+    const mimetype = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const nomeArquivo = String((req.query && req.query.nome) || '').trim().substring(0, 120)
+        || ('imagem' + (EXTENSAO_IMAGEM[mimetype] || '.jpg'));
+    const dados = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+    if (!telefone) {
+        return res.status(400).json({ success: false, message: 'Escolha a conversa antes de enviar a imagem.' });
+    }
+    if (!TIPOS_IMAGEM.has(mimetype)) {
+        return res.status(415).json({ success: false, message: 'Formato de imagem não aceito. Use JPG, PNG ou WEBP.' });
+    }
+    if (!dados.length) {
+        return res.status(400).json({ success: false, message: 'Selecione uma imagem para enviar.' });
+    }
+
+    const ator = req.user && req.user.nome;
+
+    try {
+        const acesso = await verificarDonoDoCliente(req, telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+    } catch (erro) {
+        console.error('Erro ao validar o dono do contato:', erro.message);
+        return res.status(500).json({ success: false, message: 'Erro ao validar o contato.' });
+    }
+
+    const resultado = await enviarImagemViaWati(telefone, { dados, mimetype, nome: nomeArquivo, legenda });
+
+    if (!resultado.ok) {
+        await banco.registrarAuditoria(ator, 'envio de imagem falhou', `${telefone}: ${resultado.message}`);
+        console.warn(`Imagem para ${telefone} recusada: ${resultado.message}`);
+
+        const naoConfigurada = String(resultado.message || '').includes('não configurada');
+        return res.status(naoConfigurada ? 500 : 502).json({
+            success: false,
+            message: resultado.message,
+            janelaFechada: !!resultado.janelaFechada
+        });
+    }
+
+    const texto = legenda || '📷 Imagem';
+    let midiaId = null;
+
+    try {
+        midiaId = await banco.salvarMidia({ telefone, mimetype, nome: nomeArquivo, dados });
+        await banco.atualizarUltimaMensagem(telefone, legenda ? `Você: 📷 ${legenda}` : 'Você: 📷 imagem');
+        await banco.registrarMensagem(telefone, 'enviada', texto, {
+            autorEmail: req.user && req.user.email,
+            autorNome: req.user && req.user.nome,
+            origem: 'painel',
+            midiaId
+        });
+        emitirEvento('mensagem', { telefone, direcao: 'enviada', texto, midiaId });
+        await banco.registrarAuditoria(ator, 'imagem enviada', telefone);
+    } catch (erro) {
+        console.error('Erro ao salvar a imagem enviada:', erro.message);
+        return res.json({
+            success: true,
+            demo: !!resultado.demo,
+            midiaId,
+            aviso: 'Enviada, mas o histórico não foi salvo.'
+        });
+    }
+
+    if (resultado.demo) console.log(`[DEMO] Imagem simulada -> ${telefone} (${mimetype}, ${dados.length} bytes)`);
+    return res.json({ success: true, demo: !!resultado.demo, midiaId, texto });
+});
+
+/* Mostra a foto do histórico. Só quem enxerga a conversa (admin ou o
+   colaborador dono do lead) consegue abrir a imagem. */
+app.get('/api/midias/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ success: false, message: 'Imagem inválida.' });
+    }
+
+    try {
+        const midia = await banco.lerMidia(id);
+        if (!midia) return res.status(404).json({ success: false, message: 'Imagem não encontrada.' });
+
+        const acesso = await verificarDonoDoCliente(req, midia.telefone);
+        if (!acesso.ok) return responderAcessoNegado(res, acesso);
+
+        res.set({
+            'Content-Type': midia.mimetype || 'application/octet-stream',
+            'Cache-Control': 'private, max-age=86400',
+            'Content-Disposition': 'inline'
+        });
+        return res.send(midia.dados);
+    } catch (erro) {
+        console.error('Erro ao abrir a imagem:', erro.message);
+        return res.status(500).json({ success: false, message: 'Erro ao abrir a imagem.' });
+    }
+});
+
+/* ---------------------------------------------------------
    REABRIR O TICKET COM TEMPLATE
    Depois de 24h sem mensagem do cliente a Wati recusa texto
    livre ("Ticket has been expired"). Um template aprovado
@@ -2415,7 +2744,9 @@ app.post('/api/finalizar', async (req, res) => {
 // ---------------------------------------------------------
 app.get('/api/usuarios', exigirAdmin, async (req, res) => {
     try {
-        res.json(await banco.listarUsuarios());
+        const usuarios = await banco.listarUsuarios();
+        /* online/desde/ultimoSinal vêm da memória (quem está com o painel aberto). */
+        res.json(usuarios.map((usuario) => Object.assign({}, usuario, presencaDoUsuario(usuario))));
     } catch (erro) {
         console.error('Erro ao listar usuários:', erro.message);
         res.status(500).json({ success: false, message: 'Erro ao listar usuários.' });
