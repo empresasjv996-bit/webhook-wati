@@ -568,12 +568,28 @@ function descreverErroWati(resposta) {
     return achatarErroWati(resposta.texto) || 'falha de conexão';
 }
 
+/* A Wati responde 200 com `message` = objeto da mensagem criada
+   ({ whatsappMessageId, localMessageId, text, ... }) — às vezes SEM result:true.
+   Nesse caso o envio já saiu; tratar como erro só fazia o atendente reenviar e
+   duplicar a mensagem no WhatsApp do cliente. */
+function mensagemCriadaNaWati(dados) {
+    if (!dados || typeof dados !== 'object' || Array.isArray(dados)) return false;
+    if (dados.result === true || dados.success === true) return true;
+
+    const mensagem = dados.message;
+    if (!mensagem || typeof mensagem !== 'object' || Array.isArray(mensagem)) return false;
+
+    return !!(mensagem.whatsappMessageId || mensagem.localMessageId);
+}
+
 /* A Wati às vezes responde 200 com result:false — não dá para confiar só no HTTP. */
 function watiSucesso(resposta) {
     if (!resposta || !resposta.ok) return false;
 
     const dados = resposta.dados;
     if (dados && typeof dados === 'object') {
+        if (dados.result === true || dados.success === true) return true;
+        if (mensagemCriadaNaWati(dados)) return true;
         if (dados.result === false || dados.success === false) return false;
         if (Array.isArray(dados.errors) && dados.errors.length) return false;
         if (Array.isArray(dados.contact_list) && dados.contact_list.some((item) => item && item.result === false)) return false;
@@ -2096,7 +2112,15 @@ async function enviarViaWati(telefone, texto) {
             dados = {};
             try { dados = corpo ? JSON.parse(corpo) : {}; } catch (erro) { dados = { message: corpo }; }
 
-            if (resposta.ok && dados && (dados.result === true || dados.success === true)) return { ok: true };
+            if (resposta.ok && mensagemCriadaNaWati(dados)) {
+                /* A Wati criou a mensagem (tem whatsappMessageId), mas nem sempre
+                   manda result:true. Loga o corpo cru para conferência. */
+                if (dados.result !== true && dados.success !== true) {
+                    console.warn(`Wati aceitou o envio para ${numero} sem result:true (HTTP ${resposta.status}):`, String(corpo).substring(0, 600));
+                }
+
+                return { ok: true };
+            }
 
             if ((resposta.status === 429 || resposta.status >= 500) && tentativa === 1) {
                 await new Promise((resolve) => setTimeout(resolve, 1500));

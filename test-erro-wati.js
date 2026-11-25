@@ -27,9 +27,10 @@ function pegarFuncao(nome) {
 const codigo = pegarFuncao('achatarErroWati') + '\n'
     + pegarFuncao('erroJanelaFechada') + '\n'
     + pegarFuncao('contatoInexistenteNaWati') + '\n'
-    + 'return { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati };';
+    + pegarFuncao('mensagemCriadaNaWati') + '\n'
+    + 'return { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati, mensagemCriadaNaWati };';
 
-const { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati } = new Function(codigo)();
+const { achatarErroWati, erroJanelaFechada, contatoInexistenteNaWati, mensagemCriadaNaWati } = new Function(codigo)();
 
 const casos = [
     {
@@ -81,5 +82,17 @@ const contatoOk = contatoInexistenteNaWati('Contact with phone number 5562982248
 
 if (!contatoOk) falhas++;
 console.log((contatoOk ? 'OK - ' : 'FALHOU - ') + 'detecção de contato inexistente na Wati (cria e repete o envio)');
+
+/* O caso real de produção: a Wati respondeu 200 com o objeto da mensagem
+   (whatsappMessageId + text) e o painel acusava erro "código 1". */
+const criadaOk = mensagemCriadaNaWati({ result: true, message: 'ok' })
+    && mensagemCriadaNaWati({ result: false, message: { whatsappMessageId: 'wamid.X', text: 'Boa Tarde' } })
+    && mensagemCriadaNaWati({ message: { localMessageId: 'abc' } })
+    && !mensagemCriadaNaWati({ result: false, message: 'Contact with phone number 1 not found.' })
+    && !mensagemCriadaNaWati({ result: false, message: { code: 1 } })
+    && !mensagemCriadaNaWati(null);
+
+if (!criadaOk) falhas++;
+console.log((criadaOk ? 'OK - ' : 'FALHOU - ') + 'envio aceito quando a Wati devolve o objeto da mensagem (sem result:true)');
 
 process.exit(falhas ? 1 : 0);
