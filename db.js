@@ -723,6 +723,31 @@ function criarBancoPostgres() {
             return rows;
         },
 
+        /* Pendentes cujo telefone já foi enviado (ou está saindo) nesta mesma
+           campanha: são os contatos repetidos da lista. O worker conclui esses
+           como falha, sem nova mensagem, para ninguém receber a campanha duas
+           vezes (a Wati não deduplica destinatário por nós). */
+        async enviosDuplicadosCampanha(campanhaId) {
+            const { rows } = await pool.query(
+                `SELECT e.id AS envio_id, e.campanha_id, e.telefone
+                   FROM campanha_envios e
+                  WHERE e.campanha_id = $1
+                    AND e.status = 'pendente'
+                    AND EXISTS (
+                        SELECT 1
+                          FROM campanha_envios x
+                         WHERE x.campanha_id = e.campanha_id
+                           AND x.id < e.id
+                           AND x.status IN ('enviado', 'enviando')
+                           AND regexp_replace(x.telefone, '\\D', '', 'g') = regexp_replace(e.telefone, '\\D', '', 'g')
+                    )
+                  ORDER BY e.id ASC
+                  LIMIT 500`,
+                [campanhaId]
+            );
+            return rows;
+        },
+
         async reservarEnvio(envioId) {
             const resultado = await pool.query(
                 "UPDATE campanha_envios SET status = 'enviando' WHERE id = $1 AND status = 'pendente'",
@@ -1502,6 +1527,33 @@ function criarBancoMemoria() {
             if (!envio || envio.status !== 'pendente') return false;
             envio.status = 'enviando';
             return true;
+        },
+
+        /* Mesmo contrato do Postgres: pendentes cujo telefone já saiu (ou está
+           saindo) nesta campanha, em ordem de id. */
+        async enviosDuplicadosCampanha(idCampanha) {
+            const daCampanha = envios
+                .filter((e) => String(e.campanha_id) === String(idCampanha))
+                .sort((a, b) => Number(a.id) - Number(b.id));
+
+            const enviados = new Set();
+            const duplicados = [];
+
+            daCampanha.forEach((e) => {
+                const numero = String(e.telefone || '').replace(/\D/g, '');
+                if (!numero) return;
+
+                if (e.status === 'enviado' || e.status === 'enviando') {
+                    enviados.add(numero);
+                    return;
+                }
+
+                if (e.status === 'pendente' && enviados.has(numero)) {
+                    duplicados.push({ envio_id: e.id, campanha_id: e.campanha_id, telefone: e.telefone });
+                }
+            });
+
+            return duplicados.slice(0, 500);
         },
 
         /* Mesmo contrato do Postgres: pendentes de uma campanha, em ordem,

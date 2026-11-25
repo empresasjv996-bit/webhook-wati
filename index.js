@@ -939,6 +939,36 @@ function avaliarEnvioTemplate(resposta) {
     };
 }
 
+/* Uma campanha manda UMA mensagem por número. A mesma pessoa pode aparecer em
+   várias linhas da lista (registros diferentes com o mesmo telefone) e cada
+   linha viraria um envio — a pessoa recebia a campanha repetidas vezes.
+   Mantém a primeira ocorrência e devolve os repetidos para o painel avisar. */
+function deduplicarContatosPorTelefone(contatos) {
+    const vistos = new Set();
+    const unicos = [];
+    const repetidos = [];
+
+    (Array.isArray(contatos) ? contatos : []).forEach((contato) => {
+        const numero = String((contato && contato.telefone) || '').replace(/\D/g, '');
+
+        // Sem telefone não dá para comparar: segue para virar falha visível.
+        if (!numero) {
+            unicos.push(contato);
+            return;
+        }
+
+        if (vistos.has(numero)) {
+            repetidos.push(contato);
+            return;
+        }
+
+        vistos.add(numero);
+        unicos.push(contato);
+    });
+
+    return { unicos, repetidos };
+}
+
 /* Valores do template no formato que a v3 espera. */
 function normalizarParametrosTemplate(parametros) {
     return (Array.isArray(parametros) ? parametros : []).map((item) => ({
@@ -954,14 +984,19 @@ function rotuloBroadcastWati(campanha) {
 }
 
 /* Um destinatário por contato, já com o local_message_id que a Wati devolve
-   no webhook (permite casar o evento com o envio do painel). */
+   no webhook (permite casar o evento com o envio do painel). Número repetido
+   fica uma vez só: a Wati manda a mensagem uma vez por destinatário da lista,
+   então repetido dentro do lote viraria mensagem duplicada no WhatsApp. */
 function montarDestinatariosTemplate(destinatarios, campanha) {
     const rotulo = rotuloBroadcastWati(campanha);
+    const vistos = new Set();
 
     return (Array.isArray(destinatarios) ? destinatarios : [])
         .map((item) => {
             const numero = String((item && item.telefone) || '').replace(/\D/g, '');
-            if (!numero) return null;
+            if (!numero || vistos.has(numero)) return null;
+
+            vistos.add(numero);
 
             return {
                 numero,
@@ -2190,6 +2225,10 @@ let processandoCampanhas = false;
    Ajuste com a variável WATI_LOTE_TEMPLATE no Render, se precisar. */
 const LOTE_TEMPLATE = Math.min(Math.max(parseInt(process.env.WATI_LOTE_TEMPLATE, 10) || 200, 1), 500);
 
+/* Motivo gravado quando a lista repete o mesmo WhatsApp: a campanha manda uma
+   mensagem por número, o restante fica registrado como não enviado. */
+const DUPLICADO_CAMPANHA = 'Telefone repetido na campanha: enviado uma única vez por número.';
+
 /* Efeitos colaterais de um envio aceito: direciona o lead ao vendedor da
    campanha, grava a mensagem no histórico e avisa o painel em tempo real. */
 async function registrarEnvioBemSucedido(item, textoFinal) {
@@ -2235,12 +2274,57 @@ async function processarCampanhas() {
             if (item.canal === 'template') {
                 // Um lote por vez: todos os pendentes desta campanha saem numa
                 // requisição só (uma campanha no painel da Wati).
+                //
+                // Antes do lote, fecha os pendentes que repetem um número já
+                // enviado nesta campanha (listas com a mesma pessoa em mais de
+                // uma linha): sem isso a Wati manda a mensagem de novo.
+                const repetidosJaEnviados = await banco.enviosDuplicadosCampanha(item.campanha_id);
+
+                for (const repetido of repetidosJaEnviados) {
+                    await banco.concluirEnvio(repetido.envio_id, repetido.campanha_id, false, DUPLICADO_CAMPANHA);
+                    console.warn(`Campanha ${item.campanha} -> ${repetido.telefone}: ${DUPLICADO_CAMPANHA}`);
+
+                    emitirEvento('campanha', {
+                        id: repetido.campanha_id,
+                        telefone: repetido.telefone,
+                        ok: false,
+                        erro: DUPLICADO_CAMPANHA
+                    });
+                }
+
                 const pendentes = await banco.enviosPendentesCampanha(item.campanha_id, LOTE_TEMPLATE);
                 const reservados = [];
+                const repetidosNoLote = [];
+                const noLote = new Set();
 
                 for (const envio of pendentes) {
+                    const numero = String(envio.telefone || '').replace(/\D/g, '');
+                    const repetido = numero && noLote.has(numero);
+
+                    if (repetido) {
+                        repetidosNoLote.push(envio);
+                        continue;
+                    }
+
                     if (reservados.length >= LOTE_TEMPLATE) break;
-                    if (await banco.reservarEnvio(envio.envio_id)) reservados.push(envio);
+                    if (!(await banco.reservarEnvio(envio.envio_id))) continue;
+
+                    if (numero) noLote.add(numero);
+                    reservados.push(envio);
+                }
+
+                // Repetido dentro do próprio lote também sai como falha: uma
+                // mensagem por número, nunca duas.
+                for (const repetido of repetidosNoLote) {
+                    await banco.concluirEnvio(repetido.envio_id, repetido.campanha_id, false, DUPLICADO_CAMPANHA);
+                    console.warn(`Campanha ${item.campanha} -> ${repetido.telefone}: ${DUPLICADO_CAMPANHA}`);
+
+                    emitirEvento('campanha', {
+                        id: repetido.campanha_id,
+                        telefone: repetido.telefone,
+                        ok: false,
+                        erro: DUPLICADO_CAMPANHA
+                    });
                 }
 
                 if (!reservados.length) continue;
@@ -2301,10 +2385,32 @@ async function processarCampanhas() {
                 continue;
             }
 
-            if (!(await banco.reservarEnvio(item.envio_id))) continue;
-
             // Texto livre (sessão de 24h): vai um por vez, com o intervalo da
             // campanha entre as mensagens.
+            //
+            // A lista pode repetir o mesmo WhatsApp em mais de uma linha; o
+            // segundo registro do número não gera nova mensagem.
+            const jaEnviadosNaCampanha = await banco.enviosDuplicadosCampanha(item.campanha_id);
+            const repetido = jaEnviadosNaCampanha.find((dup) => String(dup.envio_id) === String(item.envio_id));
+
+            if (repetido) {
+                if (!(await banco.reservarEnvio(item.envio_id))) continue;
+
+                await banco.concluirEnvio(item.envio_id, item.campanha_id, false, DUPLICADO_CAMPANHA);
+                console.warn(`Campanha ${item.campanha} -> ${item.telefone}: ${DUPLICADO_CAMPANHA}`);
+
+                emitirEvento('campanha', {
+                    id: item.campanha_id,
+                    telefone: item.telefone,
+                    ok: false,
+                    erro: DUPLICADO_CAMPANHA
+                });
+
+                continue;
+            }
+
+            if (!(await banco.reservarEnvio(item.envio_id))) continue;
+
             const nomeContato = String(item.nome || '').trim();
             const textoFinal = String(item.envio_mensagem || item.mensagem || '')
                 .replace(/\{\{\s*nome\s*\}\}/gi, nomeContato)
@@ -2559,6 +2665,19 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             mensagemCampanha = templateEscolhido.corpo || textoMensagem || ('Template ' + templateEscolhido.nome);
         }
 
+        // A lista pode trazer a mesma pessoa em mais de uma linha (mesmo
+        // WhatsApp em registros diferentes). Cada linha viraria uma mensagem:
+        // fica só a primeira de cada número.
+        const semRepetidos = deduplicarContatosPorTelefone(contatosParaEnvio);
+        contatosParaEnvio = semRepetidos.unicos;
+
+        if (!contatosParaEnvio.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'A lista escolhida não tem nenhum telefone válido.'
+            });
+        }
+
         const campanha = await banco.criarCampanha({
             nome: nomeCampanha,
             listaId: parseInt(listaId, 10) || null,
@@ -2580,7 +2699,9 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             req.user && req.user.nome,
             'campanha criada',
             `${campanha.id} - ${nomeCampanha} (${campanha.total} contatos, ${intervaloMs} ms`
-                + (templateEscolhido ? `, template ${templateEscolhido.nome}` : ', texto livre') + ')'
+                + (templateEscolhido ? `, template ${templateEscolhido.nome}` : ', texto livre')
+                + (semRepetidos.repetidos.length ? `, ${semRepetidos.repetidos.length} repetido(s) ignorado(s)` : '')
+                + ')'
                 + (vendedor ? ` -> ${vendedor.nome} (${vendedor.email})` : ' -> sem direcionamento')
         );
 
@@ -2588,6 +2709,7 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             success: true,
             id: campanha.id,
             total: campanha.total,
+            ignorados: semRepetidos.repetidos.length,
             intervaloMs,
             canal: canalEscolhido,
             loteTemplate: canalEscolhido === 'template' ? Math.min(campanha.total, LOTE_TEMPLATE) : 1,
@@ -2982,6 +3104,7 @@ module.exports = {
     valorDoContato,
     normalizarParametrosTemplate,
     rotuloBroadcastWati,
+    deduplicarContatosPorTelefone,
     montarDestinatariosTemplate,
     corpoEnvioTemplateWati,
     avaliarEnvioTemplate

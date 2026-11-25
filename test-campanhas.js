@@ -16,6 +16,7 @@ const {
     avaliarEnvioTemplate,
     normalizarParametrosTemplate,
     rotuloBroadcastWati,
+    deduplicarContatosPorTelefone,
     montarDestinatariosTemplate,
     corpoEnvioTemplateWati
 } = require('./index');
@@ -133,4 +134,56 @@ assert.ok(
 );
 assert.ok(fonteDb.includes('enviosPendentesCampanha'), 'banco expõe os pendentes por campanha (Postgres e demo)');
 
+/* ---------- UAT 6: ninguém recebe a mesma campanha duas vezes ---------- */
+
+const listaComRepetidos = [
+    { telefone: '55 11 97598-8590', nome: 'Ana' },
+    { telefone: '(11) 99966-7672', nome: 'Bruno' },
+    { telefone: '5511975988590', nome: 'Ana (outra linha da lista)' },
+    { telefone: '11 99966-7672', nome: 'Bruno (outra linha da lista)' },
+    { telefone: '551199555444', nome: 'Carla' }
+];
+
+const deduplicada = deduplicarContatosPorTelefone(listaComRepetidos);
+
+assert.strictEqual(deduplicada.unicos.length, 3, 'a campanha tem uma linha por número');
+assert.strictEqual(deduplicada.repetidos.length, 2, 'as linhas repetidas do mesmo WhatsApp são ignoradas');
+assert.deepStrictEqual(
+    deduplicada.unicos.map((contato) => contato.nome),
+    ['Ana', 'Bruno', 'Carla'],
+    'mantém a primeira ocorrência de cada número'
+);
+
+/* O mesmo número duas vezes no lote viraria duas mensagens no WhatsApp: a Wati
+   não deduplica destinatário por nós. */
+assert.strictEqual(
+    montarDestinatariosTemplate([
+        { telefone: '5511975988590', envioId: 1 },
+        { telefone: '55 11 97598-8590', envioId: 2 }
+    ], 'Promo').length,
+    1,
+    'número repetido sai uma vez só no lote'
+);
+
+/* Contato sem telefone continua na campanha (vira falha visível no painel). */
+assert.strictEqual(
+    deduplicarContatosPorTelefone([{ telefone: '' }, { telefone: null }]).unicos.length,
+    2,
+    'contato sem número não é escondido da campanha'
+);
+
+assert.ok(
+    fonteIndex.includes('deduplicarContatosPorTelefone(contatosParaEnvio)'),
+    'a criação da campanha deduplica os contatos por número'
+);
+assert.ok(
+    fonteIndex.includes('banco.enviosDuplicadosCampanha('),
+    'o worker fecha os repetidos de campanhas criadas antes da correção'
+);
+assert.ok(
+    fonteDb.includes('enviosDuplicadosCampanha'),
+    'banco expõe os repetidos por campanha (Postgres e demo)'
+);
+
 console.log('OK - disparo em lote (uma campanha na Wati) e intervalo de 5 segundos validados.');
+console.log('OK - uma mensagem por número: contatos repetidos na lista não recebem a campanha duas vezes.');

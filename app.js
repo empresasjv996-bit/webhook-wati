@@ -3062,6 +3062,7 @@ async function criarCampanha(botao) {
         }
 
         toast(`Campanha criada com ${dados.total} contato(s). Envio iniciado.`
+            + (dados.ignorados ? ` ${dados.ignorados} telefone(s) repetido(s) na lista foram ignorados (uma mensagem por número).` : '')
             + (dados.loteTemplate > 1 ? ` Os ${dados.loteTemplate} primeiros saem numa campanha só na Wati.` : '')
             + (dados.templateNome ? ` Template: ${dados.templateNome}.` : '')
             + (dados.vendedorNome ? ` Leads direcionados para ${dados.vendedorNome}.` : ''));
