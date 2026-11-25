@@ -620,6 +620,22 @@ function adicionarMensagemNaTela(direcao, texto, autor) {
     area.scrollTop = area.scrollHeight;
 }
 
+/* Aviso curto de ticket vencido: o motivo técnico da Wati vai para o console,
+   porque o texto completo é longo demais para um alert na tela. */
+function avisarTicketVencido(detalhe) {
+    if (detalhe) console.warn('Ticket vencido:', detalhe);
+
+    const barra = document.querySelector('.template-bar');
+    if (barra) {
+        barra.classList.add('alerta');
+        setTimeout(() => barra.classList.remove('alerta'), 6000);
+    }
+
+    alert('Ticket vencido: o WhatsApp só aceita texto livre se o cliente respondeu nas últimas 24h.\n\n'
+        + 'Envie um template aprovado na barra "Ticket vencido?", acima do campo de mensagem. '
+        + 'Se ele já recebeu o template, aguarde a resposta — é ela que libera o texto livre.');
+}
+
 async function enviarMensagem() {
     const input = $('message');
     if (!clienteAtivo) { toast('Selecione um contato primeiro.', 'erro'); return; }
@@ -645,9 +661,9 @@ async function enviarMensagem() {
             adicionarMensagemNaTela('enviada', texto, 'Você');
         } else {
             const motivo = mensagemDoErro(dados, 'A Wati recusou o envio.');
-            /* Janela de 24h fechada: o aviso é longo e importante, então usa alert. */
+            /* Janela de 24h fechada: aviso curto + destaque na barra do template. */
             if (dados.janelaFechada) {
-                alert(motivo);
+                avisarTicketVencido(motivo);
                 const select = $('select-template');
                 if (select) select.focus();
             } else {

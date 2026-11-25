@@ -507,6 +507,22 @@
         }
     }
 
+    /* Aviso curto de ticket vencido: o motivo técnico da Wati vai para o console,
+       porque o texto completo é longo demais para um alert na tela do atendente. */
+    function avisarTicketVencido(detalhe) {
+        if (detalhe) console.warn('Ticket vencido:', detalhe);
+
+        const barra = document.querySelector('.template-bar');
+        if (barra) {
+            barra.classList.add('alerta');
+            setTimeout(() => barra.classList.remove('alerta'), 6000);
+        }
+
+        alert('Ticket vencido: o WhatsApp só aceita texto livre se o cliente respondeu nas últimas 24h.\n\n'
+            + 'Envie um template aprovado na barra "Ticket vencido?", acima do campo de mensagem. '
+            + 'Se ele já recebeu o template, aguarde a resposta — é ela que libera o texto livre.');
+    }
+
     async function enviarMensagem() {
         const input = $('input-mensagem');
         if (!input || !clienteAtivo) return;
@@ -537,12 +553,13 @@
             await carregarMensagens(clienteAtivo.telefone, true);
             await carregarClientes(true, true);
         } catch (erro) {
-            alert(mensagemDoErro(erro, 'Erro ao enviar a mensagem.'));
-
-            // Ticket vencido: aponta o colaborador para a barra do template.
+            // Ticket vencido: aviso curto + aponta o colaborador para a barra do template.
             if (erro && erro.janelaFechada) {
+                avisarTicketVencido(mensagemDoErro(erro, ''));
                 await carregarTemplatesReabertura();
                 pedirTemplate = true;
+            } else {
+                alert(mensagemDoErro(erro, 'Erro ao enviar a mensagem.'));
             }
         } finally {
             if (botao) botao.disabled = false;

@@ -169,6 +169,11 @@ async function lerJson(resposta) {
             assert.ok(codigo.includes('/api/templates-reabertura') && codigo.includes('/api/enviar-template'),
                 js + ' chama as rotas da reabertura');
             assert.ok(estilo.includes('.template-bar'), css + ' estiliza a barra do template');
+            /* O alert com o motivo técnico completo era enorme; agora o aviso é curto
+               e o detalhe da Wati vai para o console. */
+            assert.ok(codigo.includes('function avisarTicketVencido(') && codigo.includes('avisarTicketVencido('),
+                js + ' avisa ticket vencido com texto curto e destaca a barra');
+            assert.ok(estilo.includes('.template-bar.alerta'), css + ' destaca a barra quando o ticket vence');
         });
 
         console.log('OK - painel do admin e do colaborador têm a barra do template');
