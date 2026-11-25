@@ -31,8 +31,8 @@ os CPFs ao módulo do extrator (o mesmo que consulta o extratorgov.online).
 |---|---|
 | **A. Parsing** | Segmenta por `CNPJ:` quando ele abre o registro (LIVE C6 PJ); no dump antigo (CNPJ depois do `CPF Persona`), segmenta por `CPF Persona:`. A seção `--- SOCIOS ---` é cortada antes de ler a persona, então telefones/e-mails dos sócios **não** entram na persona. Chaves normalizadas (sem acento, minúsculas). |
 | **B. Validação** | **CPF Persona** passa pelo dígito verificador. Falhou → descartado com **"CPF Inválido"**. CPF válido sem telefone real **não é descartado**: fica em **"Sem telefone"**, aguardando o extrator. |
-| **C. Extrator** | A lista de CPFs (completa) vai para o extrator. Na volta, o painel casa por CPF completo, CPF mascarado (`000.000.xxx-xx`) ou nome (linha `✓ [LIVE] NOME \| ... \| Revelado: ...`) e soma os telefones revelados. Também aceita o JSON do módulo **Consultar CPF**. |
-| **D. Saída** | `{telefone};{nome};{cnpj}` — N telefones = N linhas. CNPJ formatado `XX.XXX.XXX/XXXX-XX`. Telefones deduplicados por registro. |
+| **C. Extrator** | A lista de CPFs (completa) vai para o extrator. Na volta, o painel casa por CPF completo, CPF mascarado (`000.000.xxx-xx`) ou nome (linha `✓ [LIVE] NOME \| ... \| Revelado: ...`) e **substitui** os telefones do registro pelo revelado — a lista final fica só com o número do extrator (os do dump saem, guardados em `telefonesDump`). Também aceita o JSON do módulo **Consultar CPF**. |
+| **D. Saída** | `{telefone};{nome};{cnpj}` — 1 linha por telefone revelado (1 por pessoa, não 1 por número do dump). CNPJ formatado `XX.XXX.XXX/XXXX-XX`. Telefones deduplicados por registro. |
 
 Erro inesperado em um registro nunca derruba o processamento: vira descarte com motivo `Erro ao processar: ...`.
 
@@ -66,9 +66,16 @@ Menu **Listas** (tela única — o antigo "Importar lista" e "Lista Suja" virara
      **REVELADO** vira telefone — nascimento, renda, agência e conta não entram como número.
    - Também aceita `CPF;telefone` (CPF completo ou mascarado `000.000.xxx-xx`),
      `✓ [LIVE] NOME | Mask: ... | Revelado: ...` e o JSON do painel.
-   - O retorno diz o que aconteceu: `N linha(s) lida(s) · X CPF(s) com telefone revelado ·
-     Y já estava(m) com esse telefone · Z sem telefone na linha · W ainda sem telefone ·
-     K linha(s) não casada(s)`. Se `X = 0` e `Y > 0`, o resultado já tinha sido aplicado antes.
+   - O retorno diz o que aconteceu: `N resultado(s) lido(s) · X CPF(s) com telefone revelado ·
+     Y já estava(m) com esse telefone · M número(s) do dump fora da lista · Z sem telefone na linha ·
+     W ainda sem telefone · K linha(s) não casada(s)`. Se `X = 0` e `Y > 0`, o resultado já tinha
+     sido aplicado antes.
+   - **Lista final só com o telefone do extrator** (opção marcada por padrão, ao lado da caixa):
+     o número revelado **substitui** os do dump, em vez de somar. Assim cada pessoa entra uma vez
+     só na planilha. Quem o extrator não atendeu sai de **Prontos** e volta para **Sem telefone**
+     (o CPF fica pronto para a próxima consulta); os números antigos ficam guardados em
+     `telefonesDump` para conferência. Desmarque a opção e aplique de novo para devolver esses
+     números (o aviso mostra `N número(s) do dump de volta`).
    - Ao terminar, a **Planilha pronta** é preenchida no formato do envio
      (`telefone;{{1}};{{2}}` + atributos da empresa do passo 1) e a seção é aberta.
 4. **Prontos (N)** — lista final + `📋 Copiar` · `⬇ Baixar .txt` ·
@@ -106,13 +113,14 @@ Processamento síncrono com estado de loading (setTimeout antes do parse); 1.000
 | Extrator por CPF mascarado / nome / JSON do painel | Telefone revelado entra na lista | ✅ |
 | Lista com dados da empresa | 1 linha por telefone com `telefone;{{1}};{{2}}` + atributos | ✅ |
 | CSV do extrator (`CPF;NOME;...;MASK;REVELADO`) | Casa pelo CPF, nome da coluna NOME, só REVELADO vira telefone; planilha final com os dados da empresa | ✅ |
+| Lista com números do dump + extrator | O revelado substitui os do dump (1 linha por pessoa), antigos em `telefonesDump`; não atendidos voltam para "Sem telefone" | ✅ |
 
 ## 5. Arquivos
 
 | Arquivo | Papel |
 |---|---|
 | `lista-suja.js` | Parser puro (navegador + Node). Principais funções: `processarListaSuja`, `processarRegistro`, `segmentarRegistros`, `restaurarQuebras`, `normalizarEspacos`, `mensagemFormato`, `extrairEmpresa`, `extrairPersona`, `extrairSocio`, `aplicarResultadoExtrator`, `montarLinhasComEmpresa`, `montarCadastroCsv`, `validarCpf`, `formatarCnpj`. |
-| `app.js` | Cola da UI: `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`, `puxarResultadoExtratorPainel`, `mostrarAbaListaSuja`, `renderizarListaSuja`, `recalcularListaSuja`, `copiarListaSuja`, `baixarListaSuja`, `baixarListaSujaFinal`, `preencherPlanilhaFinalListaSuja`, `copiarListaSujaCpfs`, `baixarListaSujaCpfs`, `levarListaSujaParaExtrator`, `usarListaSujaNaImportacao`, `usarListaSujaNaImportacaoComEmpresa`, `baixarCadastroListaSuja`, `limparListaSuja`. |
+| `app.js` | Cola da UI: `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`, `puxarResultadoExtratorPainel`, `apenasExtratorListaSuja`, `resumoDoExtratorListaSuja`, `usarResultadoExtratorListaSuja`, `mostrarAbaListaSuja`, `renderizarListaSuja`, `recalcularListaSuja`, `copiarListaSuja`, `baixarListaSuja`, `baixarListaSujaFinal`, `preencherPlanilhaFinalListaSuja`, `copiarListaSujaCpfs`, `baixarListaSujaCpfs`, `levarListaSujaParaExtrator`, `usarListaSujaNaImportacao`, `usarListaSujaNaImportacaoComEmpresa`, `baixarCadastroListaSuja`, `limparListaSuja`. |
 | `index.html` | Tela única `view-listas` (passos 1-3, abas de resultado, planilha pronta recolhida e listas salvas) e script `lista-suja.js` carregado antes de `app.js`. |
 | `colaborador.html` / `colaborador.js` / `colaborador.css` | Ficha do cliente no painel do vendedor: exibe `clientes.atributos` (dados da empresa/persona). |
 | `style.css` | `.suja-tabs`, `.suja-bruto`. |
@@ -122,6 +130,9 @@ Processamento síncrono com estado de loading (setTimeout antes do parse); 1.000
 
 - Telefone **mascarado** (`55 (**) ***** 7130`) não vira número: o registro fica em "Sem telefone"
   até o extrator revelar. Quando o dump traz `Telefone desmascarado:`, ele entra normalmente.
+- Com **"Lista final só com o telefone do extrator"** marcada, os números do dump não vão para a
+  planilha (ficam em `telefonesDump`). Se você aplicou um resultado parcial e quer os antigos de
+  volta, desmarque a opção e aplique de novo — ou reprocesse o dump.
 - Telefones da empresa (`Tel Empresa 1/2`) **não entram na persona** — vão para o cadastro da empresa.
 - Registro sem `CPF Persona:` (ou com CPF inválido) é descartado; sem `CNPJ:` a segmentação cai no
   modo antigo (por `CPF Persona:`).

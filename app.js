@@ -3614,10 +3614,59 @@ function processarListaSujaPainel() {
     }, 30);
 }
 
-/* Passo 3: aplica o que veio do extrator (colado ou da última consulta do painel). */
+/* Passo 3: aplica o que veio do extrator (colado ou da última consulta do
+   painel). Por padrão a lista final fica SÓ com o telefone revelado: os
+   números do dump saem, senão a planilha vai com 2-3 linhas por pessoa. */
+function apenasExtratorListaSuja() {
+    const caixa = $('suja-so-extrator');
+    return !caixa || caixa.checked;
+}
+
+function resumoDoExtratorListaSuja(resultado) {
+    const partes = [
+        resultado.linhas + ' resultado(s) lido(s)',
+        resultado.aplicados + ' CPF(s) com telefone revelado'
+    ];
+
+    if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
+    if (resultado.numerosDescartados) partes.push(resultado.numerosDescartados + ' número(s) do dump fora da lista');
+    if (resultado.numerosRestaurados) partes.push(resultado.numerosRestaurados + ' número(s) do dump de volta');
+    if (resultado.semTelefoneNaLinha) partes.push(resultado.semTelefoneNaLinha + ' sem telefone na linha');
+    partes.push(listaSuja.semTelefone.length + ' ainda sem telefone');
+    if (resultado.naoEncontrados.length) partes.push(resultado.naoEncontrados.length + ' linha(s) não casada(s)');
+
+    return partes;
+}
+
+/* Aplica, recalcula, abre "Prontos" e já preenche a planilha final. */
+function usarResultadoExtratorListaSuja(entrada) {
+    const resultado = aplicarResultadoExtrator(listaSuja.validos, entrada, {
+        apenasExtrator: apenasExtratorListaSuja()
+    });
+
+    recalcularListaSuja(resultado.registros);
+    mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
+
+    const partes = resumoDoExtratorListaSuja(resultado);
+
+    /* Planilha pronta no formato do envio: dados da empresa do passo 1 +
+       o telefone revelado. */
+    if (listaSuja.linhas.length) {
+        preencherPlanilhaFinalListaSuja();
+        abrirImportacaoLista();
+        partes.push('planilha pronta preenchida');
+    }
+
+    const progresso = $('suja-progresso');
+    if (progresso) progresso.textContent = partes.join(' · ') + '.';
+
+    toast(partes.join(' · '), resultado.naoEncontrados.length ? 'erro' : undefined);
+
+    return resultado;
+}
+
 function aplicarResultadoExtratorPainel() {
     const caixa = $('suja-extrator');
-    const progresso = $('suja-progresso');
 
     if (!listaSuja.validos.length) {
         toast('Processe a lista do passo 1 antes de aplicar o extrator.', 'erro');
@@ -3630,32 +3679,7 @@ function aplicarResultadoExtratorPainel() {
     }
 
     try {
-        const resultado = aplicarResultadoExtrator(listaSuja.validos, caixa.value);
-
-        recalcularListaSuja(resultado.registros);
-
-        const partes = [
-            resultado.linhas + ' linha(s) lida(s)',
-            resultado.aplicados + ' CPF(s) com telefone revelado'
-        ];
-
-        if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
-        if (resultado.semTelefoneNaLinha) partes.push(resultado.semTelefoneNaLinha + ' sem telefone na linha');
-        partes.push(listaSuja.semTelefone.length + ' ainda sem telefone');
-        if (resultado.naoEncontrados.length) partes.push(resultado.naoEncontrados.length + ' linha(s) não casada(s)');
-
-        mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
-
-        /* Já deixa a planilha pronta no formato do envio, com os dados da
-           empresa do passo 1 + o telefone revelado. */
-        if (listaSuja.linhas.length) {
-            preencherPlanilhaFinalListaSuja();
-            abrirImportacaoLista();
-            partes.push('planilha pronta preenchida');
-        }
-
-        if (progresso) progresso.textContent = partes.join(' · ') + '.';
-        toast(partes.join(' · '), resultado.naoEncontrados.length ? 'erro' : undefined);
+        usarResultadoExtratorListaSuja(caixa.value);
     } catch (erro) {
         toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
     }
@@ -3677,25 +3701,12 @@ function puxarResultadoExtratorPainel() {
     const caixa = $('suja-extrator');
     if (caixa) caixa.value = JSON.stringify({ resultados }, null, 2);
 
-    const resultado = aplicarResultadoExtrator(listaSuja.validos, { resultados });
-    recalcularListaSuja(resultado.registros);
-    mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
-
     /* Mesmo caminho do "Aplicar resultado": planilha pronta no formato do envio. */
-    if (listaSuja.linhas.length) {
-        preencherPlanilhaFinalListaSuja();
-        abrirImportacaoLista();
+    try {
+        usarResultadoExtratorListaSuja({ resultados });
+    } catch (erro) {
+        toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
     }
-
-    const partes = [
-        resultado.linhas + ' resultado(s)',
-        resultado.aplicados + ' CPF(s) com telefone revelado',
-        listaSuja.semTelefone.length + ' ainda sem telefone'
-    ];
-
-    if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
-
-    toast(partes.join(' · ') + '.');
 }
 
 /* ---------- passo 2: CPFs para o extrator ---------- */

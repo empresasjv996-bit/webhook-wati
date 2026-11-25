@@ -745,9 +745,14 @@ function normalizarEntradaExtrator(entrada) {
 }
 
 /* Casa a saída do extrator com os registros do dump (CPF completo, CPF
-   mascarado 000.000.xxx-xx ou nome) e junta os telefones revelados. */
-function aplicarResultadoExtrator(registros, entrada) {
+   mascarado 000.000.xxx-xx ou nome). Por padrão só fica o telefone que o
+   extrator revelou: os números que vieram do dump saem da lista final
+   (guardados em `telefonesDump` para conferência) — senão a lista vira
+   bagunça, com 2-3 números por pessoa. `{ apenasExtrator: false }` soma os
+   dois modos (dump + revelado). */
+function aplicarResultadoExtrator(registros, entrada, opcoes) {
     const itens = normalizarEntradaExtrator(entrada);
+    const apenasExtrator = !opcoes || opcoes.apenasExtrator !== false;
     const atualizados = (registros || []).map((registro) => Object.assign({}, registro, {
         telefones: (registro.telefones || []).slice()
     }));
@@ -755,6 +760,21 @@ function aplicarResultadoExtrator(registros, entrada) {
     let aplicados = 0;
     let jaAplicados = 0;
     let semTelefoneNaLinha = 0;
+    let numerosDescartados = 0;
+    let numerosRestaurados = 0;
+
+    /* Sem o "só extrator": devolve à lista os números que tinham sido
+       guardados em `telefonesDump`, para o modo antigo (dump + revelado)
+       valer de novo. */
+    if (!apenasExtrator) {
+        atualizados.forEach((registro) => {
+            const guardados = registro.telefonesDump || [];
+            const devolver = guardados.filter((telefone) => !registro.telefones.includes(telefone));
+
+            numerosRestaurados += devolver.length;
+            registro.telefones = registro.telefones.concat(devolver);
+        });
+    }
 
     itens.forEach((item) => {
         let alvo = null;
@@ -792,18 +812,47 @@ function aplicarResultadoExtrator(registros, entrada) {
             return;
         }
 
-        if (!item.telefones.length) semTelefoneNaLinha += 1;
+        /* Linha casada mas sem telefone (ex.: "N/A" no REVELADO): não mexe
+           no que o registro já tinha. */
+        if (!item.telefones.length) {
+            semTelefoneNaLinha += 1;
+            return;
+        }
 
-        let novos = 0;
-        item.telefones.forEach((telefone) => {
-            if (alvo.telefones.includes(telefone)) return;
-            alvo.telefones.push(telefone);
-            novos += 1;
-        });
+        const antes = alvo.telefones.slice();
+        const depois = apenasExtrator ? item.telefones.slice() : antes.slice();
 
-        if (novos) aplicados += 1;
-        else jaAplicados += 1;
+        if (!apenasExtrator) {
+            item.telefones.forEach((telefone) => {
+                if (!depois.includes(telefone)) depois.push(telefone);
+            });
+        }
+
+        const novos = depois.filter((telefone) => !antes.includes(telefone));
+        const removidos = antes.filter((telefone) => !depois.includes(telefone));
+
+        if (removidos.length && !alvo.telefonesDump) alvo.telefonesDump = removidos.slice();
+
+        numerosDescartados += removidos.length;
+        alvo.telefones = depois;
+        alvo.telefoneDoExtrator = true;
+
+        if (novos.length) aplicados += 1;
+        else if (!removidos.length) jaAplicados += 1;
+        else aplicados += 1; /* trocou o número do dump pelo revelado */
     });
+
+    /* Quem o extrator não atendeu também não entra com número do dump:
+       fica em "Sem telefone" com o CPF pronto para a próxima consulta. */
+    if (apenasExtrator) {
+        atualizados.forEach((registro) => {
+            if (registro.telefoneDoExtrator || !registro.telefones.length) return;
+
+            if (!registro.telefonesDump) registro.telefonesDump = registro.telefones.slice();
+            numerosDescartados += registro.telefones.length;
+            registro.telefones = [];
+        });
+    }
 
     atualizados.forEach((registro) => {
         registro.aguardandoExtrator = !registro.telefones.length;
@@ -815,6 +864,8 @@ function aplicarResultadoExtrator(registros, entrada) {
         aplicados,
         jaAplicados,
         semTelefoneNaLinha,
+        numerosDescartados,
+        numerosRestaurados,
         naoEncontrados,
         linhas: itens.length
     };

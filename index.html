@@ -309,8 +309,14 @@
                                 <code>CPF;telefone</code> (CPF completo ou mascarado <code>000.000.xxx-xx</code>),
                                 <code>✓ [LIVE] NOME | Mask: ... | Revelado: ...</code> e o JSON do painel.
                                 O telefone revelado entra na lista final junto com os dados da empresa do passo 1.
+                                Por padrão a lista fica <strong>só com o número do extrator</strong> (um por pessoa):
+                                os números que vieram do dump saem, senão o mesmo cliente aparece 2-3 vezes.
                             </small>
                             <textarea id="suja-extrator" class="form-control lista-texto" style="min-height: 140px;" placeholder="014.079.xxx-xx;5512999999999&#10;✓ [LIVE] LAYLA SHIRATORI | Mask: (11) *****1514 | Revelado: 11979591514"></textarea>
+                            <label class="mapa-check">
+                                <input id="suja-so-extrator" type="checkbox" checked>
+                                Lista final só com o telefone do extrator (descarta os números do dump)
+                            </label>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
                                 <button class="btn-primary" type="button" onclick="aplicarResultadoExtratorPainel()">Aplicar resultado</button>
                                 <button class="btn-mini" type="button" onclick="puxarResultadoExtratorPainel()">⤓ Usar última consulta do painel</button>

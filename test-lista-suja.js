@@ -358,6 +358,50 @@ assert.ok(
 );
 assert.ok(planilhaFinal.cabecalho.indexOf('telefone;{{1}};{{2}};') === 0, 'cabeçalho do envio');
 
+/* ---------- "só o número do extrator": os do dump saem da lista ---------- */
+
+/* resultadoLive tem 2 registros com telefone de dump (3 + 1 números) */
+const comDump = aplicarResultadoExtrator(resultadoLive.validos, csvExtrator);
+
+assert.strictEqual(comDump.aplicados, 2, 'troca o número do dump pelo revelado');
+assert.deepStrictEqual(comDump.registros[0].telefones, ['5512998218776'], 'sobra só o número revelado (MARCOS)');
+assert.deepStrictEqual(comDump.registros[1].telefones, ['5511959949866'], 'sobra só o número revelado (LAYLA)');
+assert.ok(
+    (comDump.registros[1].telefonesDump || []).indexOf('551133334444') >= 0,
+    'número do dump fica guardado para conferência'
+);
+assert.ok(comDump.numerosDescartados >= 3, 'conta quantos números do dump saíram da lista');
+assert.strictEqual(comDump.registros[0].linhas.length, 1, '1 linha por pessoa, não 1 por número do dump');
+assert.strictEqual(comDump.registros[1].linhas.length, 1);
+assert.strictEqual(comDump.registros[1].telefoneDoExtrator, true);
+
+const planilhaSoExtrator = montarLinhasComEmpresa(comDump.registros);
+assert.strictEqual(planilhaSoExtrator.linhas.length, 2, 'planilha final sem os números do dump');
+assert.ok(planilhaSoExtrator.linhas.join('\n').indexOf('551133334444') === -1, 'número do dump não vai para o envio');
+
+/* extrator atendeu só 1 CPF: o outro fica sem telefone (não inventa número) */
+const parcial = aplicarResultadoExtrator(
+    resultadoLive.validos,
+    '014.079.598-75;MARCOS TOBIAS LIMA;10/05/1985;16421.91;marcos@exemplo.com;NUBANK S.A.;;N/A;(12) *****8776;12998218776'
+);
+assert.deepStrictEqual(parcial.registros[1].telefones, [], 'quem o extrator não atendeu sai de Prontos');
+assert.ok((parcial.registros[1].telefonesDump || []).indexOf('551133334444') >= 0, 'e o número antigo fica guardado');
+assert.strictEqual(parcial.registros[1].aguardandoExtrator, true);
+
+/* { apenasExtrator: false } volta ao modo antigo: soma dump + revelado */
+const somando = aplicarResultadoExtrator(resultadoLive.validos, csvExtrator, { apenasExtrator: false });
+assert.ok(somando.registros[1].telefones.indexOf('551133334444') >= 0, 'dump mantido quando apenasExtrator=false');
+assert.ok(somando.registros[1].telefones.indexOf('5511959949866') >= 0, 'revelado somado ao dump');
+assert.ok(somando.numerosDescartados === 0, 'sem descarte no modo soma');
+
+/* desmarcar a opção devolve os números guardados em telefonesDump */
+const devolvido = aplicarResultadoExtrator(comDump.registros, csvExtrator, { apenasExtrator: false });
+assert.ok(devolvido.registros[0].telefones.indexOf('551231533128') >= 0, 'número do dump volta à lista');
+assert.ok(devolvido.registros[1].telefones.indexOf('551133334444') >= 0);
+assert.ok(devolvido.registros[1].telefones.indexOf('5511959949866') >= 0, 'revelado continua');
+assert.strictEqual(devolvido.numerosRestaurados, 3, 'conta os números devolvidos');
+assert.strictEqual(somando.numerosRestaurados, 0, 'nada a devolver quando não houve descarte');
+
 console.log('OK - UAT 8: CSV do extrator (CPF;NOME;...;REVELADO) aplicado e planilha final');
 
 /* ---------- unidades ---------- */
@@ -471,7 +515,14 @@ assert.ok(html.includes('onclick="copiarComandoExtrator()"'), 'botão Copiar com
 assert.ok(telaListas.includes('id="lista-importar"'), 'planilha pronta recolhida na mesma tela');
 assert.ok(telaListas.includes('id="lista-texto"'), 'importação manual na mesma tela');
 assert.ok(telaListas.includes('REVELADO'), 'passo 3 explica o CSV do extrator');
+assert.ok(telaListas.includes('id="suja-so-extrator"'), 'passo 3 tem o "só o telefone do extrator"');
+assert.ok(
+    /<input id="suja-so-extrator" type="checkbox" checked>/.test(telaListas),
+    'a lista final vem marcada só com o número do extrator'
+);
 assert.ok(painel.includes('preencherPlanilhaFinalListaSuja();'), 'aplicar resultado já preenche a planilha pronta');
+assert.ok(painel.includes('apenasExtrator: apenasExtratorListaSuja()'), 'app.js passa a opção apenasExtrator');
+assert.ok(painel.includes('numerosDescartados'), 'app.js avisa quantos números do dump saíram');
 assert.ok(telaListas.includes('id="tabela-listas"'), 'listas salvas na mesma tela');
 assert.ok(painel.includes("if (view === 'listasuja') view = 'listas';"), 'irPara aceita o apelido antigo "listasuja"');
 assert.ok(painel.includes('function abrirImportacaoLista('), 'app.js abre a planilha pronta ao enviar para importação');
@@ -501,6 +552,7 @@ assert.ok(
 
 ['mostrarAbaListaSuja', 'renderizarListaSuja', 'recalcularListaSuja', 'processarListaSujaPainel',
     'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel', 'copiarListaSuja',
+    'apenasExtratorListaSuja', 'resumoDoExtratorListaSuja', 'usarResultadoExtratorListaSuja',
     'copiarListaSujaCpfs', 'baixarListaSujaCpfs', 'levarListaSujaParaExtrator', 'cpfsDaCaixa',
     'baixarListaSuja', 'usarListaSujaNaImportacao', 'usarListaSujaNaImportacaoComEmpresa',
     'preencherPlanilhaFinalListaSuja', 'baixarListaSujaFinal',
