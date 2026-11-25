@@ -2790,6 +2790,8 @@ function renderizarParametrosTemplate() {
                 </select>
                 <select class="form-control" data-atributo></select>
                 <input class="form-control oculto" data-fixo type="text" placeholder="valor fixo">
+                <input class="form-control oculto" data-padrao type="text"
+                    placeholder="se o contato não tiver, usar (ex.: cliente)">
             </div>`;
     }).join('');
 
@@ -2798,6 +2800,7 @@ function renderizarParametrosTemplate() {
         const seletorOrigem = linha.querySelector('[data-origem]');
         const seletorAtributo = linha.querySelector('[data-atributo]');
         const campoFixo = linha.querySelector('[data-fixo]');
+        const campoPadrao = linha.querySelector('[data-padrao]');
         const estado = mapaVariaveisCampanha[variavel] || {};
 
         // 1º procura atributo com o mesmo nome da variável ({{nome}} -> nome);
@@ -2816,15 +2819,18 @@ function renderizarParametrosTemplate() {
         seletorOrigem.value = estado.origem || (atributosListaCampanha.length ? 'atributo' : 'fixo');
         seletorAtributo.value = estado.origem !== 'fixo' && estado.valor ? estado.valor : (sugestao ? sugestao.nome : '');
         campoFixo.value = estado.origem === 'fixo' ? (estado.valor || '') : '';
+        campoPadrao.value = estado.padrao || '';
 
         function sincronizar() {
             const origem = seletorOrigem.value;
             seletorAtributo.classList.toggle('oculto', origem !== 'atributo');
             campoFixo.classList.toggle('oculto', origem !== 'fixo');
+            campoPadrao.classList.toggle('oculto', origem !== 'atributo');
 
             mapaVariaveisCampanha[variavel] = {
                 origem,
-                valor: origem === 'fixo' ? campoFixo.value.trim() : seletorAtributo.value
+                valor: origem === 'fixo' ? campoFixo.value.trim() : seletorAtributo.value,
+                padrao: origem === 'atributo' ? campoPadrao.value.trim() : ''
             };
 
             if (preview) preview.textContent = montarPreviewTemplate(template);
@@ -2833,6 +2839,7 @@ function renderizarParametrosTemplate() {
         seletorOrigem.onchange = sincronizar;
         seletorAtributo.onchange = sincronizar;
         campoFixo.oninput = sincronizar;
+        campoPadrao.oninput = sincronizar;
         sincronizar();
     });
 }
@@ -3029,7 +3036,8 @@ async function criarCampanha(botao) {
         parametros = variaveis.map((variavel) => ({
             nome: variavel,
             origem: mapaVariaveisCampanha[variavel].origem,
-            valor: mapaVariaveisCampanha[variavel].valor
+            valor: mapaVariaveisCampanha[variavel].valor,
+            padrao: mapaVariaveisCampanha[variavel].padrao || ''
         }));
     }
 
@@ -3066,6 +3074,14 @@ async function criarCampanha(botao) {
             + (dados.loteTemplate > 1 ? ` Os ${dados.loteTemplate} primeiros saem numa campanha só na Wati.` : '')
             + (dados.templateNome ? ` Template: ${dados.templateNome}.` : '')
             + (dados.vendedorNome ? ` Leads direcionados para ${dados.vendedorNome}.` : ''));
+
+        // Quem não tinha o dado da variável não entrou: fica um aviso separado,
+        // senão o número de contatos da campanha pareceria errado.
+        if (dados.semDadoTotal) {
+            const faltando = (dados.semDado || []).map((item) => `"${item.atributo}"`).join(', ');
+            toast(`${dados.semDadoTotal} contato(s) ficaram de fora: sem ${faltando}. `
+                + 'Complete a lista ou preencha o valor de reserva da variável.', 'erro');
+        }
         if ($('campanha-nome')) $('campanha-nome').value = '';
         if ($('campanha-mensagem')) $('campanha-mensagem').value = '';
         carregarCampanhas();

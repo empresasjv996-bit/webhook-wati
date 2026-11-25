@@ -939,12 +939,57 @@ function avaliarEnvioTemplate(resposta) {
     };
 }
 
+/* Campo sem conteúdo (null, texto em branco, objeto vazio). */
+function campoSemValor(valor) {
+    if (valor == null) return true;
+    if (typeof valor === 'string') return !valor.trim();
+    if (Array.isArray(valor)) return valor.length === 0;
+    if (typeof valor === 'object') return Object.keys(valor).length === 0;
+    return false;
+}
+
+/* A linha que fica na campanha herda o que só existia na linha repetida —
+   é comum o nome estar em um registro e o telefone em outro do mesmo
+   WhatsApp; sem isso o contato ficaria "sem nome" sem motivo. */
+function completarCamposVazios(destino, origem) {
+    if (!destino || !origem) return destino;
+
+    Object.keys(origem).forEach((campo) => {
+        if (campo === 'telefone') return;
+
+        const valorOrigem = origem[campo];
+        const valorDestino = destino[campo];
+
+        if (valorOrigem == null) return;
+
+        const ambosObjetos = valorDestino && valorOrigem
+            && typeof valorDestino === 'object' && typeof valorOrigem === 'object'
+            && !Array.isArray(valorDestino) && !Array.isArray(valorOrigem);
+
+        if (ambosObjetos) {
+            Object.keys(valorOrigem).forEach((chave) => {
+                if (campoSemValor(valorDestino[chave]) && !campoSemValor(valorOrigem[chave])) {
+                    valorDestino[chave] = valorOrigem[chave];
+                }
+            });
+            return;
+        }
+
+        if (campoSemValor(valorDestino) && !campoSemValor(valorOrigem)) {
+            destino[campo] = valorOrigem;
+        }
+    });
+
+    return destino;
+}
+
 /* Uma campanha manda UMA mensagem por número. A mesma pessoa pode aparecer em
    várias linhas da lista (registros diferentes com o mesmo telefone) e cada
    linha viraria um envio — a pessoa recebia a campanha repetidas vezes.
-   Mantém a primeira ocorrência e devolve os repetidos para o painel avisar. */
+   Mantém a primeira ocorrência (completada com o que houver nas repetidas) e
+   devolve os repetidos para o painel avisar. */
 function deduplicarContatosPorTelefone(contatos) {
-    const vistos = new Set();
+    const porNumero = new Map();
     const unicos = [];
     const repetidos = [];
 
@@ -957,13 +1002,20 @@ function deduplicarContatosPorTelefone(contatos) {
             return;
         }
 
-        if (vistos.has(numero)) {
+        if (porNumero.has(numero)) {
+            completarCamposVazios(porNumero.get(numero), contato);
             repetidos.push(contato);
             return;
         }
 
-        vistos.add(numero);
-        unicos.push(contato);
+        // Cópia: a linha da campanha pode receber dados de outra linha e a
+        // lista original (banco/demo) não deve ser alterada.
+        const copia = Object.assign({}, contato);
+        if (copia.atributos && typeof copia.atributos === 'object') copia.atributos = Object.assign({}, copia.atributos);
+        if (copia.variaveis && typeof copia.variaveis === 'object') copia.variaveis = Object.assign({}, copia.variaveis);
+
+        porNumero.set(numero, copia);
+        unicos.push(copia);
     });
 
     return { unicos, repetidos };
@@ -2556,10 +2608,25 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
         // lotes (o lote inteiro sai numa campanha só na Wati).
         const intervaloMs = Math.min(Math.max(parseInt(intervalo, 10) || 5000, 3000), 120000);
 
-        let contatosParaEnvio = contatos;
+        // A lista pode trazer a mesma pessoa em mais de uma linha (mesmo
+        // WhatsApp em registros diferentes). Cada linha viraria uma mensagem:
+        // fica só a primeira de cada número — e ela herda os dados que só
+        // existiam na outra linha. Isso vem antes de qualquer validação para
+        // uma linha repetida nunca bloquear a campanha.
+        const semRepetidos = deduplicarContatosPorTelefone(contatos);
+        let contatosParaEnvio = semRepetidos.unicos;
+
+        if (!contatosParaEnvio.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'A lista escolhida não tem nenhum telefone válido.'
+            });
+        }
+
         let mensagemCampanha = textoMensagem;
         let templateEscolhido = null;
         let templateParametros = [];
+        let contatosSemDado = [];
 
         if (canalEscolhido === 'template') {
             const resultadoTemplates = await listarTemplatesWati(false);
@@ -2592,7 +2659,9 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
                 });
             }
 
-            // Cada variável precisa de uma origem: atributo da lista ou valor fixo
+            // Cada variável precisa de uma origem: atributo da lista ou valor
+            // fixo. "padrao" é o valor de reserva para quem não tem o dado
+            // (ex.: lista sem nome -> "cliente"), evitando travar a campanha.
             const informados = {};
             (Array.isArray(parametros) ? parametros : []).forEach((item) => {
                 const chave = String((item && item.nome) || '').trim();
@@ -2600,7 +2669,8 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
 
                 informados[chave] = {
                     origem: item.origem === 'fixo' ? 'fixo' : 'atributo',
-                    valor: String(item.valor == null ? '' : item.valor).trim()
+                    valor: String(item.valor == null ? '' : item.valor).trim(),
+                    padrao: String(item.padrao == null ? '' : item.padrao).trim()
                 };
             });
 
@@ -2617,8 +2687,11 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             }
 
             const faltandoAtributo = new Map();
+            const comTodosOsDados = [];
 
-            contatosParaEnvio = contatos.map((contato) => {
+            contatosParaEnvio.forEach((contato) => {
+                let completo = true;
+
                 const valores = templateEscolhido.variaveis.map((variavel) => {
                     const mapa = informados[variavel];
                     let valor;
@@ -2629,53 +2702,64 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
                         valor = valorDoContato(contato, mapa.valor);
 
                         if (!valor) {
-                            const registro = faltandoAtributo.get(mapa.valor) || { total: 0, exemplo: '' };
-                            registro.total += 1;
-                            if (!registro.exemplo) registro.exemplo = contato.telefone;
-                            faltandoAtributo.set(mapa.valor, registro);
+                            // Valor de reserva resolve o contato incompleto sem
+                            // segurar o resto da campanha.
+                            if (mapa.padrao) {
+                                valor = mapa.padrao;
+                            } else {
+                                completo = false;
+
+                                const registro = faltandoAtributo.get(mapa.valor) || { total: 0, exemplos: [] };
+                                registro.total += 1;
+                                if (registro.exemplos.length < 5 && registro.exemplos.indexOf(contato.telefone) === -1) {
+                                    registro.exemplos.push(contato.telefone);
+                                }
+                                faltandoAtributo.set(mapa.valor, registro);
+                            }
                         }
                     }
 
                     return { name: variavel, value: valor };
                 });
 
-                return Object.assign({}, contato, {
+                if (!completo) return;
+
+                comTodosOsDados.push(Object.assign({}, contato, {
                     parametros: valores,
                     mensagem: renderizarMensagemTemplate(templateEscolhido.corpo, valores, templateEscolhido.variaveis)
-                });
+                }));
             });
 
-            if (faltandoAtributo.size) {
-                const detalhes = Array.from(faltandoAtributo.entries()).map(([atributo, info]) =>
-                    `${info.total} contato(s) sem o atributo "${atributo}" (ex.: ${info.exemplo})`
+            // Contato sem o dado fica de fora (nada de "Olá ," chegando no
+            // WhatsApp) e o painel mostra quem precisa ser completado.
+            contatosSemDado = Array.from(faltandoAtributo.entries()).map(([atributo, info]) => ({
+                atributo,
+                total: info.total,
+                exemplos: info.exemplos
+            }));
+
+            if (!comTodosOsDados.length) {
+                const detalhes = contatosSemDado.map((item) =>
+                    `${item.total} contato(s) sem "${item.atributo}" (ex.: ${item.exemplos.join(', ')})`
                 );
 
                 return res.status(400).json({
                     success: false,
-                    message: 'Complete a lista antes de disparar: ' + detalhes.join('; ') + '.'
+                    message: 'Nenhum contato da lista tem o que o template pede: ' + detalhes.join('; ')
+                        + '. Complete a lista ou preencha o valor de reserva da variável (ex.: cliente).'
                 });
             }
+
+            contatosParaEnvio = comTodosOsDados;
 
             templateParametros = templateEscolhido.variaveis.map((variavel) => ({
                 nome: variavel,
                 origem: informados[variavel].origem,
-                valor: informados[variavel].valor
+                valor: informados[variavel].valor,
+                padrao: informados[variavel].padrao
             }));
 
             mensagemCampanha = templateEscolhido.corpo || textoMensagem || ('Template ' + templateEscolhido.nome);
-        }
-
-        // A lista pode trazer a mesma pessoa em mais de uma linha (mesmo
-        // WhatsApp em registros diferentes). Cada linha viraria uma mensagem:
-        // fica só a primeira de cada número.
-        const semRepetidos = deduplicarContatosPorTelefone(contatosParaEnvio);
-        contatosParaEnvio = semRepetidos.unicos;
-
-        if (!contatosParaEnvio.length) {
-            return res.status(400).json({
-                success: false,
-                message: 'A lista escolhida não tem nenhum telefone válido.'
-            });
         }
 
         const campanha = await banco.criarCampanha({
@@ -2701,6 +2785,9 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             `${campanha.id} - ${nomeCampanha} (${campanha.total} contatos, ${intervaloMs} ms`
                 + (templateEscolhido ? `, template ${templateEscolhido.nome}` : ', texto livre')
                 + (semRepetidos.repetidos.length ? `, ${semRepetidos.repetidos.length} repetido(s) ignorado(s)` : '')
+                + (contatosSemDado.length
+                    ? `, ${contatosSemDado.map((item) => `${item.total} sem "${item.atributo}"`).join(', ')} fora da campanha`
+                    : '')
                 + ')'
                 + (vendedor ? ` -> ${vendedor.nome} (${vendedor.email})` : ' -> sem direcionamento')
         );
@@ -2710,6 +2797,8 @@ app.post('/api/campanhas', exigirAdmin, async (req, res) => {
             id: campanha.id,
             total: campanha.total,
             ignorados: semRepetidos.repetidos.length,
+            semDado: contatosSemDado,
+            semDadoTotal: contatosSemDado.reduce((soma, item) => soma + item.total, 0),
             intervaloMs,
             canal: canalEscolhido,
             loteTemplate: canalEscolhido === 'template' ? Math.min(campanha.total, LOTE_TEMPLATE) : 1,

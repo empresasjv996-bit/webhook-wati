@@ -128,6 +128,65 @@ async function lerJson(resposta) {
         assert.strictEqual(Number(resumo.falhas), 0, 'houve falha no envio demo: ' + JSON.stringify(resumo));
 
         console.log('OK - lista {{1}}/{{2}} importada e campanha enviada para ' + resumo.enviados + ' contato(s)');
+
+        /* ---------- contato sem o dado não trava a campanha ---------- */
+        const criacaoIncompleta = await fetch(BASE + '/api/listas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Cookie: cookie },
+            body: JSON.stringify({
+                nome: 'TESTE SEM DADO ' + Date.now(),
+                contatos: [
+                    { telefone: '5511777777777', nome: '', atributos: {}, variaveis: { 1: 'Ana', 2: '11' } },
+                    { telefone: '5511666666666', nome: '', atributos: {}, variaveis: { 1: '', 2: '22' } }
+                ]
+            })
+        });
+        const listaIncompleta = await lerJson(criacaoIncompleta);
+        assert.strictEqual(criacaoIncompleta.status, 200, JSON.stringify(listaIncompleta));
+
+        async function criarCampanhaTemplate(parametros) {
+            const resposta = await fetch(BASE + '/api/campanhas', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Cookie: cookie },
+                body: JSON.stringify({
+                    nome: 'Campanha sem dado ' + Date.now(),
+                    listaId: listaIncompleta.id,
+                    mensagem: '',
+                    canal: 'template',
+                    templateNome: 'teste_painel',
+                    templateIdioma: 'pt_BR',
+                    parametros,
+                    intervalo: 3000
+                })
+            });
+
+            return { status: resposta.status, dados: await lerJson(resposta) };
+        }
+
+        // Sem valor de reserva: só quem tem {{1}} entra, e o painel fica sabendo.
+        const semReserva = await criarCampanhaTemplate([
+            { nome: '1', origem: 'atributo', valor: '1' },
+            { nome: '2', origem: 'atributo', valor: '2' }
+        ]);
+
+        assert.strictEqual(semReserva.status, 200, JSON.stringify(semReserva.dados));
+        assert.strictEqual(semReserva.dados.total, 1, 'só o contato com o dado entra na campanha');
+        assert.strictEqual(semReserva.dados.semDadoTotal, 1, 'quem ficou de fora é informado');
+        assert.strictEqual(semReserva.dados.semDado[0].atributo, '1');
+        assert.deepStrictEqual(semReserva.dados.semDado[0].exemplos, ['5511666666666']);
+
+        // Com valor de reserva: ninguém fica de fora.
+        const comReserva = await criarCampanhaTemplate([
+            { nome: '1', origem: 'atributo', valor: '1', padrao: 'cliente' },
+            { nome: '2', origem: 'atributo', valor: '2' }
+        ]);
+
+        assert.strictEqual(comReserva.status, 200, JSON.stringify(comReserva.dados));
+        assert.strictEqual(comReserva.dados.total, 2, 'com valor de reserva os dois contatos entram');
+        assert.strictEqual(comReserva.dados.semDadoTotal, 0);
+
+        console.log('OK - contato sem o dado não bloqueia a campanha (' + semReserva.dados.semDadoTotal
+            + ' fora sem reserva, ' + comReserva.dados.total + ' com reserva)');
     } finally {
         filho.kill();
     }

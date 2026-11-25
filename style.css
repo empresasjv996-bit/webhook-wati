@@ -469,6 +469,7 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 }
 .template-parametro .form-control { padding: 8px 10px; font-size: 0.78rem; }
 .template-parametro [data-fixo] { grid-column: 3; }
+.template-parametro [data-padrao] { grid-column: 3; }
 .template-variavel {
     font-family: var(--font); font-size: 0.76rem; font-weight: 800; color: var(--green);
     background: rgba(0, 255, 128, 0.1); border: 1px solid rgba(0, 255, 128, 0.25);
@@ -479,6 +480,7 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 @media (max-width: 560px) {
     .template-parametro { grid-template-columns: 74px minmax(0, 1fr); }
     .template-parametro [data-fixo] { grid-column: 1 / -1; }
+    .template-parametro [data-padrao] { grid-column: 1 / -1; }
 }
 
 /* =========================================================

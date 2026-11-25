@@ -173,8 +173,8 @@ assert.strictEqual(
 );
 
 assert.ok(
-    fonteIndex.includes('deduplicarContatosPorTelefone(contatosParaEnvio)'),
-    'a criação da campanha deduplica os contatos por número'
+    fonteIndex.includes('const semRepetidos = deduplicarContatosPorTelefone(contatos);'),
+    'a criação da campanha deduplica os contatos por número (antes de validar)'
 );
 assert.ok(
     fonteIndex.includes('banco.enviosDuplicadosCampanha('),
@@ -185,5 +185,36 @@ assert.ok(
     'banco expõe os repetidos por campanha (Postgres e demo)'
 );
 
+/* ---------- UAT 7: contato incompleto não trava a campanha ---------- */
+
+const linhasMesmoNumero = [
+    { telefone: '5511975988590', nome: '', atributos: { cnpj: '' } },
+    { telefone: '55 11 97598-8590', nome: 'Ana Souza', atributos: { cnpj: '12.345.678/0001-90' } }
+];
+
+const comHeranca = deduplicarContatosPorTelefone(linhasMesmoNumero);
+
+assert.strictEqual(comHeranca.unicos.length, 1, 'continua uma linha por número');
+assert.strictEqual(comHeranca.unicos[0].nome, 'Ana Souza', 'o nome que só existia na linha repetida é aproveitado');
+assert.strictEqual(comHeranca.unicos[0].atributos.cnpj, '12.345.678/0001-90', 'atributo vazio também é completado');
+assert.strictEqual(linhasMesmoNumero[0].nome, '', 'a lista original não é alterada pela campanha');
+
+assert.ok(
+    !fonteIndex.includes('Complete a lista antes de disparar'),
+    'um contato sem o dado não bloqueia mais a campanha inteira'
+);
+assert.ok(fonteIndex.includes('mapa.padrao'), 'variável aceita valor de reserva para quem não tem o dado');
+assert.ok(fonteIndex.includes('contatosSemDado'), 'a resposta diz quantos contatos ficaram de fora');
+
+const fonteApp = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+assert.ok(fonteApp.includes('data-padrao'), 'formulário tem o campo "se o contato não tiver, usar"');
+assert.ok(fonteApp.includes('semDadoTotal'), 'painel avisa quem ficou de fora por falta de dado');
+assert.ok(
+    fonteHtml.includes('se o contato não tiver, usar'),
+    'ajuda do formulário explica o valor de reserva'
+);
+
 console.log('OK - disparo em lote (uma campanha na Wati) e intervalo de 5 segundos validados.');
 console.log('OK - uma mensagem por número: contatos repetidos na lista não recebem a campanha duas vezes.');
+console.log('OK - contato sem o dado da variável não trava a campanha (valor de reserva / fica de fora).');
