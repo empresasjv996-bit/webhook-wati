@@ -68,8 +68,10 @@ header.top {
 }
 
 .filters { display: flex; padding: 15px; gap: 5px; border-bottom: 1px solid var(--border); }
-.filters button { flex: 1; background: transparent; border: none; color: var(--text-muted); font-size: 0.75rem; font-weight: 700; padding: 8px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+.filters button { flex: 1; background: transparent; border: none; color: var(--text-muted); font-size: 0.75rem; font-weight: 700; padding: 8px 6px; border-radius: 8px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
 .filters button.active { background: rgba(0,255,128,0.1); color: var(--green); }
+.filters button .contador { min-width: 20px; padding: 1px 6px; border-radius: 20px; background: rgba(255,255,255,0.08); color: var(--text-muted); font-size: 0.68rem; font-weight: 800; }
+.filters button.active .contador { background: rgba(0,255,128,0.18); color: var(--green); }
 
 .search-box { padding: 15px; }
 .search-box input { width: 100%; background: var(--bg-body); border: 1px solid var(--border); padding: 10px 15px; border-radius: 10px; color: white; outline: none; }
@@ -83,6 +85,9 @@ header.top {
 .contact-info h4 { font-size: 0.9rem; color: #fff; margin-bottom: 3px; }
 .contact-info p { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contact-item .time { font-size: 0.7rem; color: var(--text-muted); }
+.contact-item .tag-fila { flex-shrink: 0; font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; padding: 3px 7px; border-radius: 20px; color: var(--text-muted); background: rgba(255,255,255,0.06); white-space: nowrap; }
+.contact-item .tag-fila.ativa { color: var(--green); background: rgba(0,255,128,0.12); border: 1px solid rgba(0,255,128,0.25); }
+.contact-item .tag-fila.aberto { color: #fff; background: rgba(255,255,255,0.14); }
 
 /* 2. CHAT CENTRAL */
 .chat-area {
@@ -124,9 +129,20 @@ header.top {
 .client-panel {
     width: 320px; background: var(--bg-glass); backdrop-filter: blur(16px); border: 1px solid var(--border);
     border-radius: 20px; padding: 25px; overflow-y: auto;
+    transition: width 0.22s ease, padding 0.22s ease;
 }
 
-.client-panel h3 { font-size: 1.1rem; color: #fff; margin-bottom: 20px; }
+.ficha-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 20px; }
+.client-panel h3 { font-size: 1.1rem; color: #fff; }
+.btn-ficha { flex-shrink: 0; background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--green); width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 0.95rem; line-height: 1; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+.btn-ficha:hover { background: rgba(0,255,128,0.15); }
+
+/* ficha recolhida: sobra espaço para o chat */
+.client-panel.recolhida { width: 58px; padding: 18px 8px; overflow: hidden; }
+.client-panel.recolhida .ficha-topo { flex-direction: column-reverse; align-items: center; gap: 14px; margin-bottom: 0; }
+.client-panel.recolhida .ficha-topo h3 { writing-mode: vertical-rl; text-orientation: mixed; font-size: 0.72rem; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); margin: 0 auto; }
+.client-panel.recolhida .ficha-corpo { display: none; }
+
 .info-group { margin-bottom: 15px; }
 .info-group label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 5px; }
 .info-group p { font-size: 0.95rem; font-weight: 500; color: #fff; }

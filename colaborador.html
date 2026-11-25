@@ -39,9 +39,8 @@
             
             <aside class="sidebar">
                 <div class="filters">
-                    <button class="active" data-filtro="ativos">Aguardando</button>
-                    <button data-filtro="todos">Todos</button>
-                    <button data-filtro="finalizados">Finalizados</button>
+                    <button class="active" data-filtro="aguardando" title="Leads que ainda não responderam">Aguardando <span class="contador" id="contador-aguardando">0</span></button>
+                    <button data-filtro="ativa" title="Conversas em que o cliente já respondeu">Conversa ativa <span class="contador" id="contador-ativa">0</span></button>
                 </div>
                 
                 <div class="search-box">
@@ -82,23 +81,28 @@
                 </div>
             </section>
 
-            <aside class="client-panel">
-                <h3>Ficha do Cliente</h3>
-                
-                <div class="info-group">
-                    <label>Nome</label>
-                    <p id="ficha-nome">-</p>
-                </div>
-                <div class="info-group">
-                    <label>Telefone</label>
-                    <p id="ficha-telefone">-</p>
+            <aside class="client-panel" id="painel-ficha">
+                <div class="ficha-topo">
+                    <h3>Ficha do Cliente</h3>
+                    <button type="button" class="btn-ficha" id="btn-ficha" aria-expanded="true" aria-controls="ficha-corpo" title="Recolher ficha do cliente" aria-label="Recolher ficha do cliente">&laquo;</button>
                 </div>
 
-                <div class="info-group">
-                    <label>Dados da empresa</label>
-                    <ul id="ficha-atributos" class="ficha-atributos">
-                        <li><span>Selecione um contato</span></li>
-                    </ul>
+                <div class="ficha-corpo" id="ficha-corpo">
+                    <div class="info-group">
+                        <label>Nome</label>
+                        <p id="ficha-nome">-</p>
+                    </div>
+                    <div class="info-group">
+                        <label>Telefone</label>
+                        <p id="ficha-telefone">-</p>
+                    </div>
+
+                    <div class="info-group">
+                        <label>Dados da empresa</label>
+                        <ul id="ficha-atributos" class="ficha-atributos">
+                            <li><span>Selecione um contato</span></li>
+                        </ul>
+                    </div>
                 </div>
 
             </aside>

@@ -175,9 +175,8 @@
                             </select>
                         </div>
                         <div class="filtros">
-                            <button class="active" onclick="filtrarConversas('ativos', this)">Aguardando</button>
-                            <button onclick="filtrarConversas('todos', this)">Todos</button>
-                            <button onclick="filtrarConversas('finalizado', this)">Finalizados</button>
+                            <button class="active" data-fila="aguardando" onclick="filtrarConversas('aguardando', this)" title="Leads que ainda não responderam">Aguardando <span class="contador" id="contador-aguardando-admin">0</span></button>
+                            <button data-fila="ativa" onclick="filtrarConversas('ativa', this)" title="Conversas em que o cliente já respondeu">Conversa ativa <span class="contador" id="contador-ativa-admin">0</span></button>
                         </div>
                         <div class="contact-list" id="contact-list"></div>
                     </aside>

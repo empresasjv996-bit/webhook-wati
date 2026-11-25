@@ -9,7 +9,7 @@
 
     let clienteAtivo = null;
     let clientesCache = [];
-    let filtroAtual = 'ativos';
+    let filtroAtual = 'aguardando';
     let buscaAtual = '';
     let timerBusca = null;
     let sequenciaLista = 0;
@@ -171,9 +171,45 @@
     function parametrosDaLista() {
         const parametros = new URLSearchParams();
         parametros.set('limite', '200');
-        parametros.set('status', filtroAtual === 'finalizados' ? 'finalizado' : (filtroAtual === 'todos' ? 'todos' : 'ativos'));
+        // As duas filas do painel (Aguardando / Conversa ativa) olham só os
+        // atendimentos abertos: a divisão usa o campo `respondido` do contato.
+        parametros.set('status', 'ativos');
         if (buscaAtual) parametros.set('busca', buscaAtual);
         return parametros;
+    }
+
+    /* ---------- Filas do painel ----------
+       Aguardando   = o cliente ainda não respondeu nada
+       Conversa ativa = o cliente já respondeu (a conversa está viva) */
+
+    const VAZIO_DA_FILA = {
+        aguardando: 'Nenhum lead aguardando resposta.',
+        ativa: 'Nenhuma conversa ativa ainda. Quando o cliente responder, o lead aparece aqui.'
+    };
+
+    function clienteRespondido(cliente) {
+        if (!cliente) return false;
+        const valor = cliente.respondido;
+        return valor === true || valor === 't' || valor === 1 || valor === '1';
+    }
+
+    function clientesDaFila() {
+        const querRespondidos = filtroAtual === 'ativa';
+        return clientesCache.filter((cliente) => clienteRespondido(cliente) === querRespondidos);
+    }
+
+    function atualizarContadores() {
+        const ativa = clientesCache.filter(clienteRespondido).length;
+        const aguardando = clientesCache.length - ativa;
+
+        const contadorAguardando = $('contador-aguardando');
+        if (contadorAguardando) contadorAguardando.textContent = String(aguardando);
+        const contadorAtiva = $('contador-ativa');
+        if (contadorAtiva) contadorAtiva.textContent = String(ativa);
+
+        document.querySelectorAll('.filters button').forEach((botao) => {
+            botao.classList.toggle('active', botao.dataset.filtro === filtroAtual);
+        });
     }
 
     function marcarItemAtivo() {
@@ -187,27 +223,44 @@
         if (!lista) return;
 
         lista.innerHTML = '';
+        atualizarContadores();
 
-        if (!clientesCache.length) {
+        const contatos = clientesDaFila();
+        const naFila = new Set(contatos.map((c) => c.telefone));
+
+        // A conversa aberta continua na lista mesmo quando muda de fila
+        // (o cliente respondeu enquanto o atendente estava com ela aberta).
+        if (clienteAtivo && !naFila.has(clienteAtivo.telefone)) {
+            const aberto = clientesCache.find((c) => c.telefone === clienteAtivo.telefone);
+            if (aberto) contatos.unshift(aberto);
+        }
+
+        if (!contatos.length) {
             const vazio = document.createElement('p');
             vazio.style.cssText = 'padding:20px; color:var(--text-muted); text-align:center;';
             vazio.textContent = buscaAtual
                 ? 'Nenhum contato encontrado para esta busca.'
-                : (filtroAtual === 'finalizados' ? 'Nenhum atendimento finalizado.' : 'Nenhum lead na sua carteira.');
+                : (VAZIO_DA_FILA[filtroAtual] || 'Nenhum lead na sua carteira.');
             lista.appendChild(vazio);
             return;
         }
 
-        clientesCache.forEach((cliente) => {
+        contatos.forEach((cliente) => {
             const item = document.createElement('div');
             item.className = 'contact-item' + (clienteAtivo && clienteAtivo.telefone === cliente.telefone ? ' active' : '');
             item.dataset.telefone = cliente.telefone;
+
+            const respondeu = clienteRespondido(cliente);
+            // Conversa fixada = está aberta no chat, mas é da outra fila
+            const fixado = !naFila.has(cliente.telefone);
+            const etiqueta = fixado ? 'aberto' : (respondeu ? 'respondeu' : 'aguardando');
             item.innerHTML = `
                 <div class="avatar">${escaparHtml(iniciais(cliente.nome))}</div>
                 <div class="contact-info">
                     <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
                     <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
                 </div>
+                <span class="tag-fila${fixado ? ' aberto' : (respondeu ? ' ativa' : '')}">${etiqueta}</span>
             `;
             item.addEventListener('click', () => abrirCliente(cliente));
             lista.appendChild(item);
@@ -229,6 +282,8 @@
         if (fichaTelefone) fichaTelefone.textContent = '-';
         const area = $('mensagens');
         if (area) area.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:20px;">Nenhuma conversa selecionada.</p>';
+        const atributos = $('ficha-atributos');
+        if (atributos) atributos.innerHTML = '<li><span>Selecione um contato</span></li>';
 
         marcarItemAtivo();
     }
@@ -259,7 +314,8 @@
                 return;
             }
 
-            if (clientesCache.length) await abrirCliente(clientesCache[0]);
+            const fila = clientesDaFila();
+            if (fila.length) await abrirCliente(fila[0]);
             else limparSelecao();
         } catch (erro) {
             console.error('Erro ao carregar clientes:', erro);
@@ -363,6 +419,11 @@
 
         await carregarMensagens(clienteAtivo.telefone, true);
         await carregarFicha(clienteAtivo.telefone);
+
+        // Refaz a lista: a conversa que acabou de abrir pode ter saído da
+        // fila (cliente respondeu) e continua fixada no topo com a etiqueta
+        // "aberto" — sem isso o item ficava com o destaque antigo.
+        renderizarLista();
     }
 
     /* ---------- Reabrir o ticket com template aprovado ----------
@@ -591,6 +652,43 @@
         }
     }
 
+    /* ---------- Ficha do cliente: recolher / abrir ----------
+       Em telas pequenas (ou quando atrapalha a leitura do chat) o atendente
+       recolhe a ficha e o chat ganha a largura. O estado fica salvo. */
+
+    const CHAVE_FICHA = 'qgc-ficha-recolhida';
+
+    function aplicarEstadoFicha(recolhida) {
+        const painel = $('painel-ficha');
+        const botao = $('btn-ficha');
+
+        if (painel) painel.classList.toggle('recolhida', !!recolhida);
+
+        if (botao) {
+            botao.textContent = recolhida ? '»' : '«';
+            botao.setAttribute('aria-expanded', recolhida ? 'false' : 'true');
+            const titulo = recolhida ? 'Abrir ficha do cliente' : 'Recolher ficha do cliente';
+            botao.title = titulo;
+            botao.setAttribute('aria-label', titulo);
+        }
+    }
+
+    function iniciarFicha() {
+        const botao = $('btn-ficha');
+        if (!botao) return;
+
+        let recolhida = false;
+        try { recolhida = window.localStorage.getItem(CHAVE_FICHA) === '1'; } catch (erro) { recolhida = false; }
+        aplicarEstadoFicha(recolhida);
+
+        botao.addEventListener('click', () => {
+            const painel = $('painel-ficha');
+            const novoEstado = !(painel && painel.classList.contains('recolhida'));
+            aplicarEstadoFicha(novoEstado);
+            try { window.localStorage.setItem(CHAVE_FICHA, novoEstado ? '1' : '0'); } catch (erro) { /* modo privado */ }
+        });
+    }
+
     function iniciar() {
         // Funções chamadas pelos onclick do HTML
         window.enviarMensagem = enviarMensagem;
@@ -601,10 +699,12 @@
             botao.addEventListener('click', () => {
                 document.querySelectorAll('.filters button').forEach((b) => b.classList.remove('active'));
                 botao.classList.add('active');
-                filtroAtual = botao.dataset.filtro || 'ativos';
+                filtroAtual = botao.dataset.filtro === 'ativa' ? 'ativa' : 'aguardando';
                 carregarClientes(false);
             });
         });
+
+        iniciarFicha();
 
         const busca = $('busca-contatos');
         if (busca) {

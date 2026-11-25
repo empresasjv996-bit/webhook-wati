@@ -210,7 +210,12 @@ function criarBancoPostgres() {
             const where = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
 
             const { rows } = await pool.query(
-                `SELECT nome, telefone, mensagem, status, criado_em, vendedor_email, vendedor_nome
+                `SELECT nome, telefone, mensagem, status, criado_em, vendedor_email, vendedor_nome,
+                        EXISTS (
+                            SELECT 1 FROM mensagens m
+                             WHERE m.telefone = clientes.telefone
+                               AND m.direcao = 'recebida'
+                        ) AS respondido
                    FROM clientes ${where}
                   ORDER BY criado_em DESC NULLS LAST
                   LIMIT $${valores.length}`,
@@ -1095,6 +1100,19 @@ function criarBancoMemoria() {
         cnpj: null, socio: 'Fernanda Lima', cpf: '222.333.444-55',
         responsavel: 'Vendedor Jv', outros_socios: []
     });
+    // Leads de campanha que ainda não responderam (fila "Aguardando" do painel)
+    semearCliente({
+        nome: 'Ricardo Alves', telefone: '5511983332211', status: 'pensando',
+        mensagem: 'Oi Ricardo! Passando para falar do seu consórcio.', criado_em: minutosAtras(8),
+        cnpj: null, socio: null, cpf: null, responsavel: 'Vendedor Jv', outros_socios: [],
+        vendedor_email: 'vendedor@qgcteam.com', vendedor_nome: 'Vendedor Jv'
+    });
+    semearCliente({
+        nome: 'Patrícia Gomes', telefone: '5511974443322', status: 'pensando',
+        mensagem: 'Olá Patrícia! Recebeu a proposta de ontem?', criado_em: minutosAtras(20),
+        cnpj: null, socio: null, cpf: null, responsavel: 'Claudio', outros_socios: [],
+        vendedor_email: 'colaborador@qgcteam.com', vendedor_nome: 'Claudio'
+    });
 
     semearMensagem('5511998887766', 'recebida', 'Olá, boa tarde!', 14);
     semearMensagem('5511998887766', 'enviada', 'Boa tarde, Carlos! Tudo bem? Como posso ajudar?', 13);
@@ -1168,7 +1186,9 @@ function criarBancoMemoria() {
             return itens.slice(0, limite).map((c) => ({
                 nome: c.nome, telefone: c.telefone, mensagem: c.mensagem,
                 status: c.status, criado_em: c.criado_em,
-                vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null
+                vendedor_email: c.vendedor_email || null, vendedor_nome: c.vendedor_nome || null,
+                // o cliente já respondeu? separa "Aguardando" de "Conversa ativa"
+                respondido: mensagens.some((m) => m.telefone === c.telefone && m.direcao === 'recebida')
             }));
         },
 

@@ -6,7 +6,7 @@
 
 let clienteAtivo = null;
 let clientesCache = [];
-let filtroStatus = 'ativos';
+let filtroStatus = 'aguardando';
 let filtroVendedorConversas = '';
 let buscaAtual = '';
 let fichaTelefone = null;
@@ -430,11 +430,95 @@ async function carregarDashboard() {
 /* ---------------------------------------------------------
    CONVERSAS
    --------------------------------------------------------- */
+/* As duas filas da tela Conversas (substituíram Aguardando/Todos/Finalizados):
+   - aguardando    = o cliente ainda não respondeu (lead de campanha, por ex.)
+   - ativa         = o cliente já respondeu (conversa em andamento)
+   O lead finalizado sai das duas filas — ele continua na tela Clientes. */
 function filtrarConversas(status, botao) {
-    filtroStatus = status;
-    document.querySelectorAll('.filtros button').forEach((el) => el.classList.remove('active'));
-    if (botao) botao.classList.add('active');
+    filtroStatus = status === 'ativa' ? 'ativa' : 'aguardando';
+
+    document.querySelectorAll('.filtros button').forEach((el) => {
+        el.classList.toggle('active', botao ? el === botao : el.dataset.fila === filtroStatus);
+    });
+
     carregarConversas(true);
+}
+
+/* o cliente já respondeu? (campo calculado no servidor em /api/clientes) */
+function clienteJaRespondeu(cliente) {
+    return !!(cliente && cliente.respondido);
+}
+
+function conversasDaFila() {
+    const querRespondidos = filtroStatus === 'ativa';
+    return clientesCache.filter((cliente) => clienteJaRespondeu(cliente) === querRespondidos);
+}
+
+function atualizarContadoresConversas() {
+    const aguardando = $('contador-aguardando-admin');
+    const ativa = $('contador-ativa-admin');
+    if (!aguardando && !ativa) return;
+
+    let totalAguardando = 0;
+    let totalAtiva = 0;
+
+    clientesCache.forEach((cliente) => {
+        if (clienteJaRespondeu(cliente)) totalAtiva += 1;
+        else totalAguardando += 1;
+    });
+
+    if (aguardando) aguardando.textContent = String(totalAguardando);
+    if (ativa) ativa.textContent = String(totalAtiva);
+}
+
+function renderizarConversas() {
+    const lista = $('contact-list');
+    if (!lista) return;
+
+    lista.innerHTML = '';
+    atualizarContadoresConversas();
+
+    const contatos = conversasDaFila();
+    const naFila = new Set(contatos.map((c) => c.telefone));
+
+    // A conversa aberta continua na lista mesmo quando muda de fila
+    // (o cliente respondeu enquanto o atendente estava com ela aberta).
+    if (clienteAtivo && !naFila.has(clienteAtivo.telefone)) {
+        const aberto = clientesCache.find((c) => c.telefone === clienteAtivo.telefone);
+        if (aberto) contatos.unshift(aberto);
+    }
+
+    if (!contatos.length) {
+        const aviso = filtroVendedorConversas
+            ? 'Nenhuma conversa desse colaborador nesta fila.'
+            : (filtroStatus === 'ativa' ? 'Nenhum cliente respondeu ainda.' : 'Ninguém aguardando resposta.');
+        lista.innerHTML = '<p class="vazio">' + escaparHtml(aviso) + '</p>';
+        return;
+    }
+
+    contatos.forEach((cliente) => {
+        const item = document.createElement('div');
+        const estaAtivo = clienteAtivo && clienteAtivo.telefone === cliente.telefone;
+        item.className = 'contact-item' + (estaAtivo ? ' active' : '');
+        item.dataset.telefone = cliente.telefone;
+
+        const respondeu = clienteJaRespondeu(cliente);
+        // Fixado = está aberto no chat, mas é da outra fila
+        const fixado = !naFila.has(cliente.telefone);
+        const etiqueta = fixado ? 'aberto' : (respondeu ? 'respondeu' : 'aguardando');
+
+        item.onclick = () => abrirConversa(cliente.telefone);
+        item.innerHTML = `
+            <div class="avatar">${escaparHtml(iniciais(cliente.nome))}</div>
+            <div class="contact-info">
+                <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
+                <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
+                <small class="contact-owner">👤 ${escaparHtml(cliente.vendedor_nome || cliente.vendedor_email || 'Sem vendedor')}</small>
+            </div>
+            <span class="tag-fila${fixado ? ' aberto' : (respondeu ? ' ativa' : '')}">${etiqueta}</span>
+        `;
+        lista.appendChild(item);
+    });
 }
 
 /* Colaboradores que já têm conversas na base (dono do lead).
@@ -490,10 +574,12 @@ async function carregarConversas(manterSelecao) {
     if (!lista) return;
 
     try {
+        // As duas filas mostram só atendimento aberto: o lead finalizado sai
+        // do painel (continua disponível na tela Clientes).
         const parametros = new URLSearchParams({
-            status: filtroStatus,
+            status: 'ativos',
             busca: buscaAtual,
-            limite: 50
+            limite: 200
         });
 
         // Filtro por colaborador (admin). Vazio = todos.
@@ -503,38 +589,15 @@ async function carregarConversas(manterSelecao) {
         if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
 
         clientesCache = await resposta.json();
-        lista.innerHTML = '';
-
-        if (!clientesCache.length) {
-            lista.innerHTML = filtroVendedorConversas
-                ? '<p class="vazio">Nenhuma conversa desse colaborador.</p>'
-                : '<p class="vazio">Nenhum contato encontrado.</p>';
-            return;
-        }
-
-        clientesCache.forEach((cliente) => {
-            const item = document.createElement('div');
-            const estaAtivo = clienteAtivo && clienteAtivo.telefone === cliente.telefone;
-            item.className = 'contact-item' + (estaAtivo ? ' active' : '');
-            item.dataset.telefone = cliente.telefone;
-            item.onclick = () => abrirConversa(cliente.telefone);
-            item.innerHTML = `
-                <div class="avatar">${escaparHtml(iniciais(cliente.nome))}</div>
-                <div class="contact-info">
-                    <h4>${escaparHtml(cliente.nome || 'Sem nome')}</h4>
-                    <p>${escaparHtml(cliente.mensagem || 'Sem mensagem')}</p>
-                    <small class="contact-owner">👤 ${escaparHtml(cliente.vendedor_nome || cliente.vendedor_email || 'Sem vendedor')}</small>
-                </div>
-            `;
-            lista.appendChild(item);
-        });
+        renderizarConversas();
 
         if (manterSelecao && clienteAtivo) {
             const aindaExiste = clientesCache.some((c) => c.telefone === clienteAtivo.telefone);
             if (aindaExiste) return;
         }
 
-        if (clientesCache.length) abrirConversa(clientesCache[0].telefone);
+        const fila = conversasDaFila();
+        if (fila.length) abrirConversa(fila[0].telefone);
         else limparChat();
     } catch (erro) {
         console.error('Erro ao carregar contatos:', erro);
@@ -572,6 +635,10 @@ async function abrirConversa(telefone) {
     if (avatar) avatar.textContent = iniciais(cliente.nome);
 
     await carregarMensagens(telefone);
+
+    // Refaz a lista: a conversa aberta pode ter mudado de fila (o cliente
+    // respondeu) e continua fixada no topo com a etiqueta "aberto".
+    renderizarConversas();
 }
 
 async function carregarMensagens(telefone) {
@@ -827,6 +894,10 @@ async function finalizarAtendimento() {
 
         toast('Atendimento finalizado.');
         fecharFicha();
+        // Some das duas filas: limpa a seleção antes de recarregar, senão o
+        // lead finalizado ficaria fixado no topo como "aberto".
+        clienteAtivo = null;
+        limparChat();
         carregarConversas();
         carregarDashboard();
     } catch (erro) {
