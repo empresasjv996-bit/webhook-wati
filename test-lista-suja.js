@@ -14,6 +14,7 @@ const {
     normalizarTelefone,
     extrairTelefones,
     segmentarRegistros,
+    normalizarEntradaExtrator,
     aplicarResultadoExtrator,
     montarLinhasComEmpresa,
     montarCadastroCsv,
@@ -297,6 +298,68 @@ assert.ok(cadastro.linhas[1].indexOf('55.251.617/0001-71;SHIRATORI COMERCIO DE A
 
 console.log('OK - UAT 6: dump LIVE C6 PJ (empresa/persona/sócios, extrator e lista final)');
 
+/* ---------- UAT 8: CSV do extrator (CPF;NOME;...;REVELADO) ---------- */
+
+const csvExtrator = [
+    'CPF;NOME;NASCIMENTO;RENDA;EMAIL;BANCO;AGENCIA;CONTA;MASK;REVELADO',
+    '014.079.598-75;MARCOS TOBIAS LIMA;10/05/1985;16421.91;marcos@exemplo.com;NUBANK S.A.;;N/A;(12) *****8776;12998218776',
+    '305.863.028-08;LAYLA SHIRATORI;19/10/1982;3153.53;layla@exemplo.com;BANCO BRADESCO;7733;N/A;(11) *****9866;11959949866'
+].join('\n');
+
+const itensCsv = normalizarEntradaExtrator(csvExtrator);
+
+assert.strictEqual(itensCsv.length, 2, 'o cabeçalho do CSV não vira item');
+assert.strictEqual(itensCsv[0].cpf, '014.079.598-75', 'CPF da coluna CPF');
+assert.strictEqual(itensCsv[0].nome, 'MARCOS TOBIAS LIMA', 'nome da coluna NOME');
+assert.deepStrictEqual(
+    itensCsv[0].telefones,
+    ['5512998218776'],
+    'só o REVELADO vira telefone (nascimento, renda e agência ficam de fora)'
+);
+
+/* sem cabeçalho e separado por Tab também vale */
+const semCabecalho = normalizarEntradaExtrator('014.079.598-75;MARCOS TOBIAS LIMA;12998218776');
+assert.strictEqual(semCabecalho[0].nome, 'MARCOS TOBIAS LIMA');
+assert.deepStrictEqual(semCabecalho[0].telefones, ['5512998218776'], 'CSV sem cabeçalho (CPF;NOME;telefone)');
+
+const comTab = normalizarEntradaExtrator('014.079.598-75\tMARCOS TOBIAS LIMA\t12998218776');
+assert.deepStrictEqual(comTab[0].telefones, ['5512998218776'], 'CSV separado por Tab');
+
+/* dump do passo 1 ainda sem telefone: o CSV do extrator completa */
+const semTelefonesLive = resultadoLive.validos.map((registro) => Object.assign({}, registro, { telefones: [] }));
+const comCsv = aplicarResultadoExtrator(semTelefonesLive, csvExtrator);
+
+assert.strictEqual(comCsv.linhas, 2, '2 linhas lidas do CSV');
+assert.strictEqual(comCsv.aplicados, 2, '2 CPFs ganharam telefone');
+assert.strictEqual(comCsv.jaAplicados, 0);
+assert.strictEqual(comCsv.naoEncontrados.length, 0, 'todas casadas pelo CPF');
+assert.deepStrictEqual(comCsv.registros[0].telefones, ['5512998218776']);
+assert.deepStrictEqual(comCsv.registros[1].telefones, ['5511959949866'], 'CPF mascarado do dump também casa');
+
+/* aplicar de novo não duplica e explica o "0 aplicados" */
+const repetido = aplicarResultadoExtrator(comCsv.registros, csvExtrator);
+assert.strictEqual(repetido.aplicados, 0, 'segunda aplicação não duplica telefone');
+assert.strictEqual(repetido.jaAplicados, 2, 'segunda aplicação conta como já aplicada');
+assert.deepStrictEqual(repetido.registros[1].telefones, ['5511959949866']);
+
+/* linha casada mas sem telefone reconhecido */
+const semTelefoneCsv = aplicarResultadoExtrator(
+    semTelefonesLive,
+    '014.079.598-75;MARCOS TOBIAS LIMA;10/05/1985;N/A;N/A;N/A;N/A;N/A;(12) *****8776;N/A'
+);
+assert.strictEqual(semTelefoneCsv.semTelefoneNaLinha, 1, 'linha sem telefone é sinalizada');
+
+/* planilha final: telefone;{{1}};{{2}} + dados da empresa do passo 1 */
+const planilhaFinal = montarLinhasComEmpresa(comCsv.registros);
+assert.strictEqual(planilhaFinal.linhas.length, 2, '1 linha por telefone revelado');
+assert.ok(
+    planilhaFinal.linhas[0].indexOf('5512998218776;MARCOS TOBIAS LIMA;27.964.767/0001-97;IMPERIAL MARKETING') === 0,
+    'planilha final junta empresa do dump + telefone do extrator'
+);
+assert.ok(planilhaFinal.cabecalho.indexOf('telefone;{{1}};{{2}};') === 0, 'cabeçalho do envio');
+
+console.log('OK - UAT 8: CSV do extrator (CPF;NOME;...;REVELADO) aplicado e planilha final');
+
 /* ---------- unidades ---------- */
 
 assert.strictEqual(validarCpf('123.456.789-09'), true, 'CPF de teste válido');
@@ -407,6 +470,8 @@ assert.ok(html.includes('id="extrator-aviso"'), 'aviso de servidor sem Chrome na
 assert.ok(html.includes('onclick="copiarComandoExtrator()"'), 'botão Copiar comando do extrator local');
 assert.ok(telaListas.includes('id="lista-importar"'), 'planilha pronta recolhida na mesma tela');
 assert.ok(telaListas.includes('id="lista-texto"'), 'importação manual na mesma tela');
+assert.ok(telaListas.includes('REVELADO'), 'passo 3 explica o CSV do extrator');
+assert.ok(painel.includes('preencherPlanilhaFinalListaSuja();'), 'aplicar resultado já preenche a planilha pronta');
 assert.ok(telaListas.includes('id="tabela-listas"'), 'listas salvas na mesma tela');
 assert.ok(painel.includes("if (view === 'listasuja') view = 'listas';"), 'irPara aceita o apelido antigo "listasuja"');
 assert.ok(painel.includes('function abrirImportacaoLista('), 'app.js abre a planilha pronta ao enviar para importação');
@@ -420,6 +485,7 @@ assert.ok(html.includes('id="suja-aba-sem-telefone"'), 'aba Sem telefone');
 assert.ok(html.includes('onclick="processarListaSujaPainel()"'), 'botão Processar Lista');
 assert.ok(html.includes('onclick="copiarListaSuja()"'), 'botão Copiar');
 assert.ok(html.includes('onclick="baixarListaSuja()"'), 'botão Baixar .txt');
+assert.ok(html.includes('onclick="baixarListaSujaFinal()"'), 'botão Baixar planilha final (.csv)');
 assert.ok(html.includes('onclick="copiarListaSujaCpfs()"'), 'botão Copiar CPFs');
 assert.ok(html.includes('onclick="baixarListaSujaCpfs()"'), 'botão Baixar CPFs');
 assert.ok(html.includes('onclick="levarListaSujaParaExtrator()"'), 'botão Levar para Consultar CPF');
@@ -437,6 +503,7 @@ assert.ok(
     'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel', 'copiarListaSuja',
     'copiarListaSujaCpfs', 'baixarListaSujaCpfs', 'levarListaSujaParaExtrator', 'cpfsDaCaixa',
     'baixarListaSuja', 'usarListaSujaNaImportacao', 'usarListaSujaNaImportacaoComEmpresa',
+    'preencherPlanilhaFinalListaSuja', 'baixarListaSujaFinal',
     'baixarCadastroListaSuja', 'limparListaSuja', 'verificarExtratorPainel', 'copiarComandoExtrator'].forEach((nome) => {
     assert.ok(new RegExp('function ' + nome + '\\(').test(painel), 'app.js define ' + nome);
 });

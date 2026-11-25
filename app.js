@@ -3635,14 +3635,27 @@ function aplicarResultadoExtratorPainel() {
         recalcularListaSuja(resultado.registros);
 
         const partes = [
-            resultado.aplicados + ' CPF(s) com telefone revelado',
-            listaSuja.semTelefone.length + ' sem telefone',
-            resultado.naoEncontrados.length + ' linha(s) não casada(s)'
+            resultado.linhas + ' linha(s) lida(s)',
+            resultado.aplicados + ' CPF(s) com telefone revelado'
         ];
+
+        if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
+        if (resultado.semTelefoneNaLinha) partes.push(resultado.semTelefoneNaLinha + ' sem telefone na linha');
+        partes.push(listaSuja.semTelefone.length + ' ainda sem telefone');
+        if (resultado.naoEncontrados.length) partes.push(resultado.naoEncontrados.length + ' linha(s) não casada(s)');
+
+        mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
+
+        /* Já deixa a planilha pronta no formato do envio, com os dados da
+           empresa do passo 1 + o telefone revelado. */
+        if (listaSuja.linhas.length) {
+            preencherPlanilhaFinalListaSuja();
+            abrirImportacaoLista();
+            partes.push('planilha pronta preenchida');
+        }
 
         if (progresso) progresso.textContent = partes.join(' · ') + '.';
         toast(partes.join(' · '), resultado.naoEncontrados.length ? 'erro' : undefined);
-        mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
     } catch (erro) {
         toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
     }
@@ -3666,9 +3679,23 @@ function puxarResultadoExtratorPainel() {
 
     const resultado = aplicarResultadoExtrator(listaSuja.validos, { resultados });
     recalcularListaSuja(resultado.registros);
-
-    toast(resultado.aplicados + ' CPF(s) casado(s) com a última consulta do painel.');
     mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
+
+    /* Mesmo caminho do "Aplicar resultado": planilha pronta no formato do envio. */
+    if (listaSuja.linhas.length) {
+        preencherPlanilhaFinalListaSuja();
+        abrirImportacaoLista();
+    }
+
+    const partes = [
+        resultado.linhas + ' resultado(s)',
+        resultado.aplicados + ' CPF(s) com telefone revelado',
+        listaSuja.semTelefone.length + ' ainda sem telefone'
+    ];
+
+    if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
+
+    toast(partes.join(' · ') + '.');
 }
 
 /* ---------- passo 2: CPFs para o extrator ---------- */
@@ -3809,19 +3836,47 @@ function usarListaSujaNaImportacao() {
 
 /* Mesma lista, mas com os dados da empresa/persona nas colunas extras:
    viram atributos do cliente (a ficha do painel já mostra clientes.atributos). */
-function usarListaSujaNaImportacaoComEmpresa() {
-    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
-
+/* Preenche a planilha pronta no formato do envio: telefone;{{1}}=nome;
+   {{2}}=CNPJ + os dados da empresa/persona que vieram do dump (passo 1).
+   Funciona também logo depois de aplicar o resultado do extrator. */
+function preencherPlanilhaFinalListaSuja() {
     const caixa = $('lista-texto');
-    if (!caixa) { toast('Abra a tela de importação de listas.', 'erro'); return; }
+    if (!caixa) return null;
 
     const montado = montarLinhasComEmpresa(listaSuja.validos);
     caixa.value = [montado.cabecalho].concat(montado.linhas).join('\n');
+
+    return montado;
+}
+
+function usarListaSujaNaImportacaoComEmpresa() {
+    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
+
+    const montado = preencherPlanilhaFinalListaSuja();
+    if (!montado) { toast('Abra a tela de importação de listas.', 'erro'); return; }
 
     irPara('listas');
     analisarLista();
     abrirImportacaoLista();
     toast(montado.linhas.length + ' linha(s) com os dados da empresa (ficha do cliente).');
+}
+
+/* Download do CSV final (telefone;{{1}};{{2}} + atributos), já com os
+   telefones revelados pelo extrator, pronto para subir na Wati. */
+function baixarListaSujaFinal() {
+    if (!listaSuja.validos.length) { toast('Processe a lista antes de baixar a planilha final.', 'erro'); return; }
+
+    const montado = montarLinhasComEmpresa(listaSuja.validos);
+
+    if (!montado.linhas.length) {
+        toast('Nenhum telefone ainda: aplique o resultado do extrator no passo 3.', 'erro');
+        return;
+    }
+
+    const conteudo = [montado.cabecalho].concat(montado.linhas).join('\r\n') + '\r\n';
+
+    baixarArquivoTexto('lista-wati-{carimbo}.csv', '\uFEFF' + conteudo, 'text/csv;charset=utf-8');
+    toast(montado.linhas.length + ' contato(s) na planilha final (.csv).');
 }
 
 function baixarCadastroListaSuja() {

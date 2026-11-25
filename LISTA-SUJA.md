@@ -61,8 +61,21 @@ Menu **Listas** (tela única — o antigo "Importar lista" e "Lista Suja" virara
    (o atalho joga os CPFs na tela *Consultar CPF*; o limite do painel é 25 por consulta).
 3. **Cole o resultado do extrator** e clique em **Aplicar resultado**
    (ou `⤓ Usar última consulta do painel`, que reaproveita o JSON da última consulta feita no painel).
-4. **Prontos (N)** — lista final + `📋 Copiar` · `⬇ Baixar .txt` · `↪ Enviar para importação` ·
+   - Aceita o **CSV do extrator** (`CPF;NOME;NASCIMENTO;RENDA;EMAIL;BANCO;AGENCIA;CONTA;MASK;REVELADO`,
+     com ou sem cabeçalho, `;` ou Tab): o CPF casa com o registro, o `NOME` serve de reserva e só a coluna
+     **REVELADO** vira telefone — nascimento, renda, agência e conta não entram como número.
+   - Também aceita `CPF;telefone` (CPF completo ou mascarado `000.000.xxx-xx`),
+     `✓ [LIVE] NOME | Mask: ... | Revelado: ...` e o JSON do painel.
+   - O retorno diz o que aconteceu: `N linha(s) lida(s) · X CPF(s) com telefone revelado ·
+     Y já estava(m) com esse telefone · Z sem telefone na linha · W ainda sem telefone ·
+     K linha(s) não casada(s)`. Se `X = 0` e `Y > 0`, o resultado já tinha sido aplicado antes.
+   - Ao terminar, a **Planilha pronta** é preenchida no formato do envio
+     (`telefone;{{1}};{{2}}` + atributos da empresa do passo 1) e a seção é aberta.
+4. **Prontos (N)** — lista final + `📋 Copiar` · `⬇ Baixar .txt` ·
+   `⬇ Baixar planilha final (.csv)` · `↪ Enviar para importação` ·
    `↪ Enviar com dados da empresa` · `⬇ Baixar cadastro (.csv)`.
+   - *Baixar planilha final (.csv)* entrega o CSV do disparo já completo: `telefone;{{1}};{{2}}` +
+     razão social, situação, endereço, persona, sócios (UTF-8 com BOM, `;` e CRLF — abre no Excel).
    - *Enviar para importação* usa só `telefone;{{1}};{{2}}` (nome e CNPJ nas variáveis do template).
    - *Enviar com dados da empresa* acrescenta as colunas de atributos (razão social, situação, endereço,
      persona, sócios...). Ao importar, elas ficam em `clientes.atributos` e aparecem na **ficha do cliente**
@@ -92,13 +105,14 @@ Processamento síncrono com estado de loading (setTimeout antes do parse); 1.000
 | Dump LIVE C6 PJ com empresa/persona/sócios | Empresa, persona e sócios separados; telefone do sócio não entra | ✅ |
 | Extrator por CPF mascarado / nome / JSON do painel | Telefone revelado entra na lista | ✅ |
 | Lista com dados da empresa | 1 linha por telefone com `telefone;{{1}};{{2}}` + atributos | ✅ |
+| CSV do extrator (`CPF;NOME;...;MASK;REVELADO`) | Casa pelo CPF, nome da coluna NOME, só REVELADO vira telefone; planilha final com os dados da empresa | ✅ |
 
 ## 5. Arquivos
 
 | Arquivo | Papel |
 |---|---|
 | `lista-suja.js` | Parser puro (navegador + Node). Principais funções: `processarListaSuja`, `processarRegistro`, `segmentarRegistros`, `restaurarQuebras`, `normalizarEspacos`, `mensagemFormato`, `extrairEmpresa`, `extrairPersona`, `extrairSocio`, `aplicarResultadoExtrator`, `montarLinhasComEmpresa`, `montarCadastroCsv`, `validarCpf`, `formatarCnpj`. |
-| `app.js` | Cola da UI: `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`, `puxarResultadoExtratorPainel`, `mostrarAbaListaSuja`, `renderizarListaSuja`, `recalcularListaSuja`, `copiarListaSuja`, `baixarListaSuja`, `copiarListaSujaCpfs`, `baixarListaSujaCpfs`, `levarListaSujaParaExtrator`, `usarListaSujaNaImportacao`, `usarListaSujaNaImportacaoComEmpresa`, `baixarCadastroListaSuja`, `limparListaSuja`. |
+| `app.js` | Cola da UI: `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`, `puxarResultadoExtratorPainel`, `mostrarAbaListaSuja`, `renderizarListaSuja`, `recalcularListaSuja`, `copiarListaSuja`, `baixarListaSuja`, `baixarListaSujaFinal`, `preencherPlanilhaFinalListaSuja`, `copiarListaSujaCpfs`, `baixarListaSujaCpfs`, `levarListaSujaParaExtrator`, `usarListaSujaNaImportacao`, `usarListaSujaNaImportacaoComEmpresa`, `baixarCadastroListaSuja`, `limparListaSuja`. |
 | `index.html` | Tela única `view-listas` (passos 1-3, abas de resultado, planilha pronta recolhida e listas salvas) e script `lista-suja.js` carregado antes de `app.js`. |
 | `colaborador.html` / `colaborador.js` / `colaborador.css` | Ficha do cliente no painel do vendedor: exibe `clientes.atributos` (dados da empresa/persona). |
 | `style.css` | `.suja-tabs`, `.suja-bruto`. |

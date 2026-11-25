@@ -623,13 +623,59 @@ function itensDoJson(dados) {
     }));
 }
 
+/* Colunas separadas por ; ou Tab (o CSV do extrator usa ; e os nomes não
+   têm vírgula; a vírgula fica de fora para não quebrar "SILVA, JOAO"). */
+function camposDaLinha(linha) {
+    if (linha.indexOf(';') === -1 && linha.indexOf('\t') === -1) return null;
+
+    const campos = linha.split(/\s*[;\t]\s*/).map((campo) => campo.trim());
+    return campos.length >= 2 ? campos : null;
+}
+
+/* Nome de pessoa: letras/espaços, sem dígito, e-mail ou barra (por isso
+   "12/11/1980" e "N/A" não passam). */
+function pareceNome(valor) {
+    const texto = String(valor == null ? '' : valor).trim();
+
+    if (texto.length < 4 || texto.length > 80) return false;
+    return /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\s-]*$/.test(texto);
+}
+
+function acharColuna(chaves, nomes) {
+    for (let i = 0; i < chaves.length; i += 1) {
+        if (nomes.indexOf(chaves[i]) >= 0) return i;
+    }
+
+    return -1;
+}
+
 /* Cada linha pode ser "000.000.000-00;5511...", "✓ [LIVE] NOME | Mask: ... |
-   Revelado: 11999..." ou "NOME;5511..." (nesse caso casa pelo nome). */
+   Revelado: 11999...", o CSV do extrator
+   "CPF;NOME;NASCIMENTO;RENDA;EMAIL;BANCO;AGENCIA;CONTA;MASK;REVELADO"
+   ou "NOME;5511..." (nesse caso casa pelo nome). */
 function itensDoTexto(texto) {
     const itens = [];
+    let colunas = null; /* mapa do cabeçalho do CSV do extrator */
 
     String(texto || '').replace(/\r\n?/g, '\n').split('\n').forEach((linha) => {
         if (!linha.trim()) return;
+
+        const campos = camposDaLinha(linha);
+
+        /* Cabeçalho do CSV: guarda onde está o CPF, o nome e o telefone
+           revelado e passa para a próxima linha. */
+        if (campos) {
+            const chaves = campos.map((campo) => normalizarTexto(campo).replace(/\s+/g, ' '));
+
+            if (chaves.indexOf('cpf') >= 0 || chaves.indexOf('revelado') >= 0) {
+                colunas = {
+                    cpf: acharColuna(chaves, ['cpf', 'cpf persona', 'documento']),
+                    nome: acharColuna(chaves, ['nome', 'nome persona', 'titular', 'cliente']),
+                    telefone: acharColuna(chaves, ['revelado', 'telefone', 'telefones', 'celular', 'whatsapp'])
+                };
+                return;
+            }
+        }
 
         const cpfs = linha.match(REGEX_CPF_FORMATADO) || [];
         let semCpf = linha.replace(REGEX_CPF_FORMATADO, ' ');
@@ -643,13 +689,34 @@ function itensDoTexto(texto) {
         }
 
         const live = /\[\s*LIVE\s*\]\s*(.+?)\s*\|/i.exec(linha);
-        const telefones = extrairTelefones(semCpf);
+        let nome = live ? live[1].trim() : '';
+        let telefones = null;
 
-        if (!cpfs.length && !telefones.length && !live) return;
+        /* CSV do extrator: cada dado vem da sua coluna, então nascimento,
+           renda, agência e conta não viram telefone. */
+        if (campos) {
+            const cpfDaColuna = colunas && colunas.cpf >= 0 ? campos[colunas.cpf] : campos[0];
+            const nomeDaColuna = colunas && colunas.nome >= 0 ? campos[colunas.nome] : campos[1];
+            const telefoneDaColuna = colunas && colunas.telefone >= 0
+                ? campos[colunas.telefone]
+                : campos[campos.length - 1];
+
+            if (!cpfs.length && cpfDaColuna && apenasDigitos(cpfDaColuna).length === 11) {
+                cpfs.push(cpfDaColuna);
+            }
+
+            if (!nome && nomeDaColuna && pareceNome(nomeDaColuna)) nome = nomeDaColuna;
+
+            if (telefoneDaColuna) telefones = extrairTelefones(telefoneDaColuna);
+        }
+
+        if (!telefones || !telefones.length) telefones = extrairTelefones(semCpf);
+
+        if (!cpfs.length && !telefones.length && !nome) return;
 
         itens.push({
             cpf: cpfs[0] || '',
-            nome: live ? live[1].trim() : '',
+            nome: nome ? nome.trim() : '',
             telefones,
             texto: linha.trim()
         });
@@ -686,6 +753,8 @@ function aplicarResultadoExtrator(registros, entrada) {
     }));
     const naoEncontrados = [];
     let aplicados = 0;
+    let jaAplicados = 0;
+    let semTelefoneNaLinha = 0;
 
     itens.forEach((item) => {
         let alvo = null;
@@ -723,6 +792,8 @@ function aplicarResultadoExtrator(registros, entrada) {
             return;
         }
 
+        if (!item.telefones.length) semTelefoneNaLinha += 1;
+
         let novos = 0;
         item.telefones.forEach((telefone) => {
             if (alvo.telefones.includes(telefone)) return;
@@ -731,6 +802,7 @@ function aplicarResultadoExtrator(registros, entrada) {
         });
 
         if (novos) aplicados += 1;
+        else jaAplicados += 1;
     });
 
     atualizados.forEach((registro) => {
@@ -738,7 +810,14 @@ function aplicarResultadoExtrator(registros, entrada) {
         registro.linhas = linhasDoRegistro(registro);
     });
 
-    return { registros: atualizados, aplicados, naoEncontrados };
+    return {
+        registros: atualizados,
+        aplicados,
+        jaAplicados,
+        semTelefoneNaLinha,
+        naoEncontrados,
+        linhas: itens.length
+    };
 }
 
 /* ---------- cadastro da empresa / importação ---------- */
