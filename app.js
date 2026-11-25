@@ -762,7 +762,8 @@ async function enviarTemplateReabertura() {
         ? variaveis.map((variavel, i) => '{{' + variavel + '}} = ' + (parametros[i] || '(vazio)')).join('\n')
         : 'template sem variáveis';
 
-    if (!confirm('Enviar "' + template.nome + '" para ' + clienteAtivo.nome + '?\n\n' + resumo)) return;
+    if (!confirm('Enviar "' + template.nome + '" para ' + clienteAtivo.nome + '?\n\n' + resumo
+        + '\n\nSe ele já recebeu este template, não precisa reenviar: o texto livre só volta quando ele responder.')) return;
 
     const botao = document.querySelector('.btn-template');
     if (botao) botao.disabled = true;
@@ -785,7 +786,7 @@ async function enviarTemplateReabertura() {
 
         if (select) select.value = '';
         adicionarMensagemNaTela('enviada', dados.texto || template.nome, 'Você');
-        toast('Template enviado. O ticket está aberto de novo.');
+        toast('Template enviado. O texto livre libera quando o cliente responder.');
         carregarConversas();
     } catch (erro) {
         toast(mensagemDoErro(erro, 'Erro ao enviar o template.'), 'erro');

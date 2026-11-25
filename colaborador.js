@@ -474,7 +474,8 @@
             ? variaveis.map((variavel, i) => '{{' + variavel + '}} = ' + (parametros[i] || '(vazio)')).join('\n')
             : 'template sem variáveis';
 
-        if (!confirm('Enviar "' + template.nome + '" para ' + clienteAtivo.nome + '?\n\n' + resumo)) return;
+        if (!confirm('Enviar "' + template.nome + '" para ' + clienteAtivo.nome + '?\n\n' + resumo
+            + '\n\nSe ele já recebeu este template, não precisa reenviar: o texto livre só volta quando ele responder.')) return;
 
         const botao = document.querySelector('.btn-template');
         if (botao) botao.disabled = true;
@@ -498,7 +499,7 @@
             if (select) select.value = '';
             await carregarMensagens(clienteAtivo.telefone, true);
             await carregarClientes(true, true);
-            alert('Template enviado. O ticket está aberto de novo: já pode escrever para o cliente.');
+            alert('Template enviado. O texto livre volta a funcionar quando o cliente responder — se ele já recebeu este template, não precisa reenviar.');
         } catch (erro) {
             alert(mensagemDoErro(erro, 'Erro ao enviar o template.'));
         } finally {

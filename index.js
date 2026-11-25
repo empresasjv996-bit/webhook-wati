@@ -545,12 +545,18 @@ function erroJanelaFechada(motivo) {
         || texto.includes('janela de 24')
         || texto.includes('outside the allowed window')
         || texto.includes('message failed to send because more than 24 hours')
+        || texto.includes('invalid conversation')
+        || texto.includes('conversa inválida')
+        || texto.includes('conversa invalida')
         || (texto.includes('ticket') && (texto.includes('expir') || texto.includes('vencid') || texto.includes('fechad')));
 }
 
-const ORIENTACAO_JANELA_FECHADA = 'A conversa deste cliente está sem ticket aberto (o WhatsApp libera texto livre só até 24h '
-    + 'depois da última mensagem dele). Peça para o cliente responder qualquer coisa ou reabra o ticket na barra '
-    + '"Ticket vencido?", acima do campo de mensagem, enviando um template aprovado; depois disso a conversa volta ao normal.';
+/* Importante (testado em produção): enviar um template NÃO reabre o texto livre.
+   A Meta/Wati só libera texto livre quando o CLIENTE responde — o template serve
+   para reengajar o contato, não para destravar a conversa. */
+const ORIENTACAO_JANELA_FECHADA = 'A conversa deste cliente está sem ticket aberto: o WhatsApp só aceita texto livre até 24h '
+    + 'depois da última mensagem dele. O template aprovado (barra "Ticket vencido?", acima do campo de mensagem) reengaja o '
+    + 'cliente, mas o texto livre só volta quando ele responder — se o cliente já recebeu o template, aguarde a resposta.';
 
 function descreverErroWati(resposta) {
     if (!resposta) return 'sem resposta';

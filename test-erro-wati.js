@@ -69,6 +69,9 @@ const janelaOk = erroJanelaFechada('código 131047: Re-engagement message')
     && erroJanelaFechada('Ticket has been expired.')
     && erroJanelaFechada('Ticket has been expired')
     && erroJanelaFechada('O ticket desta conversa foi fechado')
+    /* Caso real de produção: Wati respondeu "Invalid Conversation." para um
+       contato cuja conversa já tinha vencido. */
+    && erroJanelaFechada('Invalid Conversation.')
     && !erroJanelaFechada('Telefone inválido')
     && !erroJanelaFechada('Template não encontrado');
 

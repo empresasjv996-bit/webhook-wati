@@ -107,6 +107,7 @@ header.top {
 .template-bar-titulo { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); white-space: nowrap; }
 .template-bar select { flex: 1; min-width: 0; background: var(--bg-body); border: 1px solid var(--border); padding: 10px 14px; border-radius: 14px; color: #fff; font-size: 0.78rem; outline: none; }
 .template-bar select:focus { border-color: var(--green); }
+.template-bar-dica { flex-basis: 100%; font-size: 0.68rem; line-height: 1.4; color: var(--text-muted); }
 .btn-template { background: rgba(0, 255, 128, 0.1); color: var(--green); border: 1px solid rgba(0, 255, 128, 0.35); padding: 10px 16px; border-radius: 14px; font-weight: 700; font-size: 0.78rem; cursor: pointer; transition: 0.2s; white-space: nowrap; }
 .btn-template:hover { background: var(--green); color: #000; }
 .btn-template:disabled { opacity: 0.5; cursor: not-allowed; }
