@@ -44,7 +44,7 @@ assert.ok(
 
 assert.ok(
     /<button data-view="listas" onclick="mostrarListas\(\)">Listas<\/button>/.test(menu),
-    'Listas é um botão direto (fluxo único: dump, CPF, telefone e importação)'
+    'Listas é um botão direto (fluxo único: colar arquivo -> mapear colunas -> importar)'
 );
 
 /* ---------- itens de cada submenu ---------- */
@@ -85,17 +85,16 @@ assert.strictEqual(
     'todo item do submenu tem uma linha de ajuda (<small>)'
 );
 
-/* ---------- tela única de listas (Importar + Validar + Lista Suja) ---------- */
+/* ---------- tela única de listas (importação de contatos) ---------- */
 
 const telaListas = html.slice(html.indexOf('id="view-listas"'), html.indexOf('id="view-canais"'));
 
 assert.ok(!html.includes('id="view-listasuja"'), 'não existe mais tela separada de Lista Suja');
 assert.ok(!html.includes('class="listas-nav"'), 'não existem mais abas Importar <-> Lista Suja');
-assert.ok(telaListas.includes('id="suja-texto"'), 'tela Listas começa pelo dump');
-assert.ok(telaListas.includes('id="suja-cpfs"'), 'tela Listas gera os CPFs do extrator');
-assert.ok(telaListas.includes('id="lista-importar"'), 'tela Listas guarda a planilha pronta');
+assert.ok(telaListas.includes('id="painel-importar"'), 'tela Listas tem um painel único de importação');
+assert.ok(telaListas.includes('id="lista-texto"'), 'tela Listas recebe o arquivo/contatos colados');
 assert.ok(telaListas.includes('id="tabela-listas"'), 'tela Listas mostra as listas salvas');
-assert.ok(estilos.includes('.lista-importar'), 'style.css estiliza a planilha pronta recolhida');
+assert.ok(estilos.includes('.lista-texto'), 'style.css estiliza a caixa de contatos');
 
 assert.strictEqual(
     Array.from(menu.matchAll(/class="nav-grupo-btn"/g)).length,
@@ -139,6 +138,6 @@ assert.ok(
 assert.ok(estilos.includes('@keyframes navSubmenuAbrir'), 'animação de abertura do submenu');
 
 console.log('OK - menu: Início e Listas diretos + 3 grupos (Contatos, Envio, Sistema) com ajuda em cada item');
-console.log('OK - tela única de Listas (dump -> CPF -> telefone -> planilha -> listas salvas)');
+console.log('OK - tela única de Listas (arquivo/contatos colados -> colunas -> importação -> listas salvas)');
 console.log('');
 console.log('Todos os testes de navegação passaram.');

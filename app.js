@@ -159,7 +159,7 @@ function irPara(view) {
     if (view === 'inicio') carregarDashboard();
     if (view === 'conversas') { carregarVendedoresConversas(); carregarConversas(true); }
     if (view === 'clientes') carregarTabelaClientes();
-    if (view === 'listas') { carregarListas(); verificarExtratorPainel(); }
+    if (view === 'listas') carregarListas();
     if (view === 'extrator') verificarExtratorPainel(true);
     if (view === 'canais') { carregarCanais(); carregarWebhook(); }
     if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); alterarCanalCampanha(); }
@@ -177,16 +177,14 @@ function mostrarClientes() { irPara('clientes'); }
 function mostrarListas() { irPara('listas'); }
 function mostrarInicio() { irPara('inicio'); }
 
-/* Abre o bloco "Planilha pronta" da tela Listas — usado quando outra tela
-   preenche o texto e leva o usuário direto para a importação. */
+/* Leva o usuário até o painel de importação da tela Listas — usado quando
+   outra tela preenche os contatos e manda para cá. */
 function abrirImportacaoLista() {
-    const bloco = $('lista-importar');
-    if (!bloco) return;
+    const painel = $('painel-importar');
+    if (!painel) return;
 
-    bloco.open = true;
-
-    if (typeof bloco.scrollIntoView === 'function') {
-        bloco.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (typeof painel.scrollIntoView === 'function') {
+        painel.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
 }
 
@@ -1723,7 +1721,7 @@ let extratorResultado = { resumo: null, resultados: [] };
 let telefonesColetados = [];
 
 /* Comando que o painel mostra quando o servidor não tem Chrome: o extrator
-   roda aqui na máquina e o resultado volta colado no passo 3. */
+   roda aqui na máquina e o resultado entra pelo botão ↪ Usar na importação. */
 const COMANDO_EXTRATOR = 'node extrator.js testar cpfs.txt';
 
 /* Situação do extrator automático no servidor:
@@ -1895,10 +1893,8 @@ async function verificarExtratorPainel(forcar) {
 function renderizarAvisoExtrator() {
     const bloqueado = extratorSituacao.navegador === false;
 
-    ['suja-extrator-aviso', 'extrator-aviso'].forEach((id) => {
-        const aviso = $(id);
-        if (aviso) aviso.classList.toggle('oculto', !bloqueado);
-    });
+    const aviso = $('extrator-aviso');
+    if (aviso) aviso.classList.toggle('oculto', !bloqueado);
 
     const botao = $('btn-consultar-cpfs');
     if (botao) {
@@ -1941,11 +1937,11 @@ async function consultarCpfsExtrator() {
 
     if (extratorSituacao.navegador === false) {
         const aviso = 'Consulta automática indisponível neste servidor (sem Chrome). '
-            + 'Baixe os CPFs, rode "' + COMANDO_EXTRATOR + '" no seu computador e cole o resultado no passo 3.';
+            + 'Baixe os CPFs, rode "' + COMANDO_EXTRATOR + '" no seu computador e clique em ↪ Usar na importação.';
 
         if (status) status.textContent = aviso;
         if (progresso) progresso.textContent = '';
-        toast('Servidor sem Chrome: use o script local e cole o resultado no passo 3.', 'erro');
+        toast('Servidor sem Chrome: use o script local e mande o resultado para a importação de listas.', 'erro');
         return;
     }
 
@@ -3914,449 +3910,29 @@ window.fetch = async function (...argumentos) {
 };
 
 /* ---------------------------------------------------------
-   PROCESSAR LISTA (LISTA SUJA)
-   ETL local no navegador: dump bruto -> linhas
-   {telefone};{nome};{cnpj} prontas para disparo.
-   O parser puro fica em lista-suja.js (carregado antes deste).
+   LIMPAR IMPORTAÇÃO DE LISTAS
+   Zera nome, contatos colados e o vínculo de colunas — as
+   listas já importadas continuam na tabela abaixo.
    --------------------------------------------------------- */
-let listaSuja = {
-    registros: 0,
-    validos: [],
-    prontos: [],
-    semTelefone: [],
-    descartados: [],
-    linhas: [],
-    cpfs: [],
-    empresas: []
-};
-
-function mostrarAbaListaSuja(aba) {
-    const paineis = {
-        prontos: $('suja-painel-prontos'),
-        'sem-telefone': $('suja-painel-sem-telefone'),
-        descartados: $('suja-painel-descartados')
-    };
-    const abas = {
-        prontos: $('suja-aba-prontos'),
-        'sem-telefone': $('suja-aba-sem-telefone'),
-        descartados: $('suja-aba-descartados')
-    };
-
-    Object.keys(paineis).forEach((chave) => {
-        if (paineis[chave]) paineis[chave].classList.toggle('oculto', chave !== aba);
-        if (abas[chave]) abas[chave].classList.toggle('active', chave === aba);
-    });
-}
-
-function renderizarListaSuja() {
-    const abaProntos = $('suja-aba-prontos');
-    const abaSemTelefone = $('suja-aba-sem-telefone');
-    const abaDescartados = $('suja-aba-descartados');
-    const saida = $('suja-saida');
-    const cpfs = $('suja-cpfs');
-    const corpo = $('tabela-suja-descartados');
-    const corpoSem = $('tabela-suja-sem-telefone');
-
-    if (abaProntos) abaProntos.textContent = 'Prontos (' + listaSuja.linhas.length + ')';
-    if (abaSemTelefone) abaSemTelefone.textContent = 'Sem telefone (' + listaSuja.semTelefone.length + ')';
-    if (abaDescartados) abaDescartados.textContent = 'Descartados (' + listaSuja.descartados.length + ')';
-    if (saida) saida.value = listaSuja.linhas.join('\n');
-    if (cpfs) cpfs.value = listaSuja.cpfs.join('\n');
-
-    if (corpoSem) {
-        if (!listaSuja.semTelefone.length) {
-            corpoSem.innerHTML = '<tr><td colspan="4" class="vazio">Nenhum registro sem telefone.</td></tr>';
-        } else {
-            corpoSem.innerHTML = listaSuja.semTelefone.map((item) => (
-                '<tr>' +
-                '<td>' + escaparHtml(item.cpfFormatado) + '</td>' +
-                '<td>' + escaparHtml(item.nome || '-') + '</td>' +
-                '<td>' + escaparHtml(item.cnpj || '-') + '</td>' +
-                '<td>' + escaparHtml((item.empresa && item.empresa.razaoSocial) || '-') + '</td>' +
-                '</tr>'
-            )).join('');
-        }
-    }
-
-    if (corpo) {
-        if (!listaSuja.descartados.length) {
-            corpo.innerHTML = '<tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>';
-        } else {
-            corpo.innerHTML = listaSuja.descartados.map((item) => (
-                '<tr>' +
-                '<td><span class="status-badge status-nao-quis">' + escaparHtml(item.motivo) + '</span></td>' +
-                '<td><pre class="suja-bruto">' + escaparHtml(item.bruto) + '</pre></td>' +
-                '</tr>'
-            )).join('');
-        }
-    }
-}
-
-/* Recalcula as abas e a lista final depois de aplicar o extrator. */
-function recalcularListaSuja(registros) {
-    listaSuja.validos = registros;
-    listaSuja.prontos = registros.filter((registro) => (registro.telefones || []).length);
-    listaSuja.semTelefone = registros.filter((registro) => !(registro.telefones || []).length);
-    listaSuja.linhas = [];
-    listaSuja.cpfs = registros.map((registro) => registro.cpfFormatado);
-
-    listaSuja.prontos.forEach((registro) => {
-        listaSuja.linhas.push.apply(listaSuja.linhas, linhasDoRegistro(registro));
-    });
-
-    renderizarListaSuja();
-}
-
-function processarListaSujaPainel() {
-    const caixa = $('suja-texto');
-    const progresso = $('suja-progresso');
-
-    if (!caixa || !String(caixa.value || '').trim()) {
-        toast('Cole a lista bruta antes de processar.', 'erro');
-        return;
-    }
-
-    const botao = document.querySelector('button[onclick="processarListaSujaPainel()"]');
-    if (botao) botao.disabled = true;
-    if (progresso) progresso.textContent = 'Processando...';
-
-    /* o setTimeout deixa o estado de loading pintar antes do parse (que é rápido) */
-    setTimeout(() => {
-        try {
-            const resultado = processarListaSuja(caixa.value);
-
-            listaSuja = resultado;
-            renderizarListaSuja();
-
-            const partes = [
-                resultado.registros + ' registro(s)',
-                resultado.linhas.length + ' linha(s) pronta(s)',
-                resultado.cpfs.length + ' CPF(s) para o extrator',
-                resultado.descartados.length + ' descartado(s)'
-            ];
-
-            if (progresso) progresso.textContent = partes.join(' · ') + '.';
-            toast(partes.join(' · '), resultado.descartados.length ? 'erro' : undefined);
-            mostrarAbaListaSuja(resultado.linhas.length ? 'prontos' : (resultado.semTelefone.length ? 'sem-telefone' : 'descartados'));
-        } catch (erro) {
-            if (progresso) progresso.textContent = erro.message || 'Não foi possível processar a lista.';
-            toast(erro.message || 'Não foi possível processar a lista.', 'erro');
-        } finally {
-            if (botao) botao.disabled = false;
-        }
-    }, 30);
-}
-
-/* Passo 3: aplica o que veio do extrator (colado ou da última consulta do
-   painel). Por padrão a lista final fica SÓ com o telefone revelado: os
-   números do dump saem, senão a planilha vai com 2-3 linhas por pessoa. */
-function apenasExtratorListaSuja() {
-    const caixa = $('suja-so-extrator');
-    return !caixa || caixa.checked;
-}
-
-function resumoDoExtratorListaSuja(resultado) {
-    const partes = [
-        resultado.linhas + ' resultado(s) lido(s)',
-        resultado.aplicados + ' CPF(s) com telefone revelado'
-    ];
-
-    if (resultado.jaAplicados) partes.push(resultado.jaAplicados + ' já estava(m) com esse telefone');
-    if (resultado.numerosDescartados) partes.push(resultado.numerosDescartados + ' número(s) do dump fora da lista');
-    if (resultado.numerosRestaurados) partes.push(resultado.numerosRestaurados + ' número(s) do dump de volta');
-    if (resultado.semTelefoneNaLinha) partes.push(resultado.semTelefoneNaLinha + ' sem telefone na linha');
-    partes.push(listaSuja.semTelefone.length + ' ainda sem telefone');
-    if (resultado.naoEncontrados.length) partes.push(resultado.naoEncontrados.length + ' linha(s) não casada(s)');
-
-    return partes;
-}
-
-/* Aplica, recalcula, abre "Prontos" e já preenche a planilha final. */
-function usarResultadoExtratorListaSuja(entrada) {
-    const resultado = aplicarResultadoExtrator(listaSuja.validos, entrada, {
-        apenasExtrator: apenasExtratorListaSuja()
-    });
-
-    recalcularListaSuja(resultado.registros);
-    mostrarAbaListaSuja(listaSuja.linhas.length ? 'prontos' : 'sem-telefone');
-
-    const partes = resumoDoExtratorListaSuja(resultado);
-
-    /* Planilha pronta no formato do envio: dados da empresa do passo 1 +
-       o telefone revelado. */
-    if (listaSuja.linhas.length) {
-        preencherPlanilhaFinalListaSuja();
-        abrirImportacaoLista();
-        partes.push('planilha pronta preenchida');
-    }
-
-    const progresso = $('suja-progresso');
-    if (progresso) progresso.textContent = partes.join(' · ') + '.';
-
-    toast(partes.join(' · '), resultado.naoEncontrados.length ? 'erro' : undefined);
-
-    return resultado;
-}
-
-function aplicarResultadoExtratorPainel() {
-    const caixa = $('suja-extrator');
-
-    if (!listaSuja.validos.length) {
-        toast('Processe a lista do passo 1 antes de aplicar o extrator.', 'erro');
-        return;
-    }
-
-    if (!caixa || !String(caixa.value || '').trim()) {
-        toast('Cole o resultado do extrator no passo 3.', 'erro');
-        return;
-    }
-
-    try {
-        usarResultadoExtratorListaSuja(caixa.value);
-    } catch (erro) {
-        toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
-    }
-}
-
-function puxarResultadoExtratorPainel() {
-    const resultados = (extratorResultado && extratorResultado.resultados) || [];
-
-    if (!resultados.length) {
-        toast('Nenhuma consulta feita no módulo "Consultar CPF" ainda.', 'erro');
-        return;
-    }
-
-    if (!listaSuja.validos.length) {
-        toast('Processe a lista do passo 1 antes.', 'erro');
-        return;
-    }
-
-    const caixa = $('suja-extrator');
-    if (caixa) caixa.value = JSON.stringify({ resultados }, null, 2);
-
-    /* Mesmo caminho do "Aplicar resultado": planilha pronta no formato do envio. */
-    try {
-        usarResultadoExtratorListaSuja({ resultados });
-    } catch (erro) {
-        toast(erro.message || 'Não foi possível aplicar o resultado do extrator.', 'erro');
-    }
-}
-
-/* ---------- passo 2: CPFs para o extrator ---------- */
-
-/* Usa o que está na caixa (o usuário pode apagar CPFs antes de consultar). */
-function cpfsDaCaixa() {
-    const caixa = $('suja-cpfs');
-    const texto = caixa && String(caixa.value || '').trim() ? caixa.value : listaSuja.cpfs.join('\n');
-
-    return texto
-        .split(/\r?\n/)
-        .map((linha) => linha.trim())
-        .filter(Boolean);
-}
-
-function baixarArquivoTexto(nome, conteudo, tipo) {
-    const blob = new Blob([conteudo], { type: tipo || 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-
-    link.href = url;
-    link.download = nome.replace('{carimbo}', carimbo);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-}
-
-async function copiarListaSujaCpfs() {
-    const cpfs = cpfsDaCaixa();
-    if (!cpfs.length) { toast('Processe a lista antes de copiar os CPFs.', 'erro'); return; }
-
-    const texto = cpfs.join('\n');
-
-    try {
-        await navigator.clipboard.writeText(texto);
-        toast(cpfs.length + ' CPF(s) copiado(s).');
-    } catch (falha) {
-        const area = document.createElement('textarea');
-        area.value = texto;
-        document.body.appendChild(area);
-        area.select();
-        document.execCommand('copy');
-        document.body.removeChild(area);
-        toast(cpfs.length + ' CPF(s) copiado(s).');
-    }
-}
-
-function baixarListaSujaCpfs() {
-    const cpfs = cpfsDaCaixa();
-    if (!cpfs.length) { toast('Processe a lista antes de baixar os CPFs.', 'erro'); return; }
-
-    baixarArquivoTexto('cpfs-extrator-{carimbo}.txt', cpfs.join('\r\n') + '\r\n');
-    toast(cpfs.length + ' CPF(s) no .txt.');
-}
-
-function levarListaSujaParaExtrator() {
-    const cpfs = cpfsDaCaixa();
-    if (!cpfs.length) { toast('Processe a lista antes de levar os CPFs.', 'erro'); return; }
-
-    /* Servidor sem Chrome: não existe tela automática — copia os CPFs e
-       aponta para o script local, cujo resultado volta no passo 3. */
-    if (extratorSituacao.navegador === false) {
-        copiarListaSujaCpfs();
-
-        const aviso = $('suja-extrator-aviso');
-        if (aviso) {
-            aviso.classList.remove('oculto');
-            if (typeof aviso.scrollIntoView === 'function') aviso.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-
-        toast('Sem Chrome no servidor: ' + cpfs.length + ' CPF(s) copiado(s). Rode "' + COMANDO_EXTRATOR
-            + '" no seu PC e cole o resultado no passo 3.', 'erro');
-        return;
-    }
-
-    const caixa = $('extrator-texto');
-    if (!caixa) { toast('Abra a tela "Consultar CPF".', 'erro'); return; }
-
-    caixa.value = cpfs.join('\n');
-    irPara('extrator');
-    toast(cpfs.length + ' CPF(s) na tela de Consultar CPF (máximo 25 por consulta).');
-}
-
-async function copiarListaSuja() {
-    if (!listaSuja.linhas.length) { toast('Processe a lista antes de copiar.', 'erro'); return; }
-
-    const texto = listaSuja.linhas.join('\n');
-
-    try {
-        await navigator.clipboard.writeText(texto);
-        toast(listaSuja.linhas.length + ' linha(s) copiada(s).');
-    } catch (falha) {
-        const area = document.createElement('textarea');
-        area.value = texto;
-        document.body.appendChild(area);
-        area.select();
-        document.execCommand('copy');
-        document.body.removeChild(area);
-        toast(listaSuja.linhas.length + ' linha(s) copiada(s).');
-    }
-}
-
-function baixarListaSuja() {
-    if (!listaSuja.linhas.length) { toast('Processe a lista antes de baixar.', 'erro'); return; }
-
-    const blob = new Blob([listaSuja.linhas.join('\r\n') + '\r\n'], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-
-    link.href = url;
-    link.download = 'lista-limpa-' + carimbo + '.txt';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast(listaSuja.linhas.length + ' linha(s) no .txt.');
-}
-
-function usarListaSujaNaImportacao() {
-    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
-
-    const caixa = $('lista-texto');
-    if (!caixa) { toast('Abra a tela de importação de listas.', 'erro'); return; }
-
-    /* As linhas já saem como telefone;nome;cnpj. O cabeçalho {{1}}/{{2}}
-       deixa o painel ligar nome e CNPJ nas variáveis do template. */
-    caixa.value = ['telefone;{{1}};{{2}}'].concat(listaSuja.linhas).join('\n');
-
-    irPara('listas');
-    analisarLista();
-    abrirImportacaoLista();
-    toast(listaSuja.linhas.length + ' linha(s) na importação ({{1}} = nome, {{2}} = CNPJ).');
-}
-
-/* Mesma lista, mas com os dados da empresa/persona nas colunas extras:
-   viram atributos do cliente (a ficha do painel já mostra clientes.atributos). */
-/* Preenche a planilha pronta no formato do envio: telefone;{{1}}=nome;
-   {{2}}=CNPJ + os dados da empresa/persona que vieram do dump (passo 1).
-   Funciona também logo depois de aplicar o resultado do extrator. */
-function preencherPlanilhaFinalListaSuja() {
-    const caixa = $('lista-texto');
-    if (!caixa) return null;
-
-    const montado = montarLinhasComEmpresa(listaSuja.validos);
-    caixa.value = [montado.cabecalho].concat(montado.linhas).join('\n');
-
-    return montado;
-}
-
-function usarListaSujaNaImportacaoComEmpresa() {
-    if (!listaSuja.linhas.length) { toast('Processe a lista antes de importar.', 'erro'); return; }
-
-    const montado = preencherPlanilhaFinalListaSuja();
-    if (!montado) { toast('Abra a tela de importação de listas.', 'erro'); return; }
-
-    irPara('listas');
-    analisarLista();
-    abrirImportacaoLista();
-    toast(montado.linhas.length + ' linha(s) com os dados da empresa (ficha do cliente).');
-}
-
-/* Download do CSV final (telefone;{{1}};{{2}} + atributos), já com os
-   telefones revelados pelo extrator, pronto para subir na Wati. */
-function baixarListaSujaFinal() {
-    if (!listaSuja.validos.length) { toast('Processe a lista antes de baixar a planilha final.', 'erro'); return; }
-
-    const montado = montarLinhasComEmpresa(listaSuja.validos);
-
-    if (!montado.linhas.length) {
-        toast('Nenhum telefone ainda: aplique o resultado do extrator no passo 3.', 'erro');
-        return;
-    }
-
-    const conteudo = [montado.cabecalho].concat(montado.linhas).join('\r\n') + '\r\n';
-
-    baixarArquivoTexto('lista-wati-{carimbo}.csv', '\uFEFF' + conteudo, 'text/csv;charset=utf-8');
-    toast(montado.linhas.length + ' contato(s) na planilha final (.csv).');
-}
-
-function baixarCadastroListaSuja() {
-    if (!listaSuja.validos.length) { toast('Processe a lista antes de baixar o cadastro.', 'erro'); return; }
-
-    const cadastro = montarCadastroCsv(listaSuja.validos);
-    const conteudo = [cadastro.colunas.join(';')].concat(cadastro.linhas).join('\r\n') + '\r\n';
-
-    baixarArquivoTexto('cadastro-empresas-{carimbo}.csv', '\uFEFF' + conteudo, 'text/csv;charset=utf-8');
-    toast(cadastro.linhas.length + ' empresa(s) no .csv.');
-}
-
-function limparListaSuja() {
-    ['suja-texto', 'suja-saida', 'suja-cpfs', 'suja-extrator'].forEach((id) => {
+function limparImportacaoLista() {
+    ['lista-nome', 'lista-texto', 'lista-arquivo'].forEach((id) => {
         const campo = $(id);
         if (campo) campo.value = '';
     });
 
-    const progresso = $('suja-progresso');
-    if (progresso) progresso.textContent = '';
+    ['lista-resumo', 'lista-progresso'].forEach((id) => {
+        const alvo = $(id);
+        if (alvo) alvo.textContent = '';
+    });
 
-    listaSuja = {
-        registros: 0,
-        validos: [],
-        prontos: [],
-        semTelefone: [],
-        descartados: [],
-        linhas: [],
-        cpfs: [],
-        empresas: []
-    };
+    const colunas = $('lista-colunas');
+    if (colunas) colunas.innerHTML = '';
 
-    renderizarListaSuja();
-    mostrarAbaListaSuja('prontos');
+    tabelaLista = null;
+
+    const painel = $('lista-mapeamento');
+    if (painel) painel.classList.add('oculto');
 }
-
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', iniciarPainel);
 } else {

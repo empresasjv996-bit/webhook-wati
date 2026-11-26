@@ -1,143 +1,68 @@
-# Processador de Lista Suja (Dirty List Processor)
+# Listas — importação de contatos
 
 > QGC TEAM by JV · Painel admin · Documento interno
-> Transforma o dump bruto de consultas em lista limpa pronta para disparo, 100% no navegador.
+> A tela **Listas** tem um fluxo único: colar o arquivo → conferir as colunas → importar na Wati.
 
 ---
 
-## 1. O que faz
+## 1. O que a tela faz
 
-Recebe o dump bruto do **LIVE C6 PJ** (blocos com `CNPJ:`, `CPF Persona:`,
-`--- DADOS DA EMPRESA ---`, `--- DADOS DA PERSONA (CPF) ---` e, quando existe,
-`--- SOCIOS (n) ---`) e separa o registro em três partes:
-
-1. **persona** (nome, nascimento, mãe, sexo, e-mail, telefones, endereço);
-2. **empresa** (razão social, fantasia, situação, porte, capital, endereço, CEP, telefones, e-mail);
-3. **sócios** (nome, qualificação, CPF, renda, telefones...).
-
-Saídas:
-
-- **CPFs para o extrator** — um CPF completo por linha (`000.000.000-00`), na ordem dos registros;
-- **lista final de disparo** — `{telefone_e164};{nome_completo};{cnpj_formatado}`,
-  uma linha por telefone. O telefone revelado pelo extrator entra na lista;
-- **cadastro da empresa** — `.csv` com empresa + persona + sócios (para a ficha do cliente).
-
-O processamento é local. A única saída do navegador é o atalho *Levar para Consultar CPF*, que entrega
-os CPFs ao módulo do extrator (o mesmo que consulta o extratorgov.online).
-
-## 2. Pipeline (Etapas A → D)
-
-| Etapa | Regra |
+| Passo | O que acontece |
 |---|---|
-| **A. Parsing** | Segmenta por `CNPJ:` quando ele abre o registro (LIVE C6 PJ); no dump antigo (CNPJ depois do `CPF Persona`), segmenta por `CPF Persona:`. A seção `--- SOCIOS ---` é cortada antes de ler a persona, então telefones/e-mails dos sócios **não** entram na persona. Chaves normalizadas (sem acento, minúsculas). |
-| **B. Validação** | **CPF Persona** passa pelo dígito verificador. Falhou → descartado com **"CPF Inválido"**. CPF válido sem telefone real **não é descartado**: fica em **"Sem telefone"**, aguardando o extrator. |
-| **C. Extrator** | A lista de CPFs (completa) vai para o extrator. Na volta, o painel casa por CPF completo, CPF mascarado (`000.000.xxx-xx`) ou nome (linha `✓ [LIVE] NOME \| ... \| Revelado: ...`) e **substitui** os telefones do registro pelo revelado — a lista final fica só com o número do extrator (os do dump saem, guardados em `telefonesDump`). Também aceita o JSON do módulo **Consultar CPF**. |
-| **D. Saída** | `{telefone};{nome};{cnpj}` — 1 linha por telefone revelado (1 por pessoa, não 1 por número do dump). CNPJ formatado `XX.XXX.XXX/XXXX-XX`. Telefones deduplicados por registro. |
+| **Nome da lista** | Identifica a lista em *Listas salvas* e no histórico. |
+| **Arquivo ou contatos colados** | `.csv`/`.txt` (lido no navegador com `FileReader`) ou texto colado. UTF-8, separador `;`, `,` ou Tab, com ou sem cabeçalho. |
+| **Analisar colunas** | Faz o parse (`lerTabelaCsv`) e mostra um seletor por coluna. |
+| **Vincule as colunas** | `telefone` (obrigatório), `nome`, *Variável do template* (`{{1}}`, `{{2}}`…) ou atributo (fixo ou personalizado). O que ficar em *Ignorar coluna* não vai para a Wati. O painel lembra o de/para em `localStorage` (`qgc-mapa-lista`). |
+| **✓ Verificar e completar números** | `POST /api/telefones/verificar`: completa DDI/9º dígito e troca a célula pelo número no formato Wati. |
+| **Enviar os contatos para a Wati** | Marcado por padrão: depois de gravar, manda os contatos em lotes de 20 (`POST /api/wati/contatos`). |
+| **Importar lista** | `POST /api/listas` grava a lista (`{ nome, contatos }`); as colunas extras viram `clientes.atributos` e aparecem na ficha do cliente (painel admin e painel do vendedor). |
+| **Listas salvas** | Tabela com nome, contatos, data e lixeira (`DELETE /api/listas/:id`). |
+| **🧹 Limpar** | Zera nome, contatos, arquivo, resumo e o vínculo exibido (`limparImportacaoLista`). A memória de colunas em `localStorage` continua e volta no próximo *Analisar colunas*; as listas salvas não são tocadas. |
 
-Erro inesperado em um registro nunca derruba o processamento: vira descarte com motivo `Erro ao processar: ...`.
+### Formato da planilha
 
-**Colagem tolerante.** Antes de segmentar, o texto passa por `normalizarEspacos` (BOM, CRLF, NBSP e
-espaços zero-width) e, se nenhum rótulo abre linha, por `restaurarQuebras`, que devolve a quebra antes
-dos marcadores `--- ... ---` e dos rótulos conhecidos. Aceita, portanto:
+```
+telefone;{{1}};{{2}}
+5511999999999;João da Silva;12.345.678/0001-90
+5511888888888;Maria Souza;98.765.432/0001-10
+```
 
-- `CPF Persona:`, `CPF da Persona:` e `CPF Persona (Titular):` (e o mesmo para `CNPJ (...)`);
-- linhas indentadas com espaço ou NBSP (cópia de PDF/HTML);
-- CRLF do Windows;
-- o dump esmagado em **uma linha só** (tabela/PDF) — nesse caso best effort: CPF, nome, empresa e
-  telefone são recuperados, mas valores que ficaram colados na mesma linha podem vir truncados;
-- linha em branco entre registros.
+- `{{1}}`, `{{2}}`… = variáveis do template usadas na campanha (`contatos.variaveis`);
+- qualquer outro nome de coluna = atributo do contato na Wati (`contatos.atributos`);
+- telefone é deduplicado e precisa de pelo menos 10 dígitos (`montarContatosDaLista`);
+- `⬇ Baixar modelo .csv` gera o arquivo de exemplo (UTF-8 com BOM, abre no Excel).
 
-Se o texto não tem os rótulos do dump, o parser lança erro com `codigo = 'formato'` e uma mensagem que
-diz o que ele viu (`Li N linha(s), com X "CNPJ:" e Y "CPF Persona:"`) — é essa mensagem que aparece em
-`suja-progresso` e no toast.
+## 2. De onde vêm os contatos
 
-## 3. Uso no painel
+Outras telas preenchem `#lista-texto`, chamam `analisarLista()` e abrem o painel (`abrirImportacaoLista`):
 
-Menu **Listas** (tela única — o antigo "Importar lista" e "Lista Suja" viraram o mesmo fluxo):
+- **Consultar CPF (Extrator)** → `↪ Usar na importação` (`usarExtratorNaLista`);
+- **Telefones coletados** (consulta de CNPJ) → `↪ Usar na importação` (`usarColetadosNaLista`).
 
-1. **Cole a lista bruta** e clique em **Processar Lista**.
-2. **CPFs para o extrator** — um CPF completo por linha (o campo é editável: apague os que não quer
-   consultar). `📋 Copiar CPFs` · `⬇ Baixar CPFs .txt` · `↪ Levar para Consultar CPF`
-   (o atalho joga os CPFs na tela *Consultar CPF*; o limite do painel é 25 por consulta).
-3. **Cole o resultado do extrator** e clique em **Aplicar resultado**
-   (ou `⤓ Usar última consulta do painel`, que reaproveita o JSON da última consulta feita no painel).
-   - Aceita o **CSV do extrator** (`CPF;NOME;NASCIMENTO;RENDA;EMAIL;BANCO;AGENCIA;CONTA;MASK;REVELADO`,
-     com ou sem cabeçalho, `;` ou Tab): o CPF casa com o registro, o `NOME` serve de reserva e só a coluna
-     **REVELADO** vira telefone — nascimento, renda, agência e conta não entram como número.
-   - Também aceita `CPF;telefone` (CPF completo ou mascarado `000.000.xxx-xx`),
-     `✓ [LIVE] NOME | Mask: ... | Revelado: ...` e o JSON do painel.
-   - O retorno diz o que aconteceu: `N resultado(s) lido(s) · X CPF(s) com telefone revelado ·
-     Y já estava(m) com esse telefone · M número(s) do dump fora da lista · Z sem telefone na linha ·
-     W ainda sem telefone · K linha(s) não casada(s)`. Se `X = 0` e `Y > 0`, o resultado já tinha
-     sido aplicado antes.
-   - **Lista final só com o telefone do extrator** (opção marcada por padrão, ao lado da caixa):
-     o número revelado **substitui** os do dump, em vez de somar. Assim cada pessoa entra uma vez
-     só na planilha. Quem o extrator não atendeu sai de **Prontos** e volta para **Sem telefone**
-     (o CPF fica pronto para a próxima consulta); os números antigos ficam guardados em
-     `telefonesDump` para conferência. Desmarque a opção e aplique de novo para devolver esses
-     números (o aviso mostra `N número(s) do dump de volta`).
-   - Ao terminar, a **Planilha pronta** é preenchida no formato do envio
-     (`telefone;{{1}};{{2}}` + atributos da empresa do passo 1) e a seção é aberta.
-4. **Prontos (N)** — lista final + `📋 Copiar` · `⬇ Baixar .txt` ·
-   `⬇ Baixar planilha final (.csv)` · `↪ Enviar para importação` ·
-   `↪ Enviar com dados da empresa` · `⬇ Baixar cadastro (.csv)`.
-   - *Baixar planilha final (.csv)* entrega o CSV do disparo já completo: `telefone;{{1}};{{2}}` +
-     razão social, situação, endereço, persona, sócios (UTF-8 com BOM, `;` e CRLF — abre no Excel).
-   - *Enviar para importação* usa só `telefone;{{1}};{{2}}` (nome e CNPJ nas variáveis do template).
-   - *Enviar com dados da empresa* acrescenta as colunas de atributos (razão social, situação, endereço,
-     persona, sócios...). Ao importar, elas ficam em `clientes.atributos` e aparecem na **ficha do cliente**
-     (painel admin e painel do vendedor, em `colaborador.html`).
-   - Os dois botões de envio abrem a seção **Planilha pronta** (recolhida na mesma tela, `#lista-importar`):
-     revise as colunas, confira os números e clique em **Importar lista**.
-5. **Sem telefone (N)** — CPFs válidos que ainda não têm telefone (rode o extrator e volte ao passo 3).
-6. **Descartados (N)** — tabela Motivo + Dado bruto (400 chars do registro original).
-7. **🧹 Limpar** reseta caixas e resultado.
+## 3. O que saiu da tela
 
-Processamento síncrono com estado de loading (setTimeout antes do parse); 1.000 registros levam ~20ms.
+O pipeline antigo de **dump** (passos *1. Cole a lista bruta*, *2. CPFs para o extrator*,
+*3. Cole o resultado do extrator*, abas *Prontos / Sem telefone / Descartados* e a planilha
+recolhida) foi removido do painel: a tela ficou só com a importação. Os ids `suja-*`,
+`#lista-importar` e as funções `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`,
+`puxarResultadoExtratorPainel`, `copiarListaSuja*`, `baixarListaSuja*`, `limparListaSuja`
+não existem mais em `app.js`/`index.html` (o histórico do git tem a versão anterior).
 
-> **Deploy:** `lista-suja.js` faz parte da lista branca de estáticos (`ARQUIVOS_PUBLICOS` em `index.js`).
-> Se um arquivo novo do painel não for adicionado lá, chega 404 em produção.
-
-## 4. Testes (UAT do briefing)
-
-`node test-lista-suja.js` (está na cadeia do `npm test`):
-
-| Cenário | Esperado | Status |
-|---|---|---|
-| Bloco MARCOS TOBIAS LIMA (5 telefones, 1 repetido) | 5 linhas, formato exato `551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97` | ✅ |
-| CPF com dígito verificador errado | Descartado, motivo "CPF Inválido" | ✅ |
-| CPF válido sem telefone | Fica em "Sem telefone" + CPF na lista do extrator | ✅ |
-| Mesmo telefone 2x no registro | 1 linha só | ✅ |
-| 1.000 registros | < 2 s (medido: ~20 ms) | ✅ |
-| Dump LIVE C6 PJ com empresa/persona/sócios | Empresa, persona e sócios separados; telefone do sócio não entra | ✅ |
-| Extrator por CPF mascarado / nome / JSON do painel | Telefone revelado entra na lista | ✅ |
-| Lista com dados da empresa | 1 linha por telefone com `telefone;{{1}};{{2}}` + atributos | ✅ |
-| CSV do extrator (`CPF;NOME;...;MASK;REVELADO`) | Casa pelo CPF, nome da coluna NOME, só REVELADO vira telefone; planilha final com os dados da empresa | ✅ |
-| Lista com números do dump + extrator | O revelado substitui os do dump (1 linha por pessoa), antigos em `telefonesDump`; não atendidos voltam para "Sem telefone" | ✅ |
-
-## 5. Arquivos
+## 4. Arquivos
 
 | Arquivo | Papel |
 |---|---|
-| `lista-suja.js` | Parser puro (navegador + Node). Principais funções: `processarListaSuja`, `processarRegistro`, `segmentarRegistros`, `restaurarQuebras`, `normalizarEspacos`, `mensagemFormato`, `extrairEmpresa`, `extrairPersona`, `extrairSocio`, `aplicarResultadoExtrator`, `montarLinhasComEmpresa`, `montarCadastroCsv`, `validarCpf`, `formatarCnpj`. |
-| `app.js` | Cola da UI: `processarListaSujaPainel`, `aplicarResultadoExtratorPainel`, `puxarResultadoExtratorPainel`, `apenasExtratorListaSuja`, `resumoDoExtratorListaSuja`, `usarResultadoExtratorListaSuja`, `mostrarAbaListaSuja`, `renderizarListaSuja`, `recalcularListaSuja`, `copiarListaSuja`, `baixarListaSuja`, `baixarListaSujaFinal`, `preencherPlanilhaFinalListaSuja`, `copiarListaSujaCpfs`, `baixarListaSujaCpfs`, `levarListaSujaParaExtrator`, `usarListaSujaNaImportacao`, `usarListaSujaNaImportacaoComEmpresa`, `baixarCadastroListaSuja`, `limparListaSuja`. |
-| `index.html` | Tela única `view-listas` (passos 1-3, abas de resultado, planilha pronta recolhida e listas salvas) e script `lista-suja.js` carregado antes de `app.js`. |
-| `colaborador.html` / `colaborador.js` / `colaborador.css` | Ficha do cliente no painel do vendedor: exibe `clientes.atributos` (dados da empresa/persona). |
-| `style.css` | `.suja-tabs`, `.suja-bruto`. |
-| `test-lista-suja.js` | UATs + testes de unidade. |
+| `app.js` | `analisarLista`, `lerArquivoLista`, `baixarModeloLista`, `renderizarMapaLista`, `montarContatosDaLista`, `atualizarResumoLista`, `verificarNumerosLista`, `salvarLista`, `carregarListas`, `excluirLista`, `limparImportacaoLista`, `abrirImportacaoLista`, `usarExtratorNaLista`, `usarColetadosNaLista`. |
+| `index.html` | `#view-listas` com `#painel-importar` (nome, contatos, arquivo, `#lista-mapeamento`) e `#tabela-listas`. |
+| `style.css` | `.lista-texto`, `.file-row`, `.mapa-*`. |
+| `lista-suja.js` | Parser puro do dump (navegador + Node). **Não é mais carregado pelo painel**; fica no repositório como módulo e continua coberto por `test-lista-suja.js`. |
+| `test-lista-suja.js` | UATs e unidades do parser + verificação da tela (painel único, sem os ids antigos). |
 
-## 6. Limitações conhecidas (sem empolgação)
+## 5. Limitações
 
-- Telefone **mascarado** (`55 (**) ***** 7130`) não vira número: o registro fica em "Sem telefone"
-  até o extrator revelar. Quando o dump traz `Telefone desmascarado:`, ele entra normalmente.
-- Com **"Lista final só com o telefone do extrator"** marcada, os números do dump não vão para a
-  planilha (ficam em `telefonesDump`). Se você aplicou um resultado parcial e quer os antigos de
-  volta, desmarque a opção e aplique de novo — ou reprocesse o dump.
-- Telefones da empresa (`Tel Empresa 1/2`) **não entram na persona** — vão para o cadastro da empresa.
-- Registro sem `CPF Persona:` (ou com CPF inválido) é descartado; sem `CNPJ:` a segmentação cai no
-  modo antigo (por `CPF Persona:`).
-- CPF mascarado (`000.000.xxx-xx`) só mostra 6 dígitos: se dois registros tiverem o mesmo prefixo,
-  o desempate é pelo nome da linha LIVE. Sem nome, vale o primeiro.
-- Nome ausente gera linha com o campo vazio (`telefone;;cnpj`) — a espec só barra CPF/telefone.
+- Sem a tela de dump, transformar o dump do LIVE C6 PJ em planilha exige o parser fora do painel:
+  `node -e "console.log(require('./lista-suja').processarListaSuja(require('fs').readFileSync('dump.txt','utf8')).linhas.join('\n'))"`.
+- Telefone **mascarado** (`55 (**) ***** 7130`) não vira número: só entra depois de revelado pelo extrator.
+- O vínculo de colunas é salvo por nome de coluna; cabeçalhos diferentes exigem conferir o mapa de novo.
 
 *Documento interno EQP APT01.*

@@ -244,222 +244,95 @@
                     </div>
                 </div>
             </section>
-            <!-- LISTAS: fluxo unico (dump -> CPF -> telefone -> planilha) -->
+            <!-- LISTAS: importação de contatos (colar/arquivo -> colunas -> Wati) -->
             <section class="view oculto" id="view-listas">
                 <div class="section-title">
                     <div>
                         <h1>Listas</h1>
-                        <p>Um lugar só: cole o dump bruto e o painel separa persona, empresa e sócios, valida os CPFs, gera a lista final <code>{telefone};{nome};{cnpj}</code> e devolve os números para o disparo. O processamento é local; o atalho <em>Levar para Consultar CPF</em> é o único passo que entrega os CPFs ao módulo do extrator.</p>
+                        <p>Cole os contatos ou envie o arquivo, confira as colunas e importe para a Wati. O processamento é local: só o <strong>Importar lista</strong> grava no painel e envia os contatos.</p>
                     </div>
                     <div class="chat-actions">
-                        <button class="btn-mini" onclick="limparListaSuja()">🧹 Limpar</button>
+                        <button class="btn-mini" onclick="limparImportacaoLista()">🧹 Limpar</button>
                         <button class="btn-mini" onclick="carregarListas()">↻ Atualizar</button>
                         <button class="btn-mini danger" onclick="limparDadosDoPainel()" title="Apagar clientes, conversas e listas de teste">🧨 Limpar tudo</button>
                     </div>
                 </div>
 
-                <div class="listas-grid">
-                    <div class="screen-panel">
-                        <div class="form-group">
-                            <label>1. Cole a lista bruta (dump)</label>
-                            <textarea id="suja-texto" class="form-control lista-texto" style="min-height: 240px;" placeholder="CNPJ:                   27.964.767/0001-97&#10;CPF Persona:            014.079.598-75&#10;--- DADOS DA EMPRESA ---&#10;Razao Social:           IMPERIAL MARKETING E PROPAGANDA LTDA&#10;...&#10;--- DADOS DA PERSONA (CPF) ---&#10;Nome:                   MARCOS TOBIAS LIMA&#10;Telefones:&#10;    (12) 3153-3128&#10;..."></textarea>
-                            <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                Um bloco por empresa (<code>CNPJ:</code> + <code>CPF Persona:</code>). A seção
-                                <code>--- DADOS DA EMPRESA ---</code> fica guardada para a ficha do cliente; os sócios
-                                são separados da persona. CPF é validado pelo dígito verificador. Colagem sem quebras
-                                (PDF/tabela) e linhas indentadas também são aceitas.
-                            </small>
-                        </div>
+                <div class="screen-panel" id="painel-importar">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Importar contatos</h3>
+                    <p class="mapa-ajuda">
+                        O arquivo é lido no seu navegador. Depois de <strong>Analisar colunas</strong>, diga para onde
+                        vai cada coluna e clique em <strong>Importar lista</strong>.
+                    </p>
 
-                        <button class="btn-primary" style="margin-top: 16px" onclick="processarListaSujaPainel()">Processar lista</button>
-                        <p id="suja-progresso" class="mapa-resumo"></p>
-
-                        <div class="form-group" style="margin-top: 20px;">
-                            <label>2. CPFs para o extrator</label>
-                            <small class="mapa-ajuda" style="display: block; margin-bottom: 8px;">
-                                Um CPF completo por linha (formato <code>000.000.000-00</code>). O resultado do
-                                extrator volta no passo 3 — o telefone revelado entra na lista final.
-                            </small>
-                            <textarea id="suja-cpfs" class="form-control lista-texto" style="min-height: 140px;" placeholder="000.000.000-00&#10;000.000.000-00"></textarea>
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
-                                <button class="btn-mini" type="button" onclick="copiarListaSujaCpfs()">📋 Copiar CPFs</button>
-                                <button class="btn-mini" type="button" onclick="baixarListaSujaCpfs()">⬇ Baixar CPFs .txt</button>
-                                <button class="btn-mini" type="button" onclick="levarListaSujaParaExtrator()">↪ Levar para Consultar CPF</button>
-                            </div>
-
-                            <p id="suja-extrator-aviso" class="aviso-extrator oculto">
-                                <strong>Consulta automática indisponível neste servidor.</strong>
-                                O servidor não tem Chrome, então o extrator não roda aqui: baixe os CPFs
-                                (<strong>Baixar CPFs .txt</strong>) e rode no seu computador
-                                <code>node extrator.js testar cpfs.txt</code> — depois cole o resultado no passo 3.
-                                <button class="btn-mini" type="button" onclick="copiarComandoExtrator()">Copiar comando</button>
-                            </p>
-                        </div>
-
-                        <div class="form-group" style="margin-top: 20px;">
-                            <label>3. Cole o resultado do extrator</label>
-                            <small class="mapa-ajuda" style="display: block; margin-bottom: 8px;">
-                                Aceita o CSV do extrator
-                                (<code>CPF;NOME;NASCIMENTO;RENDA;EMAIL;BANCO;AGENCIA;CONTA;MASK;REVELADO</code>),
-                                <code>CPF;telefone</code> (CPF completo ou mascarado <code>000.000.xxx-xx</code>),
-                                <code>✓ [LIVE] NOME | Mask: ... | Revelado: ...</code> e o JSON do painel.
-                                O telefone revelado entra na lista final junto com os dados da empresa do passo 1.
-                                Por padrão a lista fica <strong>só com o número do extrator</strong> (um por pessoa):
-                                os números que vieram do dump saem, senão o mesmo cliente aparece 2-3 vezes.
-                            </small>
-                            <textarea id="suja-extrator" class="form-control lista-texto" style="min-height: 140px;" placeholder="014.079.xxx-xx;5512999999999&#10;✓ [LIVE] LAYLA SHIRATORI | Mask: (11) *****1514 | Revelado: 11979591514"></textarea>
-                            <label class="mapa-check">
-                                <input id="suja-so-extrator" type="checkbox" checked>
-                                Lista final só com o telefone do extrator (descarta os números do dump)
-                            </label>
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
-                                <button class="btn-primary" type="button" onclick="aplicarResultadoExtratorPainel()">Aplicar resultado</button>
-                                <button class="btn-mini" type="button" onclick="puxarResultadoExtratorPainel()">⤓ Usar última consulta do painel</button>
-                            </div>
-                        </div>
-
-
-                        <details class="lista-importar" id="lista-importar">
-                            <summary>Planilha pronta — revisar e importar na Wati</summary>
-
-                            <p class="mapa-ajuda" style="margin: 10px 0 14px;">
-                                O botão <strong>Enviar para importação</strong> preenche os campos abaixo sozinho.
-                                Confira as colunas, complete os números e clique em <strong>Importar lista</strong>.
-                            </p>
-
-                            <div class="form-group">
-                                <label>Nome da lista</label>
-                                <input id="lista-nome" class="form-control" type="text" placeholder="Ex: Clientes SP - Novembro">
-                            </div>
-
-                            <div class="form-group">
-                                <label>Arquivo ou contatos colados</label>
-                                <textarea id="lista-texto" class="form-control lista-texto" placeholder="telefone;{{1}};{{2}}&#10;5511999999999;João da Silva;12.345.678/0001-90&#10;5511888888888;Maria Souza;98.765.432/0001-10"></textarea>
-                                <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                    <strong>Formato:</strong> 1ª linha = cabeçalho · <code>telefone</code> obrigatório ·
-                                    <code>{{1}}</code>, <code>{{2}}</code>… = variáveis do template ·
-                                    outras colunas = atributos (<code>nome</code>, <code>cnpj</code>, <code>razao_social</code>…).
-                                    Separador <code>;</code>, <code>,</code> ou Tab · arquivo UTF-8.
-                                </small>
-                            </div>
-
-                            <div class="file-row">
-                                <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
-                                <button class="btn-mini" type="button" onclick="baixarModeloLista()">⬇ Baixar modelo .csv</button>
-                                <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
-                            </div>
-
-                            <button class="btn-primary" style="margin-top: 18px" onclick="analisarLista()">Analisar colunas</button>
-
-                            <div id="lista-mapeamento" class="oculto">
-                                <div class="mapa-topo">
-                                    <h3>Vincule as colunas</h3>
-                                    <p class="mapa-ajuda">
-                                        Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as colunas
-                                        <strong>Variável do template</strong> viram <code>{{1}}</code>, <code>{{2}}</code>… na campanha.
-                                        As demais viram atributos do contato na Wati.
-                                    </p>
-                                </div>
-
-                                <div id="lista-colunas" class="mapa-colunas"></div>
-
-                                <p id="lista-resumo" class="mapa-resumo"></p>
-
-                                <button class="btn-mini" type="button" onclick="verificarNumerosLista()">✓ Verificar e completar números</button>
-
-                                <label class="mapa-check">
-                                    <input id="lista-enviar-wati" type="checkbox" checked>
-                                    Enviar os contatos para a Wati já com esses atributos
-                                </label>
-
-                                <button class="btn-primary" style="margin-top: 16px" onclick="salvarLista()">Importar lista</button>
-                                <p id="lista-progresso" class="mapa-resumo"></p>
-                            </div>
-                        </details>
+                    <div class="form-group">
+                        <label>Nome da lista</label>
+                        <input id="lista-nome" class="form-control" type="text" placeholder="Ex: Clientes SP - Novembro">
                     </div>
 
-                    <div class="screen-panel">
-                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Resultado</h3>
+                    <div class="form-group">
+                        <label>Arquivo ou contatos colados</label>
+                        <textarea id="lista-texto" class="form-control lista-texto" placeholder="telefone;{{1}};{{2}}&#10;5511999999999;João da Silva;12.345.678/0001-90&#10;5511888888888;Maria Souza;98.765.432/0001-10"></textarea>
+                        <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
+                            <strong>Formato:</strong> 1ª linha = cabeçalho · <code>telefone</code> obrigatório ·
+                            <code>{{1}}</code>, <code>{{2}}</code>… = variáveis do template ·
+                            outras colunas = atributos (<code>nome</code>, <code>cnpj</code>, <code>razao_social</code>…).
+                            Separador <code>;</code>, <code>,</code> ou Tab · arquivo UTF-8.
+                        </small>
+                    </div>
 
-                        <div class="suja-tabs" style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
-                            <button id="suja-aba-prontos" class="btn-mini active" type="button" onclick="mostrarAbaListaSuja('prontos')">Prontos (0)</button>
-                            <button id="suja-aba-sem-telefone" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('sem-telefone')">Sem telefone (0)</button>
-                            <button id="suja-aba-descartados" class="btn-mini" type="button" onclick="mostrarAbaListaSuja('descartados')">Descartados (0)</button>
+                    <div class="file-row">
+                        <input id="lista-arquivo" type="file" accept=".txt,.csv" onchange="lerArquivoLista(this)">
+                        <button class="btn-mini" type="button" onclick="baixarModeloLista()">⬇ Baixar modelo .csv</button>
+                        <small>Formatos aceitos: .csv e .txt (com ou sem cabeçalho)</small>
+                    </div>
+
+                    <button class="btn-primary" style="margin-top: 18px" onclick="analisarLista()">Analisar colunas</button>
+
+                    <div id="lista-mapeamento" class="oculto">
+                        <div class="mapa-topo">
+                            <h3>Vincule as colunas</h3>
+                            <p class="mapa-ajuda">
+                                Diga para onde vai cada coluna. <strong>Telefone</strong> é obrigatório; as colunas
+                                <strong>Variável do template</strong> viram <code>{{1}}</code>, <code>{{2}}</code>… na campanha.
+                                As demais viram atributos do contato na Wati.
+                            </p>
                         </div>
 
-                        <div id="suja-painel-prontos">
-                            <p class="mapa-ajuda">Linhas no formato <code>{telefone};{nome};{cnpj}</code> — uma por telefone (deduplicado). O telefone revelado pelo extrator entra junto.</p>
+                        <div id="lista-colunas" class="mapa-colunas"></div>
 
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
-                                <button class="btn-mini" type="button" onclick="copiarListaSuja()">📋 Copiar</button>
-                                <button class="btn-mini" type="button" onclick="baixarListaSuja()">⬇ Baixar .txt</button>
-                                <button class="btn-primary" type="button" onclick="baixarListaSujaFinal()">⬇ Baixar planilha final (.csv)</button>
-                                <button class="btn-primary" type="button" onclick="usarListaSujaNaImportacao()">↪ Enviar para importação</button>
-                                <button class="btn-mini" type="button" onclick="usarListaSujaNaImportacaoComEmpresa()">↪ Enviar com dados da empresa</button>
-                                <button class="btn-mini" type="button" onclick="baixarCadastroListaSuja()">⬇ Baixar cadastro (.csv)</button>
-                            </div>
+                        <p id="lista-resumo" class="mapa-resumo"></p>
 
-                            <textarea id="suja-saida" class="form-control lista-texto" readonly style="min-height: 220px;" placeholder="551231533128;MARCOS TOBIAS LIMA;27.964.767/0001-97&#10;..."></textarea>
-                        </div>
+                        <button class="btn-mini" type="button" onclick="verificarNumerosLista()">✓ Verificar e completar números</button>
 
-                        <div id="suja-painel-sem-telefone" class="oculto">
-                            <p class="mapa-ajuda">CPFs válidos que ainda não têm telefone. Rode o extrator para eles e cole o resultado no passo 3.</p>
+                        <label class="mapa-check">
+                            <input id="lista-enviar-wati" type="checkbox" checked>
+                            Enviar os contatos para a Wati já com esses atributos
+                        </label>
 
-                            <div class="table-container">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>CPF</th>
-                                            <th>Nome</th>
-                                            <th>CNPJ</th>
-                                            <th>Empresa</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tabela-suja-sem-telefone">
-                                        <tr><td colspan="4" class="vazio">Nenhum registro sem telefone.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                        <button class="btn-primary" style="margin-top: 16px" onclick="salvarLista()">Importar lista</button>
+                        <p id="lista-progresso" class="mapa-resumo"></p>
+                    </div>
+                </div>
 
-                        <div id="suja-painel-descartados" class="oculto">
-                            <p class="mapa-ajuda">Registros rejeitados com o motivo e o trecho bruto para conferir.</p>
+                <div class="screen-panel" style="margin-top: 18px;">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Listas salvas</h3>
+                    <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Listas já importadas na Wati. Clique na lixeira para excluir.</p>
 
-                            <div class="table-container">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Motivo</th>
-                                            <th>Dado bruto</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tabela-suja-descartados">
-                                        <tr><td colspan="2" class="vazio">Nenhum descarte.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <div style="margin-top: 24px;">
-                            <h3 style="font-size: 1.05rem; margin-bottom: 6px;">Listas salvas</h3>
-                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Listas já importadas na Wati. Clique na lixeira para excluir.</p>
-
-                            <div class="table-container">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Lista</th>
-                                            <th>Contatos</th>
-                                            <th>Criada em</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tabela-listas">
-                                        <tr><td colspan="4" class="vazio">Carregando listas...</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Lista</th>
+                                    <th>Contatos</th>
+                                    <th>Criada em</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-listas">
+                                <tr><td colspan="4" class="vazio">Carregando listas...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>
@@ -695,8 +568,8 @@
                         <p id="extrator-aviso" class="aviso-extrator oculto">
                             <strong>Este servidor não tem Chrome.</strong>
                             A consulta automática não roda aqui: rode no seu computador
-                            <code>node extrator.js testar cpfs.txt</code> e cole o resultado na tela
-                            <strong>Listas</strong>, passo 3 (<em>Cole o resultado do extrator</em>).
+                            <code>node extrator.js testar cpfs.txt</code> e clique em
+                            <strong>↪ Usar na importação</strong> para levar os telefones para a tela <strong>Listas</strong>.
                             <button class="btn-mini" type="button" onclick="copiarComandoExtrator()">Copiar comando</button>
                         </p>
                     </div>
@@ -1010,7 +883,6 @@
         </aside>
     </div>
 
-    <script src="lista-suja.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

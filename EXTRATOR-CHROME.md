@@ -121,6 +121,7 @@ avise que eu ajusto os seletores.
 
 Se preferir não pagar plano maior, o caminho continua funcionando:
 
-1. Tela **Listas** → **Baixar CPFs .txt**;
+1. Tela **Consultar CPF** → **⬇ Baixar .csv** (ou copie os CPFs do arquivo que você já tem);
 2. no seu PC: `node extrator.js testar cpfs.txt`;
-3. cole o JSON/linhas no **passo 3** → **Aplicar resultado**.
+3. na tela **Consultar CPF**, clique em **↪ Usar na importação** para levar os telefones
+   para a tela **Listas** (ou cole o arquivo/telefones direto em *Arquivo ou contatos colados*).

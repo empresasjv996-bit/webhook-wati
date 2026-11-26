@@ -391,27 +391,7 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 .listas-grid .screen-panel { padding: 22px; }
 .listas-grid .table-container { margin-top: 0; }
 
-/* Planilha pronta (revisão/importação) fica recolhida dentro da tela Listas */
-.lista-importar {
-    margin-top: 22px;
-    border: 1px dashed rgba(0, 255, 128, 0.25);
-    border-radius: 12px;
-    padding: 12px 14px;
-    background: rgba(0, 255, 128, 0.03);
-}
-.lista-importar > summary {
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.86rem;
-    color: var(--green);
-    list-style: none;
-    padding: 4px 0;
-}
-.lista-importar > summary::-webkit-details-marker { display: none; }
-.lista-importar > summary::before { content: '▸ '; }
-.lista-importar[open] > summary::before { content: '▾ '; }
-.lista-importar[open] > summary { margin-bottom: 6px; }
-
+/* Planilha de importação (colar/arquivo -> colunas -> Wati) */
 .lista-texto { min-height: 150px; resize: vertical; line-height: 1.5; }
 .file-row { display: flex; flex-direction: column; gap: 6px; }
 .file-row .btn-mini { align-self: flex-start; }
@@ -551,11 +531,6 @@ tr:hover td { background: rgba(0, 255, 128, 0.03); }
 /* Consultar CPF (extrator) */
 .telefone-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; margin: 2px 6px 2px 0; font-size: 0.85rem; color: #fff; }
 .telefone-chip .btn-mini { padding: 2px 6px; margin: 0; }
-
-/* Lista Suja */
-.suja-tabs .btn-mini { padding: 8px 14px; border-radius: 10px; }
-.suja-tabs .btn-mini.active { background: var(--green); color: #04120a; border-color: transparent; font-weight: 700; }
-.suja-bruto { margin: 0; padding: 8px; font-size: 0.72rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--text-muted); background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; max-width: 460px; max-height: 160px; overflow: auto; }
 
 /* Aviso de recurso que depende da máquina (extrator automático sem Chrome) */
 .aviso-extrator {

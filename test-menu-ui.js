@@ -134,7 +134,7 @@ function tela(nome) {
     return views.find((view) => view.id === 'view-' + nome);
 }
 
-/* troca de tela: Listas concentra dump, CPF, telefone e planilha */
+/* troca de tela: Listas é o fluxo único de importação de contatos */
 contexto.mostrarListas();
 assert.strictEqual(tela('listas').classList.contains('oculto'), false, 'tela Listas aparece');
 assert.strictEqual(tela('inicio').classList.contains('oculto'), true, 'Início some');

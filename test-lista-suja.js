@@ -508,64 +508,44 @@ assert.ok(!html.includes('id="view-listasuja"'), 'a tela separada de Lista Suja 
 
 const telaListas = html.slice(html.indexOf('id="view-listas"'), html.indexOf('id="view-canais"'));
 
-assert.ok(telaListas.includes('id="suja-texto"'), 'passo do dump dentro da tela Listas');
-assert.ok(telaListas.includes('id="suja-extrator-aviso"'), 'aviso de servidor sem Chrome dentro da tela Listas');
+assert.ok(telaListas.includes('id="painel-importar"'), 'painel único de importação dentro da tela Listas');
+assert.ok(telaListas.includes('id="lista-texto"'), 'contatos colados no painel de importação');
+assert.ok(telaListas.includes('id="lista-mapeamento"'), 'vínculo de colunas no mesmo painel');
+assert.ok(telaListas.includes('onclick="analisarLista()"'), 'botão Analisar colunas');
+assert.ok(telaListas.includes('onclick="salvarLista()"'), 'botão Importar lista');
+assert.ok(telaListas.includes('onclick="limparImportacaoLista()"'), 'botão Limpar do painel de importação');
 assert.ok(html.includes('id="extrator-aviso"'), 'aviso de servidor sem Chrome na tela Consultar CPF');
 assert.ok(html.includes('onclick="copiarComandoExtrator()"'), 'botão Copiar comando do extrator local');
-assert.ok(telaListas.includes('id="lista-importar"'), 'planilha pronta recolhida na mesma tela');
-assert.ok(telaListas.includes('id="lista-texto"'), 'importação manual na mesma tela');
-assert.ok(telaListas.includes('REVELADO'), 'passo 3 explica o CSV do extrator');
-assert.ok(telaListas.includes('id="suja-so-extrator"'), 'passo 3 tem o "só o telefone do extrator"');
-assert.ok(
-    /<input id="suja-so-extrator" type="checkbox" checked>/.test(telaListas),
-    'a lista final vem marcada só com o número do extrator'
-);
-assert.ok(painel.includes('preencherPlanilhaFinalListaSuja();'), 'aplicar resultado já preenche a planilha pronta');
-assert.ok(painel.includes('apenasExtrator: apenasExtratorListaSuja()'), 'app.js passa a opção apenasExtrator');
-assert.ok(painel.includes('numerosDescartados'), 'app.js avisa quantos números do dump saíram');
 assert.ok(telaListas.includes('id="tabela-listas"'), 'listas salvas na mesma tela');
 assert.ok(painel.includes("if (view === 'listasuja') view = 'listas';"), 'irPara aceita o apelido antigo "listasuja"');
-assert.ok(painel.includes('function abrirImportacaoLista('), 'app.js abre a planilha pronta ao enviar para importação');
-assert.ok(html.includes('id="suja-texto"'), 'textarea da lista bruta');
-assert.ok(html.includes('id="suja-saida"'), 'textarea do resultado');
-assert.ok(html.includes('id="suja-cpfs"'), 'textarea dos CPFs para o extrator');
-assert.ok(html.includes('id="suja-extrator"'), 'textarea do resultado do extrator');
-assert.ok(html.includes('id="tabela-suja-descartados"'), 'tabela de descartados');
-assert.ok(html.includes('id="tabela-suja-sem-telefone"'), 'tabela de registros sem telefone');
-assert.ok(html.includes('id="suja-aba-sem-telefone"'), 'aba Sem telefone');
-assert.ok(html.includes('onclick="processarListaSujaPainel()"'), 'botão Processar Lista');
-assert.ok(html.includes('onclick="copiarListaSuja()"'), 'botão Copiar');
-assert.ok(html.includes('onclick="baixarListaSuja()"'), 'botão Baixar .txt');
-assert.ok(html.includes('onclick="baixarListaSujaFinal()"'), 'botão Baixar planilha final (.csv)');
-assert.ok(html.includes('onclick="copiarListaSujaCpfs()"'), 'botão Copiar CPFs');
-assert.ok(html.includes('onclick="baixarListaSujaCpfs()"'), 'botão Baixar CPFs');
-assert.ok(html.includes('onclick="levarListaSujaParaExtrator()"'), 'botão Levar para Consultar CPF');
-assert.ok(html.includes('onclick="aplicarResultadoExtratorPainel()"'), 'botão Aplicar resultado do extrator');
-assert.ok(html.includes('onclick="puxarResultadoExtratorPainel()"'), 'botão Usar última consulta do painel');
-assert.ok(html.includes('onclick="usarListaSujaNaImportacaoComEmpresa()"'), 'botão Enviar com dados da empresa');
-assert.ok(html.includes('onclick="baixarCadastroListaSuja()"'), 'botão Baixar cadastro .csv');
-assert.ok(html.includes('<script src="lista-suja.js"></script>'), 'parser carregado no index.html');
-assert.ok(
-    html.indexOf('src="lista-suja.js"') < html.indexOf('src="app.js"'),
-    'lista-suja.js precisa vir antes de app.js'
-);
+assert.ok(painel.includes('function abrirImportacaoLista('), 'app.js leva o usuário ao painel de importação');
 
-['mostrarAbaListaSuja', 'renderizarListaSuja', 'recalcularListaSuja', 'processarListaSujaPainel',
-    'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel', 'copiarListaSuja',
-    'apenasExtratorListaSuja', 'resumoDoExtratorListaSuja', 'usarResultadoExtratorListaSuja',
-    'copiarListaSujaCpfs', 'baixarListaSujaCpfs', 'levarListaSujaParaExtrator', 'cpfsDaCaixa',
-    'baixarListaSuja', 'usarListaSujaNaImportacao', 'usarListaSujaNaImportacaoComEmpresa',
-    'preencherPlanilhaFinalListaSuja', 'baixarListaSujaFinal',
-    'baixarCadastroListaSuja', 'limparListaSuja', 'verificarExtratorPainel', 'copiarComandoExtrator'].forEach((nome) => {
-    assert.ok(new RegExp('function ' + nome + '\\(').test(painel), 'app.js define ' + nome);
+/* O fluxo antigo (dump -> CPF -> extrator) saiu da tela: sobrou só a importação. */
+['suja-texto', 'suja-cpfs', 'suja-extrator', 'suja-saida', 'suja-progresso',
+    'suja-so-extrator', 'suja-extrator-aviso', 'lista-importar',
+    'tabela-suja-descartados', 'tabela-suja-sem-telefone', 'suja-aba-sem-telefone'].forEach((id) => {
+    assert.ok(!html.includes('id="' + id + '"'), 'fluxo do dump removido da tela (#' + id + ')');
+});
+assert.ok(!html.includes('src="lista-suja.js"'), 'parser do dump não é mais carregado no painel');
+
+['analisarLista', 'lerArquivoLista', 'baixarModeloLista', 'renderizarMapaLista',
+    'montarContatosDaLista', 'atualizarResumoLista', 'verificarNumerosLista',
+    'salvarLista', 'carregarListas', 'limparImportacaoLista', 'abrirImportacaoLista',
+    'verificarExtratorPainel', 'copiarComandoExtrator'].forEach((nome) => {
+    assert.ok(painel.includes('function ' + nome + '('), 'app.js define ' + nome);
 });
 
-assert.ok(painel.includes("'telefone;{{1}};{{2}}'"), 'enviar para a importação usa telefone;{{1}};{{2}}');
-assert.ok(servidor.includes("'lista-suja.js'"), 'lista-suja.js está na lista branca de estáticos');
-assert.ok(estilos.includes('.suja-bruto'), 'estilo do trecho bruto do descarte');
-assert.ok(estilos.includes('.suja-tabs'), 'estilo das abas do resultado');
-assert.ok(estilos.includes('.lista-importar'), 'estilo da planilha pronta recolhida');
+['processarListaSujaPainel', 'aplicarResultadoExtratorPainel', 'puxarResultadoExtratorPainel',
+    'copiarListaSuja', 'baixarListaSuja', 'limparListaSuja', 'usarListaSujaNaImportacao',
+    'baixarCadastroListaSuja', 'preencherPlanilhaFinalListaSuja'].forEach((nome) => {
+    assert.ok(!painel.includes('function ' + nome + '('), 'app.js não tem mais ' + nome);
+});
+
+assert.ok(servidor.includes("'lista-suja.js'"), 'lista-suja.js segue na lista branca de estáticos');
+assert.ok(estilos.includes('.lista-texto'), 'estilo da caixa de contatos');
+assert.ok(!estilos.includes('.lista-importar'), 'estilo do bloco recolhido saiu do CSS');
 assert.ok(estilos.includes('.aviso-extrator'), 'estilo do aviso de extrator sem Chrome');
+
 
 console.log('OK - integração da tela (HTML, app.js, lista branca e CSS)');
 console.log('');

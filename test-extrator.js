@@ -207,7 +207,6 @@ const existeOriginal = fs.existsSync;
     const servidor = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
     const estilos = fs.readFileSync(path.join(raiz, 'style.css'), 'utf8');
 
-    assert.ok(html.includes('id="suja-extrator-aviso"'), 'aviso do passo 2 na tela Listas');
     assert.ok(html.includes('id="extrator-aviso"'), 'aviso na tela Consultar CPF');
     assert.ok(html.includes('id="btn-consultar-cpfs"'), 'botão de consultar tem id para ser desabilitado');
     assert.ok(html.includes('onclick="copiarComandoExtrator()"'), 'botão Copiar comando');
