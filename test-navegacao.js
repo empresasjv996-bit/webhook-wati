@@ -56,7 +56,8 @@ menu.split(/<div class="nav-grupo" data-grupo="/).slice(1).forEach((parte) => {
     itens[nome] = Array.from(parte.matchAll(/data-view="([a-z]+)"/g)).map((m) => m[1]);
 });
 
-assert.deepStrictEqual(itens.contatos, ['conversas', 'clientes', 'extrator'], 'Contatos: Conversas, Clientes e Consultar CPF');
+assert.deepStrictEqual(itens.contatos, ['conversas', 'clientes', 'extrator', 'spyhub'],
+    'Contatos: Conversas, Clientes, Consultar CPF e Verificação SpyHub');
 assert.deepStrictEqual(itens.envio, ['campanhas', 'wati', 'canais'], 'Envio: Campanhas, Atividade Wati e Canais');
 assert.deepStrictEqual(itens.sistema, ['logs', 'auditoria', 'usuarios'], 'Sistema: Logs, Auditoria e Usuários');
 
@@ -125,7 +126,7 @@ assert.ok(
 );
 
 assert.ok(
-    /function irPara\(view\)[\s\S]{0,1400}?fecharGruposNav\(\)/.test(painel),
+    /function irPara\(view\)[\s\S]{0,2000}?fecharGruposNav\(\)/.test(painel),
     'irPara fecha os submenus ao trocar de tela'
 );
 

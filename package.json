@@ -6,11 +6,12 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test-templates.js && node test-campanhas.js && node test-listas-variaveis.js && node test-telefone.js && node test-cnpj.js && node test-lista-suja.js && node test-extrator.js && node test-navegacao.js && node test-menu-ui.js && node test-conversas-filtro.js && node test-erro-wati.js",
+    "test": "node test-templates.js && node test-campanhas.js && node test-listas-variaveis.js && node test-telefone.js && node test-cnpj.js && node test-lista-suja.js && node test-extrator.js && node test-spyhub-parser.js && node test-navegacao.js && node test-menu-ui.js && node test-conversas-filtro.js && node test-erro-wati.js",
     "test:deepseek": "node test-deepseek.js",
     "verificar": "node verificar-numeros.js",
     "capturar": "node capturar-api.js",
     "mapear": "node mapear-tela.js",
+    "estado": "node estado-spyhub.js",
     "test:e2e": "node test-listas-variaveis-e2e.js && node test-reabertura-template-e2e.js && node test-painel-filas-e2e.js && node test-imagem-presenca-e2e.js",
     "postinstall": "prisma skills sync || exit 0"
   },

@@ -126,6 +126,7 @@ function irPara(view) {
         logs: 'Logs',
         auditoria: 'Auditoria',
         extrator: 'Consultar CPF',
+        spyhub: 'Verificação SpyHub',
         usuarios: 'Usuários'
     };
 
@@ -161,6 +162,7 @@ function irPara(view) {
     if (view === 'clientes') carregarTabelaClientes();
     if (view === 'listas') carregarListas();
     if (view === 'extrator') verificarExtratorPainel(true);
+    if (view === 'spyhub') verificarSpyhubStatus(true);
     if (view === 'canais') { carregarCanais(); carregarWebhook(); }
     if (view === 'campanhas') { carregarVendedoresCampanha(); carregarListasCampanha(); carregarCampanhas(); alterarCanalCampanha(); }
     if (view === 'wati') iniciarAtividadeWati();
@@ -2107,6 +2109,352 @@ function limparExtrator() {
 
     extratorResultado = { resumo: null, resultados: [] };
     renderizarExtrator();
+}
+
+/* ---------------------------------------------------------
+   VERIFICAÇÃO SPYHUB (CPF x 4 finais do telefone)
+   Fluxo: cola/seleciona a lista -> POST /api/spyhub/verificar
+   -> fila no servidor consulta o app.spyhub.io -> acompanha o
+   job por polling e separa aprovados/reprovados.
+   --------------------------------------------------------- */
+let spyhubJob = null;
+let spyhubTimer = null;
+let spyhubSituacao = { conhecido: false, navegador: null, credenciais: null, headless: false };
+
+function pararAcompanhamentoSpyhub() {
+    if (spyhubTimer) {
+        clearTimeout(spyhubTimer);
+        spyhubTimer = null;
+    }
+}
+
+function horaCurtaSpyhub(quando) {
+    const texto = String(quando || '');
+    if (texto.length >= 19) return texto.slice(11, 19);
+
+    return new Date().toLocaleTimeString('pt-BR');
+}
+
+function setLogSpyhub(mensagem, tipo) {
+    const caixa = $('spyhub-log');
+    if (!caixa) return;
+
+    caixa.innerHTML = '<span class="spyhub-linha ' + escaparHtml(tipo || 'info') + '">'
+        + escaparHtml(mensagem) + '</span>';
+}
+
+async function verificarSpyhubStatus(forcar) {
+    if (spyhubSituacao.conhecido && !forcar) return spyhubSituacao;
+
+    try {
+        const resposta = await fetch('/api/spyhub/status');
+        if (!resposta.ok) throw new Error('status ' + resposta.status);
+
+        const dados = await resposta.json();
+        spyhubSituacao = {
+            conhecido: true,
+            navegador: dados.navegador === true,
+            credenciais: dados.credenciais === true,
+            headless: Boolean(dados.headless),
+            ocupado: Boolean(dados.ocupado)
+        };
+    } catch (falha) {
+        spyhubSituacao = { conhecido: true, navegador: false, credenciais: false, headless: false, ocupado: false };
+    }
+
+    renderizarStatusSpyhub();
+    return spyhubSituacao;
+}
+
+function renderizarStatusSpyhub() {
+    const alvo = $('spyhub-status');
+    const aviso = $('spyhub-aviso');
+    const botao = $('btn-spyhub-executar');
+    if (!alvo) return;
+
+    const navegador = spyhubSituacao.navegador;
+    const credenciais = spyhubSituacao.credenciais;
+    let texto = '';
+
+    if (navegador === false) {
+        texto = '⚠ Este servidor não tem Chrome: a verificação roda local pelo comando do node.';
+    } else if (credenciais === false) {
+        texto = '⚠ Configure SPYHUB_USUARIO e SPYHUB_SENHA no .env do servidor.';
+    } else if (navegador === true) {
+        texto = '✅ Chrome disponível' + (spyhubSituacao.headless ? ' (headless)' : ' (janela visível)') + '.';
+    }
+
+    alvo.textContent = texto;
+
+    if (aviso) {
+        aviso.classList.toggle('oculto', navegador !== false);
+        if (navegador === false) {
+            aviso.innerHTML = '<strong>Sem Chrome neste servidor.</strong> Rode local: '
+                + '<code>node spyhub.js testar lista.txt</code>';
+        }
+    }
+
+    if (botao) botao.disabled = navegador === false || credenciais === false;
+}
+
+function carregarArquivoSpyhub(input) {
+    const arquivo = input && input.files && input.files[0];
+
+    if (!arquivo) {
+        toast('Nenhum arquivo selecionado.', 'erro');
+        return;
+    }
+
+    if (arquivo.size > 2 * 1024 * 1024) {
+        toast('Arquivo muito grande (limite de 2 MB).', 'erro');
+        input.value = '';
+        return;
+    }
+
+    const leitor = new FileReader();
+
+    leitor.onload = () => {
+        const caixa = $('spyhub-texto');
+        if (caixa) caixa.value = String(leitor.result || '');
+        toast('Arquivo carregado: ' + arquivo.name);
+    };
+
+    leitor.onerror = () => {
+        toast('Não consegui ler o arquivo selecionado.', 'erro');
+        input.value = '';
+    };
+
+    leitor.readAsText(arquivo, 'utf-8');
+}
+
+async function executarVerificacaoSpyhub() {
+    const caixa = $('spyhub-texto');
+    const texto = caixa ? caixa.value.trim() : '';
+
+    if (!texto) {
+        toast('Cole a lista bruta ou carregue um arquivo .txt/.csv.', 'erro');
+        return;
+    }
+
+    const situacao = await verificarSpyhubStatus();
+    if (situacao.navegador !== true) {
+        renderizarStatusSpyhub();
+        toast('Este servidor não tem Chrome para automatizar o SpyHub.', 'erro');
+        return;
+    }
+
+    pararAcompanhamentoSpyhub();
+    spyhubJob = null;
+    renderizarSpyhub(null);
+
+    const botao = $('btn-spyhub-executar');
+    const progresso = $('spyhub-progresso');
+    if (botao) botao.disabled = true;
+    if (progresso) progresso.textContent = 'Enviando a lista e montando a fila...';
+    setLogSpyhub('Enviando a lista para o servidor...', 'info');
+
+    try {
+        const resposta = await fetch('/api/spyhub/verificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texto })
+        });
+
+        const retorno = await resposta.json().catch(() => ({}));
+
+        if (!resposta.ok) {
+            throw new Error(retorno.message || 'Falha ao iniciar a verificação.');
+        }
+
+        spyhubJob = {
+            id: retorno.jobId,
+            status: 'rodando',
+            total: retorno.total,
+            feitos: 0,
+            progresso: 0,
+            aprovados: [],
+            reprovados: [],
+            log: []
+        };
+
+        setLogSpyhub('Fila criada com ' + retorno.total + ' registro(s)'
+            + (retorno.ignoradosTotal ? ' (' + retorno.ignoradosTotal + ' ignorado(s))' : '') + '.', 'info');
+
+        if (progresso) progresso.textContent = 'Verificando ' + retorno.total + ' registro(s)...';
+        acompanharSpyhub();
+    } catch (falha) {
+        setLogSpyhub(falha.message, 'erro');
+        if (progresso) progresso.textContent = '';
+        if (botao) botao.disabled = false;
+        toast(falha.message, 'erro');
+    }
+}
+
+async function acompanharSpyhub() {
+    if (!spyhubJob || !spyhubJob.id) return;
+
+    const progresso = $('spyhub-progresso');
+    const botao = $('btn-spyhub-executar');
+
+    try {
+        const resposta = await fetch('/api/spyhub/jobs/' + encodeURIComponent(spyhubJob.id));
+        const job = await resposta.json().catch(() => ({}));
+
+        if (resposta.status === 404) {
+            throw new Error('O servidor reiniciou e esta verificação foi perdida. Rode de novo.');
+        }
+
+        if (!resposta.ok) {
+            throw new Error(job.message || 'Falha ao ler o progresso da verificação.');
+        }
+
+        spyhubJob = job;
+        renderizarSpyhub(job);
+    } catch (falha) {
+        setLogSpyhub(falha.message, 'erro');
+        if (progresso) progresso.textContent = 'Interrompido.';
+        if (botao) botao.disabled = false;
+        toast(falha.message, 'erro');
+        return;
+    }
+
+    if (spyhubJob.status === 'rodando') {
+        spyhubTimer = setTimeout(acompanharSpyhub, 1500);
+        return;
+    }
+
+    if (botao) botao.disabled = false;
+
+    if (spyhubJob.status === 'concluido') {
+        toast('Verificação concluída: ' + spyhubJob.aprovados.length + ' aprovado(s), '
+            + spyhubJob.reprovados.length + ' reprovado(s).');
+    }
+}
+
+function renderizarSpyhub(job) {
+    const log = $('spyhub-log');
+    const resumo = $('spyhub-resumo');
+    const corpo = $('tabela-spyhub-aprovados');
+    const reprovados = $('lista-spyhub-reprovados');
+    const progresso = $('spyhub-progresso');
+
+    if (!job) {
+        if (log) log.textContent = 'Aguardando a execução...';
+        if (resumo) resumo.innerHTML = '';
+        if (corpo) corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>';
+        if (reprovados) reprovados.innerHTML = '<p class="mapa-ajuda">Nenhum reprovado.</p>';
+        if (progresso) progresso.textContent = '';
+        return;
+    }
+
+    const aprovados = Array.isArray(job.aprovados) ? job.aprovados : [];
+    const recusados = Array.isArray(job.reprovados) ? job.reprovados : [];
+
+    if (log) {
+        const linhas = (job.log || []).map((linha) => '<span class="spyhub-linha ' + escaparHtml(linha.tipo || 'info') + '">'
+            + escaparHtml('[' + horaCurtaSpyhub(linha.quando) + '] ' + (linha.mensagem || '')) + '</span>');
+
+        log.innerHTML = linhas.join('') || '<span class="spyhub-linha info">Sem mensagens ainda.</span>';
+        log.scrollTop = log.scrollHeight;
+    }
+
+    if (resumo) {
+        resumo.innerHTML =
+            '<div class="validar-card ok"><strong>' + aprovados.length + '</strong><span>Aprovados</span></div>'
+            + '<div class="validar-card invalido"><strong>' + recusados.length + '</strong><span>Reprovados</span></div>'
+            + '<div class="validar-card"><strong>' + (job.feitos || 0) + '/' + (job.total || 0) + '</strong><span>Processados</span></div>';
+    }
+
+    if (progresso) {
+        const estado = job.status === 'concluido' ? ' — concluído'
+            : job.status === 'erro' ? ' — interrompido: ' + (job.erro || 'erro')
+                : job.status === 'cancelado' ? ' — cancelado' : '';
+
+        progresso.textContent = (job.feitos || 0) + '/' + (job.total || 0) + ' (' + (job.progresso || 0) + '%)' + estado;
+    }
+
+    if (corpo) {
+        corpo.innerHTML = aprovados.length
+            ? aprovados.map((item) => '<tr>'
+                + '<td>' + escaparHtml(item.cnpjFormatado || item.cnpj || '') + '</td>'
+                + '<td>' + escaparHtml(item.cpfFormatado || item.cpf || '') + '</td>'
+                + '<td>' + escaparHtml(item.razaoSocial || '') + '</td>'
+                + '<td>' + escaparHtml(item.nomeFantasia || '') + '</td>'
+                + '<td>' + escaparHtml(item.telefoneDesmascarado || item.telefoneEncontrado || item.telefone || '') + '</td>'
+                + '<td>' + escaparHtml(item.endereco || '') + '</td>'
+                + '</tr>').join('')
+            : '<tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>';
+    }
+
+    if (reprovados) {
+        reprovados.innerHTML = recusados.length
+            ? recusados.map((item) => '<details class="spyhub-ficha">'
+                + '<summary>' + escaparHtml(item.cpfFormatado || item.cpf || 'sem CPF')
+                + ' · final ' + escaparHtml((item.finais || []).join('/') || '-')
+                + (item.razaoSocial || item.nomeFantasia ? ' · ' + escaparHtml(item.razaoSocial || item.nomeFantasia) : '')
+                + ' · <em>' + escaparHtml(item.motivo || 'não encontrado') + '</em></summary>'
+                + (item.retorno ? '<p class="mapa-ajuda spyhub-retorno">Retorno do site: '
+                    + escaparHtml(item.retorno) + '</p>' : '')
+                + '<pre>' + escaparHtml(item.ficha || '') + '</pre></details>').join('')
+            : '<p class="mapa-ajuda">Nenhum reprovado.</p>';
+    }
+}
+
+async function baixarSpyhubJob(caminho, extensao, rotulo) {
+    if (!spyhubJob || !spyhubJob.id) {
+        toast('Rode uma verificação antes de exportar.', 'erro');
+        return;
+    }
+
+    try {
+        const resposta = await fetch('/api/spyhub/jobs/' + encodeURIComponent(spyhubJob.id) + caminho);
+
+        if (!resposta.ok) {
+            const retorno = await resposta.json().catch(() => ({}));
+            throw new Error(retorno.message || 'Falha ao exportar o arquivo.');
+        }
+
+        const blob = await resposta.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+
+        link.href = url;
+        link.download = 'spyhub-' + rotulo + '-' + carimbo + '.' + extensao;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast('Exportação gerada.');
+    } catch (falha) {
+        toast(falha.message, 'erro');
+    }
+}
+
+function baixarSpyhubAprovados() {
+    return baixarSpyhubJob('/aprovados.csv', 'csv', 'aprovados');
+}
+
+function baixarSpyhubReprovados() {
+    return baixarSpyhubJob('/reprovados.txt', 'txt', 'reprovados');
+}
+
+function limparSpyhub() {
+    pararAcompanhamentoSpyhub();
+    spyhubJob = null;
+
+    const texto = $('spyhub-texto');
+    if (texto) texto.value = '';
+
+    const arquivo = $('spyhub-arquivo');
+    if (arquivo) arquivo.value = '';
+
+    renderizarSpyhub(null);
+
+    const aviso = $('spyhub-aviso');
+    if (aviso) aviso.classList.add('oculto');
+
+    verificarSpyhubStatus(true);
 }
 
 /* ---------------------------------------------------------

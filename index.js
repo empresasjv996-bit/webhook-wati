@@ -16,9 +16,12 @@ const { gerarHash, verificarSenha } = require('./senha');
 const { analisarListaTelefones } = require('./telefone');
 const { validarCnpj, formatarCnpj, normalizarEmpresa } = require('./cnpj');
 const extrator = require('./extrator');
+const criarRotasSpyhub = require('./routes/contatos-spyhub');
 
 const app = express();
-app.use(express.json());
+/* 3 MB: o dump/CSV do SpyHub chega inteiro por texto no corpo do POST
+   (o limite padrão de 100 kB cortava listas a partir de ~120 registros). */
+app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
 
 /* ---------------------------------------------------------
@@ -2038,7 +2041,7 @@ app.post('/api/cnpj/consultar', exigirAdmin, async (req, res) => {
 
 /* ---------------------------------------------------------
    CONSULTA DE CPF NO EXTRATOR (extratorgov.online)
-   Body: { cpfs: ["32695561873", ...] } — até 50 por vez.
+   Body: { cpfs: ["52998224725", ...] } — até 50 por vez.
    A extração roda no painel do site (conta cliente1010) e
    pode levar de 1 a 5 minutos. A auditoria guarda só os CPFs.
    --------------------------------------------------------- */
@@ -2089,6 +2092,16 @@ app.post('/api/extrator/consultar', exigirAdmin, async (req, res) => {
 app.get('/api/extrator/status', exigirAdmin, (req, res) => {
     res.json(Object.assign({ success: true }, extrator.status()));
 });
+
+/* ---------------------------------------------------------
+   VERIFICAÇÃO SPYHUB (CPF x 4 últimos dígitos do telefone)
+   POST /api/spyhub/verificar  { texto } -> fila -> 202
+   GET  /api/spyhub/jobs/:id  -> progresso + log + resultados
+   --------------------------------------------------------- */
+app.use('/api/spyhub', criarRotasSpyhub({
+    exigirAdmin,
+    registrarAuditoria: (usuario, acao, detalhe) => banco.registrarAuditoria(usuario, acao, detalhe)
+}));
 
 app.post('/api/listas', exigirAdmin, async (req, res) => {
     const { nome, contatos } = req.body || {};

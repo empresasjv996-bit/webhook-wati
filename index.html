@@ -38,6 +38,9 @@
                         <button type="button" data-view="extrator" onclick="irPara('extrator')">
                             Consultar CPF <small>CPF → nome e telefone</small>
                         </button>
+                        <button type="button" data-view="spyhub" onclick="irPara('spyhub')">
+                            Verificação SpyHub <small>CPF x final do telefone</small>
+                        </button>
                     </div>
                 </div>
 
@@ -549,9 +552,9 @@
                     <div class="screen-panel">
                         <div class="form-group">
                             <label>1. Cole os CPFs ou carregue um arquivo (um por linha)</label>
-                            <textarea id="extrator-texto" class="form-control lista-texto" placeholder="326.955.618-73&#10;21970056851"></textarea>
+                            <textarea id="extrator-texto" class="form-control lista-texto" placeholder="529.982.247-25&#10;11144477735"></textarea>
                             <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
-                                Aceita com ou sem máscara (<code>326.955.618-73</code> ou <code>32695561873</code>).
+                                Aceita com ou sem máscara (<code>529.982.247-25</code> ou <code>52998224725</code>).
                                 Máximo de 25 CPFs por consulta (~1 minuto por CPF).
                             </small>
                         </div>
@@ -658,7 +661,97 @@
                 </div>
             </section>
 
-            
+            <!-- VERIFICAÇÃO SPYHUB: dump -> CPF + 4 finais -> app.spyhub.io -->
+            <section class="view oculto" id="view-spyhub">
+                <div class="section-title">
+                    <div>
+                        <h1>Verificação SpyHub</h1>
+                        <p>
+                            Cole a lista bruta (blocos separados por <code>=====</code>) ou envie o CSV. O painel extrai o
+                            <strong>CPF Persona</strong> e os <strong>4 finais do telefone</strong>, consulta cada CPF em
+                            <strong>app.spyhub.io</strong> e separa quem tem telefone terminando nesses dígitos.
+                        </p>
+                    </div>
+                    <button class="btn-mini" type="button" onclick="limparSpyhub()">🧹 Limpar</button>
+                </div>
+
+                <div class="listas-grid">
+                    <div class="screen-panel">
+                        <div class="form-group">
+                            <label for="spyhub-texto">1. Cole a lista bruta</label>
+                            <textarea id="spyhub-texto" class="form-control lista-texto spyhub-texto"
+                                placeholder="CNPJ: 21420227000166&#10;CPF Persona: 314.223.488-81&#10;Telefone cadastro: 55 (**) ***** 0906&#10;Final visivel: 0906&#10;...&#10;============================================================"></textarea>
+                            <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
+                                CSV aceito com cabeçalho:
+                                <code>cnpj;cpf;razao_social;nome_fantasia;telefone_desmascarado;endereco;final</code>
+                                (separador <code>;</code>, <code>,</code> ou tab).
+                            </small>
+                        </div>
+
+                        <div class="file-row">
+                            <input id="spyhub-arquivo" type="file" accept=".txt,.csv" onchange="carregarArquivoSpyhub(this)">
+                            <small>O arquivo é lido no navegador; o parsing roda no servidor, antes da fila.</small>
+                        </div>
+
+                        <button class="btn-primary" id="btn-spyhub-executar" type="button" style="margin-top: 16px"
+                            onclick="executarVerificacaoSpyhub()">Executar Verificação</button>
+
+                        <p id="spyhub-progresso" class="mapa-resumo"></p>
+                        <p id="spyhub-status" class="mapa-ajuda" style="margin-top: 8px;"></p>
+                        <p id="spyhub-aviso" class="aviso-extrator oculto"></p>
+                    </div>
+
+                    <div class="screen-panel">
+                        <h3 style="font-size: 1.05rem; margin-bottom: 6px;">2. Progresso</h3>
+                        <p class="mapa-ajuda">Cada CPF consultado aparece aqui, com o retorno do site.</p>
+
+                        <pre id="spyhub-log" class="spyhub-log" aria-live="polite">Aguardando a execução...</pre>
+
+                        <div id="spyhub-resumo" class="validar-resumo"></div>
+                    </div>
+                </div>
+
+                <div class="screen-panel" style="margin-top: 18px;">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">3. Aprovados (encontrados)</h3>
+                    <p class="mapa-ajuda">CPF com telefone terminando nos 4 dígitos pedidos.</p>
+
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
+                        <button class="btn-mini" type="button" onclick="baixarSpyhubAprovados()">⬇ Exportar Aprovados (CSV)</button>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>CNPJ</th>
+                                    <th>CPF Persona</th>
+                                    <th>Razão Social</th>
+                                    <th>Nome Fantasia</th>
+                                    <th>Telefone Desmascarado</th>
+                                    <th>Endereço</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-spyhub-aprovados">
+                                <tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="screen-panel" style="margin-top: 18px;">
+                    <h3 style="font-size: 1.05rem; margin-bottom: 6px;">4. Reprovados (não encontrados)</h3>
+                    <p class="mapa-ajuda">A ficha completa original fica aqui para a análise manual.</p>
+
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
+                        <button class="btn-mini" type="button" onclick="baixarSpyhubReprovados()">⬇ Exportar Reprovados (TXT)</button>
+                    </div>
+
+                    <div id="lista-spyhub-reprovados" class="spyhub-reprovados">
+                        <p class="mapa-ajuda">Nenhum reprovado.</p>
+                    </div>
+                </div>
+            </section>
+
             <!-- LOGS -->
             <section class="view oculto" id="view-logs">
                 <div class="section-title">
