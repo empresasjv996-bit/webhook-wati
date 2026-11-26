@@ -5,12 +5,14 @@
    Transforma a lista bruta (dump do LIVE C6 PJ, colado em
    blocos separados por "=====") ou um CSV em registros:
 
-     { cnpj, cpf, cpfFormatado, razaoSocial, nomeFantasia,
+     { cnpj, cpf, cpfFormatado, nome, razaoSocial, nomeFantasia,
        telefoneDesmascarado, endereco, finais: ['0906'], ficha }
 
    Regras (as mesmas que o painel mostra na tela):
      - CPF vem de "CPF Persona" (só dígitos) e passa pelo
        dígito verificador; bloco sem CPF válido é ignorado;
+     - nome vem de "Nome Persona" (ou "Nome"/"Nome completo")
+       e acompanha o registro até o CSV dos aprovados;
      - final vem de "Final visivel" e, se faltar, dos 4
        últimos dígitos de "Telefone cadastro";
      - a ficha original é preservada inteira para o caso
@@ -23,6 +25,10 @@ const SEPARADOR_BLOCO = /^\s*={6,}\s*$/;
 const ROTULO = /^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ()/.-]{0,45}?)\s*:\s*(.*)$/;
 /* "--- DADOS DA EMPRESA ---" e "=====" são títulos de seção, não valor do campo anterior. */
 const TITULO_SECAO = /^\s*(?:-{3,}|={3,}|_{3,}).*(?:-{3,}|={3,}|_{3,})\s*$/;
+/* Rótulos que trazem o nome da persona. A ordem importa: o rótulo específico
+   vence o genérico ("Nome da mae" e "Nome fantasia" não entram aqui). */
+const CHAVES_NOME = ['nome_persona', 'nome_da_persona', 'nome_completo', 'nome_pessoa',
+    'nome_pf', 'nome_titular', 'nome'];
 
 function apenasDigitos(valor) {
     return String(valor == null ? '' : valor).replace(/\D/g, '');
@@ -178,6 +184,7 @@ function registroDoBloco(bloco, indice) {
         cnpjFormatado: formatarCnpj(cnpj),
         cpf,
         cpfFormatado: formatarCpf(cpf),
+        nome: limpar(valorDe(campos, CHAVES_NOME)),
         razaoSocial: limpar(valorDe(campos, ['razao_social', 'empresa'])),
         nomeFantasia: limpar(valorDe(campos, ['nome_fantasia', 'fantasia'])),
         telefoneDesmascarado,
@@ -280,6 +287,7 @@ function dividirLinha(linha, separador) {
 const COLUNAS_CSV = {
     cnpj: ['cnpj'],
     cpf: ['cpf', 'cpf_persona', 'cpf persona', 'cpf da persona'],
+    nome: ['nome', 'nome_persona', 'nome persona', 'nome_completo', 'nome completo', 'nome da persona'],
     razaoSocial: ['razao_social', 'razao social', 'empresa'],
     nomeFantasia: ['nome_fantasia', 'nome fantasia', 'fantasia'],
     telefoneDesmascarado: ['telefone_desmascarado', 'telefone desmascarado', 'telefone', 'revelado'],
@@ -339,6 +347,7 @@ function registrosDoCsv(texto) {
             cnpjFormatado: formatarCnpj(campos.cnpj),
             cpf,
             cpfFormatado: formatarCpf(cpf),
+            nome: limpar(campos.nome),
             razaoSocial: limpar(campos.razaoSocial),
             nomeFantasia: limpar(campos.nomeFantasia),
             telefoneDesmascarado: limpar(campos.telefoneDesmascarado),
@@ -411,7 +420,8 @@ function parseEntrada(texto) {
 }
 
 /* Exportações usadas pela tela e pelos testes. */
-const COLUNAS_APROVADOS = ['cnpj', 'cpf_persona', 'razao_social', 'nome_fantasia', 'telefone_desmascarado', 'endereco'];
+const COLUNAS_APROVADOS = ['cnpj', 'cpf_persona', 'nome', 'razao_social', 'nome_fantasia',
+    'telefone_desmascarado', 'endereco'];
 
 function csvDeAprovados(aprovados) {
     const linhas = [COLUNAS_APROVADOS.join(';')];
@@ -420,6 +430,7 @@ function csvDeAprovados(aprovados) {
         linhas.push([
             item.cnpjFormatado || item.cnpj,
             item.cpfFormatado || item.cpf,
+            item.nome,
             item.razaoSocial,
             item.nomeFantasia,
             item.telefoneDesmascarado || item.telefoneEncontrado,

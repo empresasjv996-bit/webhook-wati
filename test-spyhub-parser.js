@@ -116,6 +116,7 @@ const primeiro = doDump.registros[0];
 
 assert.strictEqual(primeiro.cpf, '52998224725', 'CPF só com dígitos');
 assert.strictEqual(primeiro.cpfFormatado, '529.982.247-25', 'CPF formatado para a tela');
+assert.strictEqual(primeiro.nome, 'JOAO DA SILVA', 'nome da persona vem de "Nome Persona"');
 assert.strictEqual(primeiro.cnpjFormatado, '21.420.227/0001-66', 'CNPJ formatado');
 assert.deepStrictEqual(primeiro.finais, ['0906'], 'final vem de "Final visivel"');
 assert.strictEqual(primeiro.razaoSocial, 'ACOUGUE E MERCEARIA SAO JOAO LTDA', 'razão social do bloco');
@@ -133,7 +134,24 @@ const repetido = parser.registrosDoDump([BLOCO_VALIDO, BLOCO_VALIDO].join('\n===
 assert.strictEqual(repetido.registros.length, 1, 'mesmo CPF/final não entra duas vezes');
 assert.strictEqual(repetido.ignorados[0].motivo, 'Registro repetido', 'repetido é marcado como tal');
 
-console.log('OK - spyhub: dump -> registros (final, endereço, ficha, dedupe)');
+/* nome: rótulo genérico funciona e "Nome da mae" não é confundido com a persona */
+const BLOCO_NOME_GENERICO = [
+    'CNPJ: 11222333000181',
+    'CPF Persona: 111.444.777-35',
+    'Nome: MARIA SOUZA',
+    'Nome da mae: ANA SOUZA',
+    'Final visivel: 1234'
+].join('\n');
+
+const comNome = parser.registrosDoDump(BLOCO_NOME_GENERICO);
+assert.strictEqual(comNome.registros.length, 1, 'bloco com "Nome:" continua válido');
+assert.strictEqual(comNome.registros[0].nome, 'MARIA SOUZA', '"Nome:" genérico é aceito como nome da persona');
+assert.ok(comNome.registros[0].nome.indexOf('ANA') === -1, '"Nome da mae" não entra como nome da persona');
+
+const semNome = parser.registrosDoDump(BLOCO_INVALIDO.replace('111.111.111-11', '111.444.777-35'));
+assert.strictEqual(semNome.registros[0].nome, '', 'bloco sem nome fica com nome vazio (não inventa valor)');
+
+console.log('OK - spyhub: dump -> registros (final, nome, endereço, ficha, dedupe)');
 
 /* ---------- CSV ---------- */
 
@@ -168,7 +186,25 @@ assert.strictEqual(csvVirgula.registros.length, 1, 'CSV com vírgula aceito');
 assert.strictEqual(csvVirgula.registros[0].razaoSocial, 'EMPRESA, COM VIRGULA', 'vírgula dentro de aspas');
 assert.deepStrictEqual(csvVirgula.registros[0].finais, ['7777'], 'final veio do telefone_cadastro');
 
-console.log('OK - spyhub: CSV (aspas, vírgula, dedupe, final alternativo)');
+/* coluna nome no CSV (aceita "nome", "nome_persona" e "nome_completo") */
+const CSV_COM_NOME = [
+    'cnpj;cpf;nome;telefone_cadastro;razao_social',
+    '21.420.227/0001-66;529.982.247-25;JOAO DA SILVA;55 19 98888-7777;ACOUGUE'
+].join('\n');
+
+const csvNome = parser.registrosDoCsv(CSV_COM_NOME);
+assert.strictEqual(csvNome.registros.length, 1, 'CSV com coluna nome aceito');
+assert.strictEqual(csvNome.registros[0].nome, 'JOAO DA SILVA', 'coluna nome do CSV vira registro.nome');
+
+const CSV_NOME_COMPLETO = [
+    'cpf;nome_completo;final',
+    '11144477735;MARIA SOUZA;1234'
+].join('\n');
+
+assert.strictEqual(parser.registrosDoCsv(CSV_NOME_COMPLETO).registros[0].nome, 'MARIA SOUZA',
+    'cabeçalho "nome_completo" também alimenta registro.nome');
+
+console.log('OK - spyhub: CSV (aspas, vírgula, dedupe, final alternativo, coluna nome)');
 
 /* ---------- parseEntrada ---------- */
 
@@ -192,12 +228,18 @@ console.log('OK - spyhub: parseEntrada escolhe dump/CSV/vazio');
 const aprovado = Object.assign({}, primeiro, { razaoSocial: 'ACOUGUE; MERCEARIA' });
 const csv = parser.csvDeAprovados([aprovado]);
 
-assert.ok(csv.startsWith('cnpj;cpf_persona;razao_social;nome_fantasia;telefone_desmascarado;endereco\r\n'),
+assert.deepStrictEqual(parser.COLUNAS_APROVADOS,
+    ['cnpj', 'cpf_persona', 'nome', 'razao_social', 'nome_fantasia', 'telefone_desmascarado', 'endereco'],
+    'ordem das colunas do CSV de aprovados (nome logo depois do CPF)');
+assert.ok(csv.startsWith('cnpj;cpf_persona;nome;razao_social;nome_fantasia;telefone_desmascarado;endereco\r\n'),
     'cabeçalho do CSV de aprovados');
-assert.ok(csv.indexOf('21.420.227/0001-66;529.982.247-25;ACOUGUE, MERCEARIA') >= 0,
-    'CSV troca ";" do texto por "," para não quebrar colunas');
+assert.ok(csv.indexOf('21.420.227/0001-66;529.982.247-25;JOAO DA SILVA;ACOUGUE, MERCEARIA') >= 0,
+    'CSV traz o nome da persona e troca ";" do texto por "," para não quebrar colunas');
 assert.ok(csv.indexOf('RUA DAS FLORES') >= 0, 'endereço exportado');
 assert.ok(csv.endsWith('\r\n'), 'CSV termina com quebra de linha');
+
+const csvSemNome = parser.csvDeAprovados([{ cpfFormatado: '529.982.247-25', razaoSocial: 'X' }]);
+assert.ok(csvSemNome.indexOf('529.982.247-25;;X;') >= 0, 'sem nome, a célula fica vazia (colunas alinhadas)');
 
 const txt = parser.txtDeReprovados([{ cpfFormatado: '529.982.247-25', finais: ['0906'], motivo: 'Nenhum telefone', ficha: BLOCO_VALIDO }]);
 assert.ok(txt.startsWith('### 529.982.247-25 - finais 0906 - Nenhum telefone'), 'cabeçalho do TXT de reprovados');
@@ -341,6 +383,8 @@ assert.ok(html.indexOf('id="spyhub-texto"') >= 0, 'caixa para colar a lista');
 assert.ok(html.indexOf('id="spyhub-arquivo"') >= 0, 'upload do arquivo .txt/.csv');
 assert.ok(html.indexOf('onclick="executarVerificacaoSpyhub()"') >= 0, 'botão Executar Verificação');
 assert.ok(html.indexOf('id="tabela-spyhub-aprovados"') >= 0, 'tabela de aprovados');
+assert.ok(html.indexOf('<th>Nome</th>') >= 0, 'tabela de aprovados tem a coluna Nome');
+assert.ok(app.indexOf("escaparHtml(item.nome || '')") >= 0, 'app.js mostra o nome do aprovado na tabela');
 assert.ok(html.indexOf('id="lista-spyhub-reprovados"') >= 0, 'lista de reprovados');
 assert.ok(html.indexOf('onclick="baixarSpyhubAprovados()"') >= 0, 'botão de exportar aprovados');
 assert.ok(html.indexOf('onclick="baixarSpyhubReprovados()"') >= 0, 'botão de exportar reprovados');

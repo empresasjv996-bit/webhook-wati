@@ -2379,7 +2379,7 @@ function renderizarSpyhub(job) {
     if (!job) {
         if (log) log.textContent = 'Aguardando a execução...';
         if (resumo) resumo.innerHTML = '';
-        if (corpo) corpo.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>';
+        if (corpo) corpo.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum aprovado ainda.</td></tr>';
         if (reprovados) reprovados.innerHTML = '<p class="mapa-ajuda">Nenhum reprovado.</p>';
         if (progresso) progresso.textContent = '';
         return;
@@ -2416,12 +2416,13 @@ function renderizarSpyhub(job) {
             ? aprovados.map((item) => '<tr>'
                 + '<td>' + escaparHtml(item.cnpjFormatado || item.cnpj || '') + '</td>'
                 + '<td>' + escaparHtml(item.cpfFormatado || item.cpf || '') + '</td>'
+                + '<td>' + escaparHtml(item.nome || '') + '</td>'
                 + '<td>' + escaparHtml(item.razaoSocial || '') + '</td>'
                 + '<td>' + escaparHtml(item.nomeFantasia || '') + '</td>'
                 + '<td>' + escaparHtml(item.telefoneDesmascarado || item.telefoneEncontrado || item.telefone || '') + '</td>'
                 + '<td>' + escaparHtml(item.endereco || '') + '</td>'
                 + '</tr>').join('')
-            : '<tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>';
+            : '<tr><td colspan="7" class="vazio">Nenhum aprovado ainda.</td></tr>';
     }
 
     if (reprovados) {

@@ -963,6 +963,7 @@ async function processar(job, registros) {
                         cnpjFormatado: registro.cnpjFormatado,
                         cpf: registro.cpf,
                         cpfFormatado: registro.cpfFormatado,
+                        nome: registro.nome,
                         razaoSocial: registro.razaoSocial,
                         nomeFantasia: registro.nomeFantasia,
                         telefoneDesmascarado: registro.telefoneDesmascarado || resultado.telefone,
@@ -1147,6 +1148,7 @@ async function principal() {
                 console.log(JSON.stringify({
                     registros: analise.registros.map((item) => ({
                         cpf: item.cpfFormatado,
+                        nome: item.nome,
                         finais: item.finais,
                         cnpj: item.cnpjFormatado,
                         empresa: item.nomeFantasia,

@@ -680,10 +680,10 @@
                         <div class="form-group">
                             <label for="spyhub-texto">1. Cole a lista bruta</label>
                             <textarea id="spyhub-texto" class="form-control lista-texto spyhub-texto"
-                                placeholder="CNPJ: 21420227000166&#10;CPF Persona: 314.223.488-81&#10;Telefone cadastro: 55 (**) ***** 0906&#10;Final visivel: 0906&#10;...&#10;============================================================"></textarea>
+                                placeholder="CNPJ: 21420227000166&#10;CPF Persona: 314.223.488-81&#10;Nome Persona: JOAO DA SILVA&#10;Telefone cadastro: 55 (**) ***** 0906&#10;Final visivel: 0906&#10;...&#10;============================================================"></textarea>
                             <small class="mapa-ajuda" style="display: block; margin-top: 8px;">
                                 CSV aceito com cabeçalho:
-                                <code>cnpj;cpf;razao_social;nome_fantasia;telefone_desmascarado;endereco;final</code>
+                                <code>cnpj;cpf;nome;razao_social;nome_fantasia;telefone_desmascarado;endereco;final</code>
                                 (separador <code>;</code>, <code>,</code> ou tab).
                             </small>
                         </div>
@@ -725,6 +725,7 @@
                                 <tr>
                                     <th>CNPJ</th>
                                     <th>CPF Persona</th>
+                                    <th>Nome</th>
                                     <th>Razão Social</th>
                                     <th>Nome Fantasia</th>
                                     <th>Telefone Desmascarado</th>
@@ -732,7 +733,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tabela-spyhub-aprovados">
-                                <tr><td colspan="6" class="vazio">Nenhum aprovado ainda.</td></tr>
+                                <tr><td colspan="7" class="vazio">Nenhum aprovado ainda.</td></tr>
                             </tbody>
                         </table>
                     </div>

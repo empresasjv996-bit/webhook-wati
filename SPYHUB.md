@@ -163,8 +163,10 @@ motivo.
 
 ## Exportações
 
-- **Aprovados (CSV, `;`, com BOM UTF-8):** `cnpj;cpf_persona;razao_social;nome_fantasia;telefone_desmascarado;endereco`.
-  Ponto e vírgula dentro do texto vira vírgula para não quebrar colunas.
+- **Aprovados (CSV, `;`, com BOM UTF-8):** `cnpj;cpf_persona;nome;razao_social;nome_fantasia;telefone_desmascarado;endereco`.
+  O `nome` é o da persona, lido de `Nome Persona:` / `Nome:` / `Nome completo:` no dump
+  (ou da coluna `nome`/`nome_persona`/`nome_completo` no CSV); sem esse campo a célula
+  fica vazia. Ponto e vírgula dentro do texto vira vírgula para não quebrar colunas.
 - **Reprovados (TXT):** para cada registro, `### CPF - finais XXXX - motivo`,
   seguido da ficha original completa (pronta para conferir/reprocessar).
 
