@@ -46,7 +46,7 @@ configuração de variáveis no Render.
 
 Na aba **Contatos** do painel administrativo, o operador cola um dump/CSV com **CPF + 4 últimos
 dígitos do telefone**. O sistema consulta cada CPF nos módulos do SpyHub
-(`/search/avancada`, `/search/tracker` e `/search/cpf-top` — 100 consultas em cada URL, com troca
+(`/search/tracker`, `/search/cpf-top` e `/search/avancada` — 100 consultas em cada URL, com troca
 automática quando um estoura a cota) e entrega:
 
 - **aprovados**: CPF cujo resultado do site contém um telefone terminando nos 4 dígitos pedidos;
@@ -70,7 +70,7 @@ routes/contatos-spyhub.js  (admin-only)
 spyhub.js — motor CDP próprio
    │  abre Chrome dedicado: porta CDP 9226, perfil %TEMP%\qgc-painel-spyhub
    │  login com SPYHUB_USUARIO/SPYHUB_SENHA (ou sessão já salva no perfil)
-   │  módulo atual (avancada → tracker → cpf-top) → aba CPF → digita CPF → CONSULTAR
+   │  módulo atual (tracker → cpf-top → avancada) → aba CPF → digita CPF → CONSULTAR
    │  lê o selo X/100 antes de cada consulta; cota estourada = próximo módulo
    │  varre só o texto que apareceu DEPOIS do clique (textoNovoDepois)
    │  procura telefone terminando nos 4 dígitos (aceita máscara)

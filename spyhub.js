@@ -8,7 +8,7 @@
      1. abre UM Chrome dedicado (porta/perfil próprios) e faz
         login com SPYHUB_USUARIO / SPYHUB_SENHA;
      2. para cada registro do parser (CPF + 4 finais), entra no
-        módulo de consulta (avancada -> tracker -> cpf-top),
+        módulo de consulta (tracker -> cpf-top -> avancada),
         preenche o CPF e espera o resultado; cada módulo tem cota
         própria de 100 consultas: quando um estoura, o MESMO CPF é
         repetido no módulo seguinte (o selo X/100 da página é lido
@@ -47,13 +47,9 @@ const URL_LOGIN = process.env.SPYHUB_LOGIN_URL || (URL_BASE + '/login');
 /* Módulos de consulta do SpyHub. Cada URL tem a PRÓPRIA cota (100 consultas):
    quando o selo chega a 100/100 (ou o site avisa do limite), o motor repete o
    mesmo CPF no módulo seguinte — a verificação não para nem reprova por isso. */
+/* A ordem importa: o Tracker é o módulo que devolve o número certo (o
+   /search/avancada fica por último, só como reserva de cota). */
 const MODULOS_PADRAO = [
-    {
-        id: 'avancada',
-        nome: 'Consulta P.Física',
-        caminho: '/search/avancada',
-        chaves: ['consulta p.fisica', 'consulta p fisica', 'p.fisica', 'p fisica', 'pessoa fisica']
-    },
     {
         id: 'tracker',
         nome: 'Consulta Tracker',
@@ -65,11 +61,29 @@ const MODULOS_PADRAO = [
         nome: 'Consulta CPF TOP',
         caminho: '/search/cpf-top',
         chaves: ['consulta cpf top', 'cpf top', 'cpf-top']
+    },
+    {
+        id: 'avancada',
+        nome: 'Consulta P.Física',
+        caminho: '/search/avancada',
+        chaves: ['consulta p.fisica', 'consulta p fisica', 'p.fisica', 'p fisica', 'pessoa fisica']
     }
 ];
 
 /* SPYHUB_MODULOS_URLS=https://.../search/tracker,https://.../search/cpf-top
-   manda na ordem dada; SPYHUB_BUSCA_URL (antigo) troca só a URL do 1º módulo. */
+   manda na ordem dada (o nome/chaves do selo seguem a URL); SPYHUB_BUSCA_URL
+   (antigo) troca só a URL do 1º módulo. */
+/* acha o módulo padrão pela URL (o último trecho do caminho), para manter o
+   nome e as chaves do selo mesmo quando a ordem vem trocada no .env */
+function moduloPorUrl(url) {
+    const trecho = String(url || '').replace(/\/+$/, '').split('/').pop().toLowerCase();
+    if (!trecho) return null;
+
+    return MODULOS_PADRAO.find((modulo) => modulo.caminho === '/' + trecho)
+        || MODULOS_PADRAO.find((modulo) => trecho.indexOf(modulo.id) >= 0)
+        || null;
+}
+
 function montarModulos() {
     const lista = String(process.env.SPYHUB_MODULOS_URLS || '')
         .split(/[,;\s]+/)
@@ -78,14 +92,14 @@ function montarModulos() {
 
     if (lista.length) {
         return lista.map((url, indice) => {
-            const padrao = MODULOS_PADRAO[indice] || {};
             const limpa = url.replace(/\/+$/, '');
+            const padrao = moduloPorUrl(limpa) || MODULOS_PADRAO[indice] || {};
 
             return {
                 id: padrao.id || ('modulo-' + (indice + 1)),
                 nome: padrao.nome || ('Módulo ' + (indice + 1)),
                 url: limpa,
-                chaves: padrao.chaves || [limpa.slice(limpa.lastIndexOf('/') + 1)]
+                chaves: (padrao.chaves || [limpa.slice(limpa.lastIndexOf('/') + 1)]).slice()
             };
         });
     }

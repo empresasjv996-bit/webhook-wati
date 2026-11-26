@@ -24,7 +24,7 @@ arquivado em `HANDOFF-CLINE.md` (seções 5 e 12).
 node estado-spyhub.js          # docs, arquivos, sintaxe, .env, git, exports e próximos passos
 npm run estado                 # atalho para o comando acima
 node estado-spyhub.js --diag   # idem + sonda ao vivo no Chrome do SpyHub (CDP 9226)
-node estado-spyhub.js --ir     # navega o Chrome para o 1º módulo (/search/avancada) e sonda
+node estado-spyhub.js --ir     # navega o Chrome para o 1º módulo (/search/tracker) e sonda
 node estado-spyhub.js --json   # tudo em JSON (bom para colar em outra sessão)
 ```
 
@@ -37,8 +37,8 @@ node estado-spyhub.js --json   # tudo em JSON (bom para colar em outra sessão)
 ## 1. Objetivo
 
 Na aba **Contatos** do painel administrativo, importar um dump/CSV, extrair **CPF + 4 últimos dígitos do telefone**,
-consultar cada CPF nos módulos do SpyHub (`/search/avancada`, `/search/tracker`, `/search/cpf-top` —
-100 consultas em cada, trocando sozinho quando um estoura) e entregar:
+consultar cada CPF nos módulos do SpyHub (`/search/tracker`, `/search/cpf-top`, `/search/avancada` —
+100 consultas em cada URL, trocando sozinho quando um estoura) e entregar:
 
 - **aprovados**: CPF cujo resultado do site contém um telefone terminando nos 4 dígitos pedidos;
 - **reprovados**: sem correspondência ou com erro, preservando a ficha original + um trecho do retorno do site;

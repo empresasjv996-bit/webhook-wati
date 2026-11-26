@@ -359,15 +359,16 @@ console.log('OK - spyhub: diferença de texto (evita "não encontrado" das instr
 
 assert.strictEqual(spyhub.MODULOS.length, 3, 'três módulos de consulta');
 assert.deepStrictEqual(spyhub.MODULOS.map((modulo) => modulo.url), [
-    'https://app.spyhub.io/search/avancada',
     'https://app.spyhub.io/search/tracker',
-    'https://app.spyhub.io/search/cpf-top'
-], 'ordem dos módulos: avancada -> tracker -> cpf-top');
+    'https://app.spyhub.io/search/cpf-top',
+    'https://app.spyhub.io/search/avancada'
+], 'ordem dos módulos: tracker -> cpf-top -> avancada');
+assert.strictEqual(spyhub.MODULOS[0].id, 'tracker', 'o Tracker é o primeiro (é o que devolve o número certo)');
 
 const situacaoModulos = spyhub.status();
 assert.strictEqual(situacaoModulos.modulos.length, 3, 'status lista os três módulos');
 assert.strictEqual(situacaoModulos.modulos[0].ativo, true, 'o primeiro módulo começa ativo');
-assert.strictEqual(situacaoModulos.moduloAtivo, 'Consulta P.Física', 'status informa o módulo ativo');
+assert.strictEqual(situacaoModulos.moduloAtivo, 'Consulta Tracker', 'status informa o módulo ativo');
 assert.strictEqual(situacaoModulos.moduloQuota, '0/100', 'status informa a cota do módulo ativo');
 
 assert.deepStrictEqual(spyhub.quotaDoTexto('Consultas usadas 12/100'), { usadas: 12, total: 100 },
@@ -383,10 +384,12 @@ const TELA_MODULOS = [
     '0 / 100', 'CONSULTA CPF TOP'
 ].join('\n');
 
-assert.deepStrictEqual(spyhub.quotaDoTexto(TELA_MODULOS, spyhub.MODULOS[0].chaves), { usadas: 100, total: 100 },
-    'P.Física lê o próprio selo (100/100) mesmo com os outros módulos na tela');
+assert.deepStrictEqual(spyhub.quotaDoTexto(TELA_MODULOS, spyhub.MODULOS[0].chaves), { usadas: 0, total: 100 },
+    'Tracker lê o próprio selo (0/100), não o 100/100 do vizinho');
 assert.deepStrictEqual(spyhub.quotaDoTexto(TELA_MODULOS, spyhub.MODULOS[1].chaves), { usadas: 0, total: 100 },
-    'Tracker lê o próprio selo (0/100), não o do vizinho');
+    'CPF TOP lê o próprio selo (0/100)');
+assert.deepStrictEqual(spyhub.quotaDoTexto(TELA_MODULOS, spyhub.MODULOS[2].chaves), { usadas: 100, total: 100 },
+    'P.Física (reserva) lê o próprio selo (100/100)');
 
 assert.strictEqual(spyhub.textoIndicaLimite('Você atingiu o limite de consultas diárias'), true,
     'aviso de limite na página é reconhecido');
@@ -398,8 +401,8 @@ assert.strictEqual(modulosDoMotor.length, 3, 'motor guarda o estado dos três m�
 
 /* estourou o primeiro: o próximo assume; todos estourados: a consulta para */
 spyhub.esgotarModulo(modulosDoMotor[0], 'selo 100/100');
-assert.deepStrictEqual(spyhub.modulosDisponiveis().map((modulo) => modulo.id), ['tracker', 'cpf-top'],
-    'P.Física estourado -> segue com Tracker e depois CPF TOP');
+assert.deepStrictEqual(spyhub.modulosDisponiveis().map((modulo) => modulo.id), ['cpf-top', 'avancada'],
+    'Tracker estourado -> segue com CPF TOP e depois P.Física');
 
 spyhub.esgotarModulo(modulosDoMotor[1], 'selo 100/100');
 spyhub.esgotarModulo(modulosDoMotor[2], 'selo 100/100');
@@ -410,10 +413,10 @@ assert.strictEqual(spyhub.modulosDisponiveis(Date.now() + 11 * 60 * 1000).length
 
 /* o selo lido na tela manda no contador */
 modulosDoMotor.forEach((modulo) => spyhub.liberarModulo(modulo, null));
-spyhub.atualizarCota(modulosDoMotor[1], 'CONSULTA TRACKER 5 / 100');
-assert.strictEqual(modulosDoMotor[1].usadas, 5, 'selo da tela atualiza o contador do módulo');
-spyhub.atualizarCota(modulosDoMotor[1], 'sem selo na tela');
-assert.strictEqual(modulosDoMotor[1].usadas, 6, 'sem selo na tela, conta +1 consulta');
+spyhub.atualizarCota(modulosDoMotor[0], 'CONSULTA TRACKER 5 / 100');
+assert.strictEqual(modulosDoMotor[0].usadas, 5, 'selo da tela atualiza o contador do módulo');
+spyhub.atualizarCota(modulosDoMotor[0], 'sem selo na tela');
+assert.strictEqual(modulosDoMotor[0].usadas, 6, 'sem selo na tela, conta +1 consulta');
 
 /* limpa o estado compartilhado para os próximos testes */
 modulosDoMotor.forEach((modulo) => {

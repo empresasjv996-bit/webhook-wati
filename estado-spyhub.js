@@ -47,7 +47,7 @@ const VARIAVEIS_OBRIGATORIAS = ['SPYHUB_USUARIO', 'SPYHUB_SENHA'];
 const ARTEFATOS = ['aprovados-spyhub.csv', 'reprovados-spyhub.txt'];
 
 const PORTA_CDP = Number(process.env.CDP_PORT_SPYHUB || 9226);
-const URL_BUSCA = process.env.SPYHUB_BUSCA_URL || 'https://app.spyhub.io/search/avancada';
+const URL_BUSCA = process.env.SPYHUB_BUSCA_URL || 'https://app.spyhub.io/search/tracker';
 
 function esperar(ms) {
     return new Promise((resolver) => setTimeout(resolver, ms));

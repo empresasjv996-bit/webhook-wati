@@ -22,7 +22,7 @@ cola a lista / envia o arquivo
 spyhub-parser.js  →  CPF válido + 4 finais + ficha original
         │  job em memória (1 por vez)
         ▼
-spyhub.js  →  Chrome dedicado (CDP) → login → módulo (avancada/tracker/cpf-top) → CPF
+spyhub.js  →  Chrome dedicado (CDP) → login → módulo (tracker/cpf-top/avancada) → CPF
         │  varre o resultado procurando telefone com o final pedido
         ▼
 GET /api/spyhub/jobs/:id   (polling de 1,5 s na tela)
@@ -54,9 +54,14 @@ módulos nesta ordem e troca sozinho quando a cota acaba:
 
 | # | Módulo | URL |
 | --- | --- | --- |
-| 1 | Consulta P.Física | `https://app.spyhub.io/search/avancada` |
-| 2 | Consulta Tracker | `https://app.spyhub.io/search/tracker` |
-| 3 | Consulta CPF TOP | `https://app.spyhub.io/search/cpf-top` |
+| 1 | Consulta Tracker | `https://app.spyhub.io/search/tracker` |
+| 2 | Consulta CPF TOP | `https://app.spyhub.io/search/cpf-top` |
+| 3 | Consulta P.Física | `https://app.spyhub.io/search/avancada` |
+
+- **O Tracker vem primeiro** porque é o módulo que devolve o número certo; a
+  Consulta P.Física (`/search/avancada`), que estava retornando número errado,
+  ficou **por último**, só como reserva de cota — se não quiser usá-la de jeito
+  nenhum, deixe só as duas primeiras em `SPYHUB_MODULOS_URLS`.
 
 - Antes de cada consulta o motor lê o selo **`usadas/100`** da página (e do
   card do módulo, quando a tela lista os três) — se estiver cheio, pula para o
@@ -117,7 +122,7 @@ Opcionais:
 | `SPYHUB_ESPERA_LOGIN` | `40000` | tempo máximo esperando o login |
 | `SPYHUB_MAX_REGISTROS` | `500` | teto de registros por job |
 | `SPYHUB_URL` / `SPYHUB_LOGIN_URL` | app.spyhub.io | URLs alternativas do painel/login |
-| `SPYHUB_MODULOS_URLS` | avancada, tracker, cpf-top | lista de módulos (na ordem), separada por vírgula |
+| `SPYHUB_MODULOS_URLS` | tracker, cpf-top, avancada | lista de módulos (na ordem), separada por vírgula |
 | `SPYHUB_BUSCA_URL` | — | troca só a URL do 1º módulo (compatibilidade) |
 | `SPYHUB_COTA_MODULO` | `100` | consultas por módulo quando o selo da tela não aparece |
 | `SPYHUB_REVALIDAR_MODULO_MS` | `600000` | tempo até conferir de novo um módulo marcado como esgotado |
