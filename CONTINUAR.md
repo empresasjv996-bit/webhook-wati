@@ -1,6 +1,8 @@
 # CONTINUAR — Motor de Verificação SpyHub
 
 > Documento de retomada. Quem abrir o projeto (ou outra sessão de IA) começa por aqui.
+> **Handoff completo para o Cline/outra IA: `HANDOFF-CLINE.md`** (deploy, diagnóstico do
+> "não aparece no painel", runbook e limites).
 > Rode `node estado-spyhub.js` para ver o estado atual e os próximos passos sem abrir o código.
 
 ## 0. Como retomar (checklist rápido)
@@ -294,6 +296,9 @@ SPYHUB_URL / SPYHUB_LOGIN_URL / SPYHUB_BUSCA_URL   # overrides opcionais
 14. **E2E visual** em modo demo (porta 3100): login admin → Contatos → SpyHub → job pela tela →
     tabela/log → exportações (CSV com BOM, TXT), 22 s; screenshots em `diagnostico/`.
     Harness: `node e2e-painel-visual.js`.
-15. **Pendente**: apenas a validação no painel real/de produção, se o operador decidir subir
-    (atenção ao worker de campanhas).
+15. **Deploy**: commits enviados ao GitHub (`decf583..f64f0f0`) e Render servindo a versão nova
+    (`app.js` com 57 referências, `index.html` com o item de menu, `cf-cache-status: DYNAMIC`).
+16. **Pendente**: operador confirmar a exibição no painel (o item é submenu de **Contatos ▾**; conferir
+    cache/DOM e se a sessão é admin) e cadastrar `SPYHUB_USUARIO`/`SPYHUB_SENHA` no Render.
+    Runbook e diagnóstico completos em `HANDOFF-CLINE.md`.
 

@@ -11,6 +11,7 @@ acompanha o progresso.
 
 > Retomando o trabalho? Leia `CONTINUAR.md` (estado atual e próximos passos) e
 > rode `node estado-spyhub.js` / `node estado-spyhub.js --diag`.
+> Handoff completo de deploy/diagnóstico (para Cline/outra IA): `HANDOFF-CLINE.md`.
 
 ## Como funciona
 
