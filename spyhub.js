@@ -7,8 +7,12 @@
 
      1. abre UM Chrome dedicado (porta/perfil próprios) e faz
         login com SPYHUB_USUARIO / SPYHUB_SENHA;
-     2. para cada registro do parser (CPF + 4 finais), entra em
-        /search/pessoa-fisica, preenche o CPF e espera o resultado;
+     2. para cada registro do parser (CPF + 4 finais), entra no
+        módulo de consulta (avancada -> tracker -> cpf-top),
+        preenche o CPF e espera o resultado; cada módulo tem cota
+        própria de 100 consultas: quando um estoura, o MESMO CPF é
+        repetido no módulo seguinte (o selo X/100 da página é lido
+        antes de cada consulta);
      3. varre o DOM procurando um telefone que termine nos 4
         dígitos pedidos (com ou sem máscara);
      4. ENCONTRADO -> aprovados; senão / erro -> reprovados com a
@@ -39,9 +43,81 @@ const parser = require('./spyhub-parser');
 
 const URL_BASE = String(process.env.SPYHUB_URL || 'https://app.spyhub.io').replace(/\/+$/, '');
 const URL_LOGIN = process.env.SPYHUB_LOGIN_URL || (URL_BASE + '/login');
-const URL_BUSCA = process.env.SPYHUB_BUSCA_URL || (URL_BASE + '/search/pessoa-fisica');
+
+/* Módulos de consulta do SpyHub. Cada URL tem a PRÓPRIA cota (100 consultas):
+   quando o selo chega a 100/100 (ou o site avisa do limite), o motor repete o
+   mesmo CPF no módulo seguinte — a verificação não para nem reprova por isso. */
+const MODULOS_PADRAO = [
+    {
+        id: 'avancada',
+        nome: 'Consulta P.Física',
+        caminho: '/search/avancada',
+        chaves: ['consulta p.fisica', 'consulta p fisica', 'p.fisica', 'p fisica', 'pessoa fisica']
+    },
+    {
+        id: 'tracker',
+        nome: 'Consulta Tracker',
+        caminho: '/search/tracker',
+        chaves: ['consulta tracker', 'tracker']
+    },
+    {
+        id: 'cpf-top',
+        nome: 'Consulta CPF TOP',
+        caminho: '/search/cpf-top',
+        chaves: ['consulta cpf top', 'cpf top', 'cpf-top']
+    }
+];
+
+/* SPYHUB_MODULOS_URLS=https://.../search/tracker,https://.../search/cpf-top
+   manda na ordem dada; SPYHUB_BUSCA_URL (antigo) troca só a URL do 1º módulo. */
+function montarModulos() {
+    const lista = String(process.env.SPYHUB_MODULOS_URLS || '')
+        .split(/[,;\s]+/)
+        .map((url) => url.trim())
+        .filter(Boolean);
+
+    if (lista.length) {
+        return lista.map((url, indice) => {
+            const padrao = MODULOS_PADRAO[indice] || {};
+            const limpa = url.replace(/\/+$/, '');
+
+            return {
+                id: padrao.id || ('modulo-' + (indice + 1)),
+                nome: padrao.nome || ('Módulo ' + (indice + 1)),
+                url: limpa,
+                chaves: padrao.chaves || [limpa.slice(limpa.lastIndexOf('/') + 1)]
+            };
+        });
+    }
+
+    const modulos = MODULOS_PADRAO.map((modulo) => ({
+        id: modulo.id,
+        nome: modulo.nome,
+        url: URL_BASE + modulo.caminho,
+        chaves: modulo.chaves.slice()
+    }));
+
+    if (process.env.SPYHUB_BUSCA_URL) {
+        modulos[0] = Object.assign({}, modulos[0], {
+            url: String(process.env.SPYHUB_BUSCA_URL).replace(/\/+$/, '')
+        });
+    }
+
+    return modulos;
+}
+
+const MODULOS = montarModulos();
+
+/* compatibilidade: quem já usava URL_BUSCA (erros/status) segue funcionando */
+const URL_BUSCA = MODULOS[0].url;
+
 const PORTA = Number(process.env.CDP_PORT_SPYHUB || 9226);
 const PERFIL = path.join(os.tmpdir(), 'qgc-painel-spyhub');
+
+/* cota de cada módulo (100 no SpyHub) e tempo para revalidar um módulo marcado
+   como esgotado — se a cota renovar, ele volta sozinho para a fila */
+const COTA_MODULO = Math.max(1, Number(process.env.SPYHUB_COTA_MODULO || 100));
+const REVALIDAR_MS = Math.max(60000, Number(process.env.SPYHUB_REVALIDAR_MODULO_MS || 600000));
 
 const PADRAO = {
     tentativas: Math.max(1, Number(process.env.SPYHUB_TENTATIVAS || 3)),
@@ -57,7 +133,19 @@ const estado = {
     job: null,
     cdp: null,
     processo: null,
-    iniciando: null
+    iniciando: null,
+    /* cota de cada módulo em memória (o número real vem do selo da página) */
+    modulos: MODULOS.map((modulo) => ({
+        id: modulo.id,
+        nome: modulo.nome,
+        url: modulo.url,
+        chaves: modulo.chaves,
+        esgotado: false,
+        usadas: 0,
+        total: COTA_MODULO,
+        motivo: '',
+        verificadoEm: 0
+    }))
 };
 
 function esperar(ms) {
@@ -98,6 +186,180 @@ function erro(mensagem, codigo) {
     const falha = new Error(mensagem);
     falha.codigo = codigo || 'spyhub';
     return falha;
+}
+
+/* ---------- módulos de consulta e cota (100 por URL) ---------- */
+
+const COM_ACENTO = 'áàãâäéèêëíìîïóòõôöúùûüçÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ';
+const SEM_ACENTO = 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC';
+
+/* Minúsculo e sem acento SEM mudar o tamanho do texto (os índices do selo
+   continuam valendo para achar o X/100 que pertence a cada módulo). */
+function semAcento(valor) {
+    return String(valor == null ? '' : valor).replace(
+        /[áàãâäéèêëíìîïóòõôöúùûüçÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ]/g,
+        (letra) => SEM_ACENTO.charAt(COM_ACENTO.indexOf(letra))
+    );
+}
+
+/* Todos os selos "usadas/total" plausíveis do texto.
+   total < 10 é descartado para não confundir com data (01/02). */
+function quotasDoTexto(texto) {
+    const bruto = String(texto || '');
+    const regex = /\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g;
+    const achados = [];
+    let achado;
+
+    while ((achado = regex.exec(bruto)) !== null) {
+        const usadas = Number(achado[1]);
+        const total = Number(achado[2]);
+
+        if (!(total >= 10 && total <= 1000)) continue;
+        if (usadas > total) continue;
+
+        achados.push({
+            usadas,
+            total,
+            inicio: achado.index,
+            fim: achado.index + achado[0].length
+        });
+    }
+
+    return achados;
+}
+
+/* Posição do nome/chave do módulo no texto (sem acento, sem mudar tamanho). */
+function acharAncora(texto, chaves) {
+    const procurado = semAcento(texto).toLowerCase();
+    let ancora = null;
+
+    /* a 1ª chave encontrada vence: título completo antes dos apelidos curtos */
+    (Array.isArray(chaves) ? chaves : [chaves]).forEach((chave) => {
+        if (ancora) return;
+
+        const alvo = semAcento(String(chave == null ? '' : chave)).toLowerCase().trim();
+        if (alvo.length < 3) return;
+
+        const posicao = procurado.indexOf(alvo);
+        if (posicao >= 0) ancora = { inicio: posicao, fim: posicao + alvo.length };
+    });
+
+    return ancora;
+}
+
+/* Cota do módulo. A tela pode listar todos os módulos, cada um com o seu selo
+   (cards: selo ao lado do nome); então fica com o selo mais perto do NOME do
+   módulo — e, no empate, com o que vem antes do nome. Sem o nome na tela,
+   devolve o maior selo (o mais perto de estourar). */
+function quotaDoTexto(texto, chaves) {
+    const achados = quotasDoTexto(texto);
+    if (!achados.length) return null;
+    if (achados.length === 1) return { usadas: achados[0].usadas, total: achados[0].total };
+
+    const ancora = acharAncora(texto, chaves);
+    let melhor = null;
+    let escolhido = null;
+
+    if (ancora) {
+        achados.forEach((item) => {
+            const antes = item.fim <= ancora.inicio;
+            const depois = item.inicio >= ancora.fim;
+            let distancia = 0;
+
+            if (antes) distancia = ancora.inicio - item.fim;
+            else if (depois) distancia = item.inicio - ancora.fim;
+
+            /* x2 + 1: empate fica com o selo que vem antes do nome */
+            const peso = (distancia * 2) + (antes ? 0 : 1);
+
+            if (!melhor || peso < melhor) {
+                melhor = peso;
+                escolhido = item;
+            }
+        });
+    } else {
+        escolhido = achados.reduce((atual, item) => (item.usadas > atual.usadas ? item : atual));
+    }
+
+    return { usadas: escolhido.usadas, total: escolhido.total };
+}
+
+/* Aviso de cota estourada na própria página (antes de consultar): bem restrito,
+   porque "limite de 100 consultas por dia" em texto de ajuda não é esgotamento. */
+const RE_LIMITE_PAGINA = /limite de consultas (atingido|excedido|esgotado)|atingiu o limite|limite (di[aá]rio )?(atingido|esgotado|excedido)|consultas (esgotadas|indispon[ií]veis)|sem cr[eé]ditos?|saldo insuficiente|plano expirado/i;
+
+/* Mesma ideia, mas no texto que a consulta acrescentou à tela (aí a menção ao
+   limite é do site, não da ajuda). */
+const RE_LIMITE_CONSULTA = /limite de consultas|limite di[aá]rio|limite atingido|atingiu o limite|sem cr[eé]dito|saldo insuficiente|plano expirado|consultas esgotadas|consultas indispon[ií]veis/i;
+
+function textoIndicaLimite(texto) {
+    return RE_LIMITE_PAGINA.test(String(texto || ''));
+}
+
+function moduloAtivo() {
+    return estado.modulos.find((modulo) => !modulo.esgotado) || null;
+}
+
+/* Módulos na ordem de uso. Se todos estiverem marcados, devolve vazio — a não
+   ser que já tenha passado tempo suficiente para revalidar (a cota renova). */
+function modulosDisponiveis(agora) {
+    const livres = estado.modulos.filter((modulo) => !modulo.esgotado);
+    if (livres.length) return livres;
+
+    const quando = Number(agora) || Date.now();
+    const podeRevalidar = estado.modulos.every((modulo) => !modulo.verificadoEm
+        || (quando - modulo.verificadoEm) >= REVALIDAR_MS);
+
+    return podeRevalidar ? estado.modulos.slice() : [];
+}
+
+function esgotarModulo(modulo, motivo) {
+    modulo.esgotado = true;
+    modulo.verificadoEm = Date.now();
+    modulo.motivo = String(motivo == null ? '' : motivo).slice(0, 200);
+}
+
+function liberarModulo(modulo, quota) {
+    modulo.esgotado = false;
+    modulo.motivo = '';
+    modulo.verificadoEm = 0;
+
+    if (quota) {
+        modulo.usadas = quota.usadas;
+        modulo.total = quota.total;
+    }
+}
+
+/* Atualiza o selo do módulo com o texto da tela (antes ou depois de consultar). */
+function atualizarCota(modulo, texto) {
+    const quota = quotaDoTexto(texto, modulo.chaves);
+
+    if (quota) {
+        modulo.usadas = Math.max(modulo.usadas, quota.usadas);
+        modulo.total = quota.total;
+
+        if (quota.usadas >= quota.total) esgotarModulo(modulo, 'selo ' + quota.usadas + '/' + quota.total);
+        return quota;
+    }
+
+    if (!modulo.esgotado) modulo.usadas = Math.min(modulo.total, modulo.usadas + 1);
+
+    return null;
+}
+
+function descreverModulos() {
+    const ativo = moduloAtivo();
+
+    return estado.modulos.map((modulo) => ({
+        id: modulo.id,
+        nome: modulo.nome,
+        url: modulo.url,
+        esgotado: modulo.esgotado,
+        usadas: modulo.usadas,
+        total: modulo.total,
+        motivo: modulo.motivo,
+        ativo: Boolean(ativo && ativo.id === modulo.id)
+    }));
 }
 
 /* ---------- Chrome dedicado + CDP ---------- */
@@ -631,18 +893,22 @@ const EXPRESSAO_FORMULARIO_BUSCA = '(() => {' +
     '   || Array.from(document.querySelectorAll("input, textarea")).some(visivel);' +
     '})()';
 
-/* Abre a tela de busca; se a sessão caiu (login no meio do caminho), refaz. */
-async function garantirSessaoBusca(cdp) {
-    await navegar(cdp, URL_BUSCA);
+/* Abre a tela de um módulo; se a sessão caiu (login no meio do caminho), refaz. */
+async function garantirSessaoBusca(cdp, url) {
+    const alvo = url || URL_BUSCA;
+
+    await navegar(cdp, alvo);
     await esperarDomQuieto(cdp);
 
     if (await existe(cdp, EXPRESSAO_SENHA)) {
         await garantirLogin(cdp);
-        await navegar(cdp, URL_BUSCA);
+        await navegar(cdp, alvo);
         await esperarDomQuieto(cdp);
     }
 
     await esperarPor(cdp, EXPRESSAO_FORMULARIO_BUSCA, 40, 500);
+
+    return alvo;
 }
 
 /* Nomes dos campos visíveis: entra no erro para não precisar abrir o Chrome. */
@@ -664,8 +930,55 @@ async function descreverCampos(cdp) {
     }
 }
 
+/* Rótulos dos botões visíveis (diagnóstico dos módulos novos). */
+async function descreverBotoes(cdp) {
+    try {
+        const lista = await avaliar(cdp, '(() => {' +
+            ' const visivel = (el) => {' +
+            '   const caixa = el.getBoundingClientRect();' +
+            '   return caixa.width > 0 && caixa.height > 0;' +
+            ' };' +
+            ' return Array.from(document.querySelectorAll("button, [role=button], input[type=submit], a"))' +
+            '   .filter(visivel)' +
+            '   .map((el) => ((el.innerText || el.value || el.getAttribute("aria-label") || "") + "").trim())' +
+            '   .filter((texto) => texto && texto.length <= 40)' +
+            '   .slice(0, 12);' +
+            '})()');
+
+        return Array.isArray(lista) ? lista : [];
+    } catch (falha) {
+        return [];
+    }
+}
+
+/* Lê o selo "usadas/100" do módulo antes de consultar: módulo estourado é
+   marcado na hora (economiza uma consulta perdida) e módulo renovado volta. */
+async function conferirCota(cdp, modulo) {
+    let texto = '';
+
+    try {
+        texto = await textoPagina(cdp);
+    } catch (falha) {
+        return null;
+    }
+
+    const quota = quotaDoTexto(texto, modulo.chaves);
+
+    if (quota && quota.usadas >= quota.total) {
+        modulo.usadas = quota.usadas;
+        modulo.total = quota.total;
+        esgotarModulo(modulo, 'selo ' + quota.usadas + '/' + quota.total);
+    } else if (quota) {
+        liberarModulo(modulo, quota);
+    } else if (textoIndicaLimite(texto)) {
+        esgotarModulo(modulo, 'aviso de limite na página');
+    }
+
+    return quota;
+}
+
 /* Marca o campo de busca, digita o CPF e dispara a pesquisa. */
-async function prepararBusca(cdp, valor) {
+async function prepararBusca(cdp, valor, modulo) {
     let campo = '';
 
     /* o SpyHub abre em NOME; sem trocar para a aba CPF o texto iria para o campo errado.
@@ -679,7 +992,7 @@ async function prepararBusca(cdp, valor) {
 
     if (!campo) {
         const visiveis = await descreverCampos(cdp);
-        throw erro('Campo de busca de CPF não encontrado em ' + URL_BUSCA
+        throw erro('Campo de busca de CPF não encontrado em ' + ((modulo && modulo.url) || URL_BUSCA)
             + ' (o layout mudou?). Campos visíveis: ' + (visiveis || 'nenhum'), 'campo-busca');
     }
 
@@ -793,8 +1106,8 @@ async function esperarResultadoBusca(cdp, cpf, final4, textoBase) {
             throw erro('O SpyHub pediu captcha/verificação. Resolva na janela do Chrome e rode de novo.', 'captcha');
         }
 
-        if (/limite de consultas|limite di[aá]rio|sem cr[eé]dito|saldo insuficiente|plano expirado/i.test(texto)) {
-            throw erro('O SpyHub informou limite de consultas/créditos. Verifique a conta.', 'limite');
+        if (RE_LIMITE_CONSULTA.test(texto)) {
+            throw erro('O módulo do SpyHub informou limite de consultas/créditos.', 'limite');
         }
 
         if (/sess[aã]o expirada|fa[cç]a login novamente/i.test(texto)) {
@@ -827,24 +1140,31 @@ async function esperarResultadoBusca(cdp, cpf, final4, textoBase) {
     throw erro('Tempo esgotado esperando o resultado do CPF ' + parser.formatarCpf(cpf) + '.', 'timeout-resultado');
 }
 
-/* Consulta UM registro: abre a busca, digita o CPF e classifica. */
-async function consultarRegistro(registro) {
-    const final4 = registro.finais[0];
-    const cdp = await abrir();
+/* Consulta UM registro DENTRO de um módulo: abre a tela, digita o CPF e classifica. */
+async function consultarNoModulo(cdp, modulo, registro, final4) {
+    await garantirSessaoBusca(cdp, modulo.url);
+    await conferirCota(cdp, modulo);
 
-    await garantirSessaoBusca(cdp);
-    const tentativa = await prepararBusca(cdp, registro.cpf);
+    if (modulo.esgotado) {
+        throw erro('Módulo ' + modulo.nome + ' sem consultas disponíveis ('
+            + modulo.usadas + '/' + modulo.total + (modulo.motivo ? ': ' + modulo.motivo : '') + ').', 'limite');
+    }
+
+    const tentativa = await prepararBusca(cdp, registro.cpf, modulo);
     let base = tentativa.textoBase;
     let texto = await esperarResultadoBusca(cdp, registro.cpf, final4, base);
 
     /* Alguns inputs exigem a máscara: se o site reclamou do formato, repete. */
     if (!tentativa.comMascara && !acharTelefoneComFinal(texto, final4, registro.cpf)
         && /cpf inv[aá]lido|formato inv[aá]lido|documento inv[aá]lido|d[ií]gitos inv[aá]lidos/i.test(texto)) {
-        await garantirSessaoBusca(cdp);
-        const nova = await prepararBusca(cdp, registro.cpfFormatado);
+        await garantirSessaoBusca(cdp, modulo.url);
+        const nova = await prepararBusca(cdp, registro.cpfFormatado, modulo);
         base = nova.textoBase;
         texto = await esperarResultadoBusca(cdp, registro.cpf, final4, base);
     }
+
+    /* a consulta foi gasta de verdade: atualiza o selo do módulo */
+    atualizarCota(modulo, texto);
 
     /* olha primeiro o que a consulta acrescentou à tela; se nada mudou, a página inteira */
     const novo = textoNovoDepois(texto, base) || texto;
@@ -855,6 +1175,8 @@ async function consultarRegistro(registro) {
             encontrado: true,
             telefone: telefone.bruto,
             telefoneDigitos: telefone.digitos,
+            modulo: modulo.nome,
+            moduloId: modulo.id,
             texto
         };
     }
@@ -868,8 +1190,50 @@ async function consultarRegistro(registro) {
             : 'Nenhum telefone terminando em ' + final4,
         /* trecho do retorno do site: ajuda a conferir a reprovação sem abrir o Chrome */
         retorno: parser.limpar(novo).slice(0, 400),
+        modulo: modulo.nome,
+        moduloId: modulo.id,
         texto
     };
+}
+
+/* Consulta UM registro trocando de módulo quando a cota estoura: o MESMO CPF é
+   repetido no módulo seguinte (a consulta recusada pelo limite não gasta crédito). */
+async function consultarRegistro(registro, job) {
+    const final4 = registro.finais[0];
+    const cdp = await abrir();
+    const disponiveis = modulosDisponiveis();
+
+    if (!disponiveis.length) {
+        throw erro('Todos os módulos do SpyHub estão no limite de consultas ('
+            + estado.modulos.map((modulo) => modulo.nome + ' ' + modulo.usadas + '/' + modulo.total).join(', ')
+            + '). Espere a cota renovar para continuar.', 'limite');
+    }
+
+    if (job && disponiveis[0] !== estado.modulos[0]) {
+        log(job, 'info', 'Usando o módulo ' + disponiveis[0].nome + ' (o anterior estourou a cota).');
+    }
+
+    let ultimo = null;
+
+    for (const modulo of disponiveis) {
+        try {
+            return await consultarNoModulo(cdp, modulo, registro, final4);
+        } catch (falha) {
+            if (falha.codigo !== 'limite') throw falha;
+
+            /* cota estourada: marca o módulo e repete o CPF no próximo */
+            esgotarModulo(modulo, falha.message);
+            ultimo = falha;
+
+            if (job) {
+                log(job, 'aviso', 'Módulo ' + modulo.nome + ' no limite ('
+                    + modulo.usadas + '/' + modulo.total + ') -> trocando para o próximo módulo.');
+            }
+        }
+    }
+
+    throw erro('Nenhum módulo do SpyHub aceitou a consulta agora. '
+        + (ultimo ? ultimo.message : ''), 'limite');
 }
 
 /* ---------- job: fila sequencial de registros ---------- */
@@ -948,14 +1312,19 @@ async function comRetry(job, registro, acao) {
 
 async function processar(job, registros) {
     try {
+        const ativo = moduloAtivo();
+
         log(job, 'info', 'Verificação iniciada: ' + registros.length + ' registro(s).');
+        log(job, 'info', 'Módulos: ' + estado.modulos.map((modulo) => modulo.nome + ' ('
+            + modulo.usadas + '/' + modulo.total + (modulo.esgotado ? ', esgotado' : '') + ')').join(' | ')
+            + (ativo ? ' -> usando ' + ativo.nome + '.' : ' -> todos esgotados.'));
 
         for (const registro of registros) {
             const rotulo = registro.cpfFormatado + ' (final ' + registro.finais.join('/') + ')';
             log(job, 'info', 'Consultando ' + rotulo + '...');
 
             try {
-                const resultado = await comRetry(job, registro, () => consultarRegistro(registro));
+                const resultado = await comRetry(job, registro, () => consultarRegistro(registro, job));
 
                 if (resultado.encontrado) {
                     job.aprovados.push({
@@ -970,15 +1339,19 @@ async function processar(job, registros) {
                         telefoneEncontrado: resultado.telefone,
                         endereco: registro.endereco,
                         finais: registro.finais.slice(),
+                        modulo: resultado.modulo || '',
                         ficha: registro.ficha
                     });
-                    log(job, 'ok', 'APROVADO ' + rotulo + ' - telefone ' + resultado.telefone);
+                    log(job, 'ok', 'APROVADO ' + rotulo + ' - telefone ' + resultado.telefone
+                        + (resultado.modulo ? ' [' + resultado.modulo + ']' : ''));
                 } else {
                     job.reprovados.push(Object.assign({}, registro, {
                         motivo: resultado.motivo,
-                        retorno: resultado.retorno || ''
+                        retorno: resultado.retorno || '',
+                        modulo: resultado.modulo || ''
                     }));
-                    log(job, 'aviso', 'REPROVADO ' + rotulo + ' - ' + resultado.motivo);
+                    log(job, 'aviso', 'REPROVADO ' + rotulo + ' - ' + resultado.motivo
+                        + (resultado.modulo ? ' [' + resultado.modulo + ']' : ''));
                 }
             } catch (falha) {
                 job.reprovados.push(Object.assign({}, registro, { motivo: falha.message }));
@@ -1035,6 +1408,8 @@ function status() {
     const binario = navegador.acharNavegador();
     const conectado = Boolean(estado.cdp);
     const cred = credenciais();
+    const ativo = moduloAtivo();
+    const modulos = descreverModulos();
 
     return {
         navegador: Boolean(binario),
@@ -1045,7 +1420,10 @@ function status() {
         porta: PORTA,
         jobId: estado.job ? estado.job.id : '',
         credenciais: Boolean(cred.usuario && cred.senha),
-        urlBusca: URL_BUSCA
+        urlBusca: URL_BUSCA,
+        moduloAtivo: ativo ? ativo.nome : '',
+        moduloQuota: ativo ? (ativo.usadas + '/' + ativo.total) : '',
+        modulos
     };
 }
 
@@ -1122,6 +1500,48 @@ async function acompanharConsole(id) {
     }
 }
 
+/* Diagnóstico dos módulos: abre cada URL, mostra o selo X/100, os campos e os
+   botões visíveis. NÃO consulta ninguém (não gasta crédito) — serve para ver
+   qual módulo está disponível e como o layout de cada um está hoje. */
+async function diagnosticarModulos() {
+    const cdp = await abrir();
+    await garantirLogin(cdp);
+
+    const saida = [];
+
+    for (const modulo of estado.modulos) {
+        await navegar(cdp, modulo.url);
+        await esperarDomQuieto(cdp);
+
+        let texto = '';
+        try {
+            texto = await textoPagina(cdp);
+        } catch (falha) { /* página ainda carregando */ }
+
+        const quota = quotaDoTexto(texto, modulo.chaves);
+
+        if (quota) {
+            modulo.usadas = quota.usadas;
+            modulo.total = quota.total;
+            modulo.esgotado = quota.usadas >= quota.total;
+        }
+
+        saida.push({
+            id: modulo.id,
+            nome: modulo.nome,
+            url: modulo.url,
+            selo: quota ? (quota.usadas + '/' + quota.total) : 'não encontrado',
+            esgotado: modulo.esgotado,
+            avisoDeLimite: textoIndicaLimite(texto),
+            campos: await descreverCampos(cdp),
+            botoes: await descreverBotoes(cdp)
+        });
+    }
+
+    console.log(JSON.stringify(saida, null, 2));
+    return saida;
+}
+
 async function principal() {
     try {
         const comando = process.argv[2];
@@ -1129,6 +1549,11 @@ async function principal() {
 
         if (comando === 'status') {
             console.log(JSON.stringify(status(), null, 2));
+            return;
+        }
+
+        if (comando === 'modulos') {
+            await diagnosticarModulos();
             return;
         }
 
@@ -1172,8 +1597,12 @@ async function principal() {
             'Uso:',
             '  node spyhub.js testar <arquivo.txt|csv>   verifica de verdade e mostra o JSON',
             '  node spyhub.js analisar <arquivo>         só o parser (não abre o Chrome)',
+            '  node spyhub.js modulos                    selo X/100, campos e botões de cada módulo',
             '  node spyhub.js status                     estado do Chrome/sessão/credenciais',
             '  node spyhub.js fechar                     fecha o Chrome dedicado',
+            '',
+            'Módulos (100 consultas em cada): ' + estado.modulos.map((modulo) => modulo.nome + ' -> ' + modulo.url).join(' | '),
+            'Quando um estoura a cota, o mesmo CPF é consultado no próximo automaticamente.',
             '',
             'No painel, os endpoints são POST /api/spyhub/verificar e GET /api/spyhub/jobs/:id.'
         ].join('\n'));
@@ -1193,9 +1622,20 @@ module.exports = {
     extrairTelefones,
     acharTelefoneComFinal,
     textoNovoDepois,
+    /* módulos e cota (testável sem abrir o Chrome) */
+    quotaDoTexto,
+    quotasDoTexto,
+    textoIndicaLimite,
+    descreverModulos,
+    modulosDoMotor: () => estado.modulos,
+    modulosDisponiveis,
+    esgotarModulo,
+    liberarModulo,
+    atualizarCota,
     PADRAO,
     URL_LOGIN,
-    URL_BUSCA
+    URL_BUSCA,
+    MODULOS
 };
 
 if (require.main === module) {

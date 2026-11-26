@@ -8,7 +8,20 @@
 
 ---
 
+> **ATUALIZAÇÃO (26/11, decisão do operador): operação via CMD.**
+> O painel/Render **não é mais o caminho de operação**. A verificação roda por linha de comando
+> com `spyhub-cmd.bat` na raiz do projeto (arraste o `.txt`/`.csv` para o `.bat`, ou
+> `spyhub-cmd.bat arquivo.csv`). O `.bat` fixa o diretório do projeto (o motor lê o `.env` do cwd),
+> aceita arrastar-e-soltar e deixa o Chrome do SpyHub aberto entre execuções (mais rápido).
+> O diagnóstico de exibição no painel (seções 5 e 12) fica **arquivado** — só é relevante se o
+> operador voltar a usar o painel.
+
+---
+
 ## 0. TL;DR — onde estamos e o que falta
+
+> **Operação atual: CMD.** Ver a atualização acima. O restante deste documento sobre painel/Render
+> fica arquivado; use o runbook da atualização para o dia a dia.
 
 **O código está pronto, testado, commitado, enviado ao GitHub e o Render já está servindo a versão nova.**
 O problema relatado pelo operador ("ainda não aparece no painel") **não é mais falta de deploy**:
@@ -32,8 +45,9 @@ configuração de variáveis no Render.
 ## 1. O que é a tarefa
 
 Na aba **Contatos** do painel administrativo, o operador cola um dump/CSV com **CPF + 4 últimos
-dígitos do telefone**. O sistema consulta cada CPF em `https://app.spyhub.io/search/pessoa-fisica`
-e entrega:
+dígitos do telefone**. O sistema consulta cada CPF nos módulos do SpyHub
+(`/search/avancada`, `/search/tracker` e `/search/cpf-top` — 100 consultas em cada URL, com troca
+automática quando um estoura a cota) e entrega:
 
 - **aprovados**: CPF cujo resultado do site contém um telefone terminando nos 4 dígitos pedidos;
 - **reprovados**: sem correspondência ou erro, preservando a ficha original + trecho do retorno;
@@ -56,7 +70,8 @@ routes/contatos-spyhub.js  (admin-only)
 spyhub.js — motor CDP próprio
    │  abre Chrome dedicado: porta CDP 9226, perfil %TEMP%\qgc-painel-spyhub
    │  login com SPYHUB_USUARIO/SPYHUB_SENHA (ou sessão já salva no perfil)
-   │  /search/pessoa-fisica → aba CPF → digita CPF → CONSULTAR
+   │  módulo atual (avancada → tracker → cpf-top) → aba CPF → digita CPF → CONSULTAR
+   │  lê o selo X/100 antes de cada consulta; cota estourada = próximo módulo
    │  varre só o texto que apareceu DEPOIS do clique (textoNovoDepois)
    │  procura telefone terminando nos 4 dígitos (aceita máscara)
    ▼
@@ -429,3 +444,8 @@ aberto, status do `/api/spyhub/status`, e (se rodou) o resultado da verificaçã
 > URL, sessão admin, `document.querySelector('[data-view="spyhub"]')`, e hard reload. Se o DOM estiver
 > correto e ainda assim a verificação falhar, o problema é ambiente (SPYHUB_* no Render ou captcha no
 > headless) — o motor local é o caminho validado. Não é preciso refazer nada do zero.
+>
+> **Atualização 26/11 (vale mais que o parágrafo acima): o operador decidiu operar via CMD.**
+> Use `spyhub-cmd.bat` na raiz do projeto (`spyhub-cmd.bat arquivo.csv` ou arraste o arquivo para
+> o `.bat`). O painel/Render fica arquivado. O Chrome do SpyHub permanece aberto entre execuções
+> para acelerar; a primeira execução com o Chrome fechado paga cold start + login.

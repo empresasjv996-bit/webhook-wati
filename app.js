@@ -2119,7 +2119,14 @@ function limparExtrator() {
    --------------------------------------------------------- */
 let spyhubJob = null;
 let spyhubTimer = null;
-let spyhubSituacao = { conhecido: false, navegador: null, credenciais: null, headless: false };
+let spyhubSituacao = {
+    conhecido: false,
+    navegador: null,
+    credenciais: null,
+    headless: false,
+    modulo: '',
+    cota: ''
+};
 
 function pararAcompanhamentoSpyhub() {
     if (spyhubTimer) {
@@ -2162,6 +2169,8 @@ async function verificarSpyhubStatus(forcar) {
             headless: Boolean(dados.headless),
             ocupado: Boolean(dados.ocupado),
             motivo: String(dados.motivo || ''),
+            modulo: String(dados.moduloAtivo || ''),
+            cota: String(dados.moduloQuota || ''),
             sessaoExpirada: false
         };
     } catch (falha) {
@@ -2173,6 +2182,8 @@ async function verificarSpyhubStatus(forcar) {
             headless: false,
             ocupado: false,
             motivo: '',
+            modulo: '',
+            cota: '',
             sessaoExpirada: (falha && falha.statusHttp === 401)
         };
     }
@@ -2199,7 +2210,10 @@ function renderizarStatusSpyhub() {
     } else if (credenciais === false) {
         texto = '⚠ Configure SPYHUB_USUARIO e SPYHUB_SENHA no .env do servidor.';
     } else if (navegador === true) {
-        texto = '✅ Chrome disponível' + (spyhubSituacao.headless ? ' (headless)' : ' (janela visível)') + '.';
+        texto = '✅ Chrome disponível' + (spyhubSituacao.headless ? ' (headless)' : ' (janela visível)') + '.'
+            + (spyhubSituacao.modulo
+                ? ' Módulo: ' + spyhubSituacao.modulo + (spyhubSituacao.cota ? ' (' + spyhubSituacao.cota + ')' : '') + '.'
+                : '');
     }
 
     alvo.textContent = texto;

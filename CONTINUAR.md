@@ -5,13 +5,26 @@
 > "não aparece no painel", runbook e limites).
 > Rode `node estado-spyhub.js` para ver o estado atual e os próximos passos sem abrir o código.
 
+## Decisão de operação (26/11): CMD — painel arquivado
+
+O operador optou por rodar a verificação **via CMD**, sem depender do painel/Render:
+
+```cmd
+spyhub-cmd.bat listas\minha-lista.csv
+```
+
+O `.bat` fixa o diretório do projeto (o motor lê o `.env` do cwd), aceita arrastar-e-soltar e
+deixa o Chrome do SpyHub aberto (a próxima execução é mais rápida). O painel foi deployado e está
+no ar, mas **não é mais o caminho de operação**; o diagnóstico de exibição no painel fica
+arquivado em `HANDOFF-CLINE.md` (seções 5 e 12).
+
 ## 0. Como retomar (checklist rápido)
 
 ```powershell
 node estado-spyhub.js          # docs, arquivos, sintaxe, .env, git, exports e próximos passos
 npm run estado                 # atalho para o comando acima
 node estado-spyhub.js --diag   # idem + sonda ao vivo no Chrome do SpyHub (CDP 9226)
-node estado-spyhub.js --ir     # navega o Chrome para /search/pessoa-fisica e sonda
+node estado-spyhub.js --ir     # navega o Chrome para o 1º módulo (/search/avancada) e sonda
 node estado-spyhub.js --json   # tudo em JSON (bom para colar em outra sessão)
 ```
 
@@ -24,7 +37,8 @@ node estado-spyhub.js --json   # tudo em JSON (bom para colar em outra sessão)
 ## 1. Objetivo
 
 Na aba **Contatos** do painel administrativo, importar um dump/CSV, extrair **CPF + 4 últimos dígitos do telefone**,
-consultar cada CPF em `https://app.spyhub.io/search/pessoa-fisica` e entregar:
+consultar cada CPF nos módulos do SpyHub (`/search/avancada`, `/search/tracker`, `/search/cpf-top` —
+100 consultas em cada, trocando sozinho quando um estoura) e entregar:
 
 - **aprovados**: CPF cujo resultado do site contém um telefone terminando nos 4 dígitos pedidos;
 - **reprovados**: sem correspondência ou com erro, preservando a ficha original + um trecho do retorno do site;
@@ -168,11 +182,11 @@ Os passos abaixo ficam como referência para repetir a validação em outro lote
 - [x] Aprovação real (CLI + rota) com CPF existente e final confirmado.
 - [x] CLI solta o socket CDP ao terminar (`encerrarCli()` no `finally`).
 
-### Passo 2 — Validar o painel ponta a ponta — CONCLUÍDO em modo demo (26/11)
+### Passo 2 — Validar o painel ponta a ponta — ARQUIVADO (operação via CMD)
 
-Caminho servidor validado no harness isolado (`node e2e-spyhub-rota.js`) e caminho **visual** pela
-tela validado em modo demo (`node e2e-painel-visual.js`, seção 2). O roteiro abaixo fica para
-reproduzir no painel real quando o operador decidir subir (atenção ao worker de campanhas):
+**Decisão de 26/11:** o dia a dia é via CMD (`spyhub-cmd.bat`, ver Passo 4). O caminho servidor e o
+visual foram validados em modo demo, mas o painel não é mais o caminho de operação. O roteiro abaixo
+só é relevante se o operador decidir voltar ao painel (atenção ao worker de campanhas):
 
 1. `npm start` (ou `npm run dev`) e entrar como admin — atenção: o `index.js` inicia o worker de
    campanhas; a porta 3000 está ocupada pelo G0DM0D3 nesta máquina (use `PORT=3100` se preciso).
@@ -207,6 +221,16 @@ npm test
 node estado-spyhub.js
 git status --short
 ```
+
+### Passo 4 — Operação diária via CMD (escolhida em 26/11)
+
+1. `spyhub-cmd.bat listas\minha-lista.csv` — ou arraste o `.txt`/`.csv` para cima do `.bat`.
+2. Deixe o Chrome do SpyHub aberto entre execuções: a próxima é mais rápida. A primeira, com o
+   Chrome fechado, paga o cold start e o login.
+3. Saídas na raiz: `aprovados-spyhub.csv` e `reprovados-spyhub.txt` (gitignored).
+4. Diagnóstico: `node spyhub.js status` / `node estado-spyhub.js --diag`.
+5. Opcional para lote: `SPYHUB_INTERVALO_MS=600` com moderação (padrão 1200). Não reduza
+   `SPYHUB_ESPERA_RESULTADO` sem necessidade — é a paciência para a SPA carregar.
 
 ## 4. Mapa dos arquivos
 

@@ -47,7 +47,7 @@ const VARIAVEIS_OBRIGATORIAS = ['SPYHUB_USUARIO', 'SPYHUB_SENHA'];
 const ARTEFATOS = ['aprovados-spyhub.csv', 'reprovados-spyhub.txt'];
 
 const PORTA_CDP = Number(process.env.CDP_PORT_SPYHUB || 9226);
-const URL_BUSCA = process.env.SPYHUB_BUSCA_URL || 'https://app.spyhub.io/search/pessoa-fisica';
+const URL_BUSCA = process.env.SPYHUB_BUSCA_URL || 'https://app.spyhub.io/search/avancada';
 
 function esperar(ms) {
     return new Promise((resolver) => setTimeout(resolver, ms));
@@ -269,7 +269,7 @@ function diagnosticar(sonda) {
     if (!sonda.conectado) return sonda.motivo;
     if (sonda.senhaVisivel) return 'A sessão caiu (formulário de senha na tela). Faça login na janela do Chrome e rode de novo.';
 
-    if (!/\/search\/pessoa-fisica/.test(String(sonda.url || ''))) {
+    if (!/\/search\/(pessoa-fisica|avancada|tracker|cpf-top)/.test(String(sonda.url || ''))) {
         return 'A aba atual não é a busca de pessoa física (' + sonda.url + ').'
             + ' O motor navega sozinho antes de cada CPF; para inspecionar o formulário, rode'
             + ' "node spyhub.js testar <arquivo>" e repita o --diag durante a consulta.';
@@ -402,6 +402,7 @@ function imprimir(base, sonda) {
     console.log('');
 
     console.log('Comandos úteis');
+    linha('$', 'spyhub-cmd.bat <arquivo>             (atalho CMD: arrasta-e-solta, fixa o cwd)');
     linha('$', 'node estado-spyhub.js --diag          (estado + sonda no Chrome)');
     linha('$', 'node estado-spyhub.js --ir            (navega para a busca e sonda)');
     linha('$', 'node spyhub.js status                 (Chrome/sessão/credenciais)');

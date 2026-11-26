@@ -22,7 +22,7 @@ cola a lista / envia o arquivo
 spyhub-parser.js  →  CPF válido + 4 finais + ficha original
         │  job em memória (1 por vez)
         ▼
-spyhub.js  →  Chrome dedicado (CDP) → login → /search/pessoa-fisica → CPF
+spyhub.js  →  Chrome dedicado (CDP) → login → módulo (avancada/tracker/cpf-top) → CPF
         │  varre o resultado procurando telefone com o final pedido
         ▼
 GET /api/spyhub/jobs/:id   (polling de 1,5 s na tela)
@@ -34,6 +34,9 @@ GET /api/spyhub/jobs/:id   (polling de 1,5 s na tela)
 - Usa o mesmo esquema do `extrator.js`: Chrome via CDP, sem puppeteer.
 - Chrome, porta e perfil são **próprios** (`CDP_PORT_SPYHUB`, perfil
   `qgc-painel-spyhub`), então pode rodar junto com o Consultar CPF.
+- Três módulos de consulta, **100 consultas em cada URL**: quando um estoura a
+  cota, o motor repete o mesmo CPF no seguinte (veja
+  [Módulos de consulta](#módulos-de-consulta-100-por-url)).
 - A tela abre na aba **NOME**; o motor clica em `#li_module_cpf` (aba **CPF**),
   espera `#tab_cpf input[name="cpf"]` ficar visível, digita e clica no
   **CONSULTAR** do painel.
@@ -43,6 +46,31 @@ GET /api/spyhub/jobs/:id   (polling de 1,5 s na tela)
 - Só um job por vez (`409` se já existir verificação em andamento).
 - O job vive em memória: se o servidor reiniciar, a tela avisa e pede para
   rodar de novo.
+
+## Módulos de consulta (100 por URL)
+
+O SpyHub limita **cada URL** de consulta a 100 consultas. O motor usa os três
+módulos nesta ordem e troca sozinho quando a cota acaba:
+
+| # | Módulo | URL |
+| --- | --- | --- |
+| 1 | Consulta P.Física | `https://app.spyhub.io/search/avancada` |
+| 2 | Consulta Tracker | `https://app.spyhub.io/search/tracker` |
+| 3 | Consulta CPF TOP | `https://app.spyhub.io/search/cpf-top` |
+
+- Antes de cada consulta o motor lê o selo **`usadas/100`** da página (e do
+  card do módulo, quando a tela lista os três) — se estiver cheio, pula para o
+  próximo módulo.
+- Se o site responder com aviso de limite no meio da consulta, aquele CPF é
+  repetido no módulo seguinte (a consulta recusada não gasta crédito e o CPF
+  **não** vai para reprovados).
+- Consulta aprovada/reprovada continua igual: só muda qual módulo respondeu —
+  o log do job mostra `[Consulta Tracker]` no fim da linha e o CSV/TXT não mudam.
+- Só para tudo quando **os três** estão no limite (erro `limite`, com o selo de
+  cada módulo na mensagem). Depois de `SPYHUB_REVALIDAR_MODULO_MS` o motor
+  confere os selos de novo, então a cota renovada volta a ser usada sozinha.
+- Para ver o selo/campos/botões de cada módulo sem gastar consulta:
+  `node spyhub.js modulos`.
 
 ## Formatos aceitos
 
@@ -88,7 +116,11 @@ Opcionais:
 | `SPYHUB_ESPERA_RESULTADO` | `25000` | tempo máximo esperando o resultado de um CPF |
 | `SPYHUB_ESPERA_LOGIN` | `40000` | tempo máximo esperando o login |
 | `SPYHUB_MAX_REGISTROS` | `500` | teto de registros por job |
-| `SPYHUB_URL` / `SPYHUB_LOGIN_URL` / `SPYHUB_BUSCA_URL` | app.spyhub.io | URLs alternativas |
+| `SPYHUB_URL` / `SPYHUB_LOGIN_URL` | app.spyhub.io | URLs alternativas do painel/login |
+| `SPYHUB_MODULOS_URLS` | avancada, tracker, cpf-top | lista de módulos (na ordem), separada por vírgula |
+| `SPYHUB_BUSCA_URL` | — | troca só a URL do 1º módulo (compatibilidade) |
+| `SPYHUB_COTA_MODULO` | `100` | consultas por módulo quando o selo da tela não aparece |
+| `SPYHUB_REVALIDAR_MODULO_MS` | `600000` | tempo até conferir de novo um módulo marcado como esgotado |
 | `EXTRATOR_HEADLESS` | automático | `1` roda sem janela (o login com captcha pede janela) |
 
 As credenciais ficam **somente** no `.env` (que está no `.gitignore`); o código
@@ -99,9 +131,13 @@ não tem usuário/senha e a tela nunca recebe a senha.
 ```bash
 node spyhub.js analisar listas/spyhub.txt   # só o parser: mostra válidos/ignorados
 node spyhub.js testar   listas/spyhub.txt   # abre o Chrome e consulta de verdade
+node spyhub.js modulos                      # selo X/100, campos e botões de cada módulo
 node spyhub.js status                       # Chrome aberto? credenciais? job atual?
 node spyhub.js fechar                       # fecha o Chrome do SpyHub
 ```
+
+`modulos` só abre cada URL e lê a tela: **não consome consulta**. Use quando um
+módulo mudar de layout ou para ver qual ainda tem cota no dia.
 
 `testar` imprime aprovados/reprovados no console, salva `aprovados-spyhub.csv`
 e `reprovados-spyhub.txt` no diretório atual e **encerra o processo ao terminar**
@@ -161,6 +197,9 @@ Falhas passageiras (timeout, resultado vazio) tentam de novo até
 `SPYHUB_TENTATIVAS` e, se persistirem, o CPF vai para os reprovados com o
 motivo.
 
+O erro `limite` **só** acontece quando os três módulos estão esgotados — a troca
+de módulo no meio do caminho é automática e não interrompe o job.
+
 ## Exportações
 
 - **Aprovados (CSV, `;`, com BOM UTF-8):** `cnpj;cpf_persona;nome;razao_social;nome_fantasia;telefone_desmascarado;endereco`.
@@ -213,7 +252,9 @@ baixe os exports antes de encerrar o Node.
 | "Campo de busca de CPF não encontrado (... Campos visíveis: ...)" | a SPA ainda estava montando ou a aba CPF não abriu; o erro lista os campos visíveis. Rode `node estado-spyhub.js --diag` para ver URL/abas/campos ao vivo |
 | Tentativa 1/3 com "Campos visíveis: nenhum" e aprovação no retry | hidratação lenta da SPA: a primeira tentativa navega e não acha campo; o retry repete a busca e segue. Não é preciso fazer nada |
 | `node spyhub.js testar` imprimia e não voltava ao prompt | corrigido: `encerrarCli()` no `finally` fecha o socket CDP e solta o Chrome sem matar a janela. Se restar processo antigo de versões anteriores, encerre com `taskkill /PID <pid> /F` |
-| Todos reprovados com "não retornou resultado" | confira `SPYHUB_BUSCA_URL` e se a conta tem saldo/consulta liberada; o motivo real aparece em "Retorno do site" |
+| Todos reprovados com "não retornou resultado" | confira `SPYHUB_MODULOS_URLS` e se a conta tem saldo/consulta liberada; o motivo real aparece em "Retorno do site" |
+| Job parou com "Todos os módulos do SpyHub estão no limite" | os três módulos chegaram a 100/100 no dia; rode `node spyhub.js modulos` para ver os selos e espere a cota renovar |
+| Log com "Módulo Consulta P.Física no limite -> trocando..." | comportamento esperado: aquele CPF foi repetido no próximo módulo (não é erro) |
 | `409` ao executar | já existe verificação rodando; aguarde ou feche/reabra a aba |
 
 ## Testes
