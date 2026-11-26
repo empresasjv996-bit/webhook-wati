@@ -2148,7 +2148,11 @@ async function verificarSpyhubStatus(forcar) {
 
     try {
         const resposta = await fetch('/api/spyhub/status');
-        if (!resposta.ok) throw new Error('status ' + resposta.status);
+        if (!resposta.ok) {
+            const falhaHttp = new Error('status ' + resposta.status);
+            falhaHttp.statusHttp = resposta.status;
+            throw falhaHttp;
+        }
 
         const dados = await resposta.json();
         spyhubSituacao = {
@@ -2156,10 +2160,21 @@ async function verificarSpyhubStatus(forcar) {
             navegador: dados.navegador === true,
             credenciais: dados.credenciais === true,
             headless: Boolean(dados.headless),
-            ocupado: Boolean(dados.ocupado)
+            ocupado: Boolean(dados.ocupado),
+            motivo: String(dados.motivo || ''),
+            sessaoExpirada: false
         };
     } catch (falha) {
-        spyhubSituacao = { conhecido: true, navegador: false, credenciais: false, headless: false, ocupado: false };
+        /* 401 aqui é sessão vencida, não falta de Chrome: a tela precisa dizer a verdade. */
+        spyhubSituacao = {
+            conhecido: true,
+            navegador: false,
+            credenciais: false,
+            headless: false,
+            ocupado: false,
+            motivo: '',
+            sessaoExpirada: (falha && falha.statusHttp === 401)
+        };
     }
 
     renderizarStatusSpyhub();
@@ -2174,9 +2189,12 @@ function renderizarStatusSpyhub() {
 
     const navegador = spyhubSituacao.navegador;
     const credenciais = spyhubSituacao.credenciais;
+    const sessaoExpirada = spyhubSituacao.sessaoExpirada === true;
     let texto = '';
 
-    if (navegador === false) {
+    if (sessaoExpirada) {
+        texto = '⚠ Sessão expirada: recarregue a página (Ctrl+F5) e entre de novo com a conta admin.';
+    } else if (navegador === false) {
         texto = '⚠ Este servidor não tem Chrome: a verificação roda local pelo comando do node.';
     } else if (credenciais === false) {
         texto = '⚠ Configure SPYHUB_USUARIO e SPYHUB_SENHA no .env do servidor.';
@@ -2187,14 +2205,21 @@ function renderizarStatusSpyhub() {
     alvo.textContent = texto;
 
     if (aviso) {
-        aviso.classList.toggle('oculto', navegador !== false);
-        if (navegador === false) {
-            aviso.innerHTML = '<strong>Sem Chrome neste servidor.</strong> Rode local: '
-                + '<code>node spyhub.js testar lista.txt</code>';
+        aviso.classList.toggle('oculto', !(sessaoExpirada || navegador === false));
+        if (sessaoExpirada) {
+            aviso.innerHTML = '<strong>Sessão expirada.</strong> <a href="/login">Entre de novo</a> e recarregue esta tela.';
+        } else if (navegador === false) {
+            aviso.innerHTML = '<strong>Sem Chrome neste servidor.</strong> No Render, o serviço precisa rodar como '
+                + '<strong>Docker</strong> (Settings → Language/Runtime) para ter o Chromium. '
+                + 'Enquanto isso, rode local: <code>node spyhub.js testar lista.txt</code>';
         }
     }
 
-    if (botao) botao.disabled = navegador === false || credenciais === false;
+    /* O botão fica clicável de propósito: clicar mostra o motivo (toast) em vez de não fazer nada. */
+    if (botao) {
+        botao.disabled = false;
+        botao.title = texto;
+    }
 }
 
 function carregarArquivoSpyhub(input) {
@@ -2236,10 +2261,23 @@ async function executarVerificacaoSpyhub() {
         return;
     }
 
-    const situacao = await verificarSpyhubStatus();
+    const situacao = await verificarSpyhubStatus(true);
+
+    if (situacao.sessaoExpirada) {
+        renderizarStatusSpyhub();
+        toast('Sessão expirada: recarregue a página e entre de novo.', 'erro');
+        return;
+    }
+
     if (situacao.navegador !== true) {
         renderizarStatusSpyhub();
-        toast('Este servidor não tem Chrome para automatizar o SpyHub.', 'erro');
+        toast('Este servidor não tem Chrome (no Render, rode como Docker). Use o motor local.', 'erro');
+        return;
+    }
+
+    if (situacao.credenciais !== true) {
+        renderizarStatusSpyhub();
+        toast('Faltam SPYHUB_USUARIO e SPYHUB_SENHA no servidor (Render → Environment).', 'erro');
         return;
     }
 
