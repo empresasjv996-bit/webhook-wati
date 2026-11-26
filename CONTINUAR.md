@@ -99,9 +99,33 @@ E2E OK | EXIT=0 | ~11 s
   e solta o processo do Chrome **sem matar a janela**. Antes, `testar` imprimia tudo e continuava
   vivo (sobraram 3 node antigos — PIDs 1276, 27472 e 14760 — ainda conectados ao CDP; dá para
   encerrar com `taskkill /PID <pid> /F`).
-- A porta 3000 está ocupada por outro app (G0DM0D3, Next.js); o painel não estava rodando. A
-  validação **visual** (log ao vivo, tabela, downloads no navegador) segue pendente e deve ser feita
-  ao subir o painel com `npm start` — lembrando que o `index.js` inicia o worker de campanhas.
+- A porta 3000 está ocupada por outro app (G0DM0D3, Next.js) e o painel não estava rodando; por
+  isso a conferência visual foi feita em modo demo na porta 3100 (seção abaixo). O painel real/de
+  produção continua sendo decisão do operador — o `index.js` inicia o worker de campanhas.
+
+### E2E visual do painel (modo demo, porta 3100) — CONCLUÍDO em 26/11
+
+Painel subiu em **modo demo** (banco em memória, Wati sem token) na porta 3100 e o harness
+`node e2e-painel-visual.js` fez o caminho completo pela tela:
+
+```
+Login OK: /admin
+Status na tela: ✅ Chrome disponível (janela visível).
+[06:27:41] Consultando <CPF> (final 7672)...
+[06:27:51] APROVADO <CPF> (final 7672) - telefone retornado
+1/1 (100%) — concluído
+Exportações: {"csvStatus":200,"csvBom":true,"csvLinhas":2,"csvTemCpf":true,"txtStatus":200,"txtBytes":0}
+Toasts: "Exportação gerada.\nExportação gerada."
+E2E VISUAL OK | EXIT=0 | 22 s
+```
+
+- Screenshots (fora do git): `diagnostico/painel-spyhub-log.png` e
+  `diagnostico/painel-spyhub-tabela.png`.
+- Comando do painel demo (PowerShell):
+  `$env:MODO_DEMO='1'; $env:WATI_TOKEN=''; $env:WATI_NUMERO=''; $env:PORT='3100'; $env:JWT_SECRET='e2e-local-demo-2026'; node index.js`
+- O harness consome 1 consulta real no SpyHub e exige `listas/spyhub-aprovado.csv` (fora do git).
+- A validação **no painel real/de produção** continua sendo decisão do operador (o `index.js`
+  inicia o worker de campanhas); em modo demo não houve envio nem escrita no Postgres.
 
 
 
@@ -142,10 +166,11 @@ Os passos abaixo ficam como referência para repetir a validação em outro lote
 - [x] Aprovação real (CLI + rota) com CPF existente e final confirmado.
 - [x] CLI solta o socket CDP ao terminar (`encerrarCli()` no `finally`).
 
-### Passo 2 — Validar o painel ponta a ponta
+### Passo 2 — Validar o painel ponta a ponta — CONCLUÍDO em modo demo (26/11)
 
-**Parcial**: o caminho servidor → motor → exportações foi validado no harness isolado
-(`node e2e-spyhub-rota.js`). Falta a conferência **visual** no navegador:
+Caminho servidor validado no harness isolado (`node e2e-spyhub-rota.js`) e caminho **visual** pela
+tela validado em modo demo (`node e2e-painel-visual.js`, seção 2). O roteiro abaixo fica para
+reproduzir no painel real quando o operador decidir subir (atenção ao worker de campanhas):
 
 1. `npm start` (ou `npm run dev`) e entrar como admin — atenção: o `index.js` inicia o worker de
    campanhas; a porta 3000 está ocupada pelo G0DM0D3 nesta máquina (use `PORT=3100` se preciso).
@@ -198,6 +223,7 @@ git status --short
 | `CONTINUAR.md` | Este documento | estado + próximos passos |
 | `estado-spyhub.js` | Script de estado/diagnóstico | lê os docs, checa arquivos, roda `--check` e sonda o Chrome |
 | `e2e-spyhub-rota.js` | E2E ao vivo do caminho do painel | Express mínimo + rota real + motor real; sem banco/worker/Wati; consome consulta no SpyHub |
+| `e2e-painel-visual.js` | E2E visual pela tela (modo demo) | Chrome próprio (CDP 9230) + login admin + Contatos → SpyHub → job → tabela → exportações; screenshots em `diagnostico/` |
 
 ## 5. Contrato da API (painel)
 
@@ -264,6 +290,10 @@ SPYHUB_URL / SPYHUB_LOGIN_URL / SPYHUB_BUSCA_URL   # overrides opcionais
     CSV/TXT 200 (BOM conferido byte a byte no harness novo).
 12. **Limpeza pré-commit**: exemplos com CPF real trocados pelo CPF público de teste; o teste de
     credenciais passou a ler o `.env` em vez de embutir usuário/senha.
-13. **Pendente**: conferência **visual** no navegador (Passo 2). O painel não estava rodando e a
-    porta 3000 está ocupada pelo G0DM0D3.
+13. **Commit** `7fb7271` (16 arquivos) e memória do painel atualizada.
+14. **E2E visual** em modo demo (porta 3100): login admin → Contatos → SpyHub → job pela tela →
+    tabela/log → exportações (CSV com BOM, TXT), 22 s; screenshots em `diagnostico/`.
+    Harness: `node e2e-painel-visual.js`.
+15. **Pendente**: apenas a validação no painel real/de produção, se o operador decidir subir
+    (atenção ao worker de campanhas).
 

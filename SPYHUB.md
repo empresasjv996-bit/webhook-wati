@@ -114,6 +114,26 @@ Wati — e valida `POST /verificar` (202), o polling do job, o CSV de aprovados 
 conferido byte a byte) e o TXT de reprovados. Cada execução consome consulta no SpyHub;
 não faz parte do `npm test`. Sem argumento usa `listas/spyhub-aprovado.csv` (fora do git).
 
+## E2E visual do painel (modo demo)
+
+Valida o caminho completo **pela tela**: abre um Chrome próprio (CDP 9230), faz login
+admin, entra em Contatos → Verificação SpyHub, cola o CSV, executa a verificação e
+confere log, tabela, toasts e exportações (CSV com BOM e TXT). Salva screenshots em
+`diagnostico/` (fora do git). Também consome 1 consulta no SpyHub.
+
+```powershell
+# terminal 1 — painel em modo demo (banco em memória, Wati sem token)
+$env:MODO_DEMO='1'; $env:WATI_TOKEN=''; $env:WATI_NUMERO=''
+$env:PORT='3100'; $env:JWT_SECRET='e2e-local-demo-2026'; node index.js
+
+# terminal 2
+node e2e-painel-visual.js
+```
+
+Resultado esperado (26/11): `1/1 (100%) — concluído`, `csvStatus=200`, `csvBom=true`,
+`txtStatus=200` e dois toasts "Exportação gerada.". O painel real/de produção não é
+tocado por esse harness; `index.js` fora do modo demo inicia o worker de campanhas.
+
 ## Erros que interrompem o job
 
 `sem-chrome`, `sem-credenciais`, `login-recusado`, `captcha`, `limite`,
@@ -149,7 +169,9 @@ node test-spyhub-parser.js   # parser + motor + rotas + tela (sem rede)
 npm test                     # inclui o teste acima na suíte
 node estado-spyhub.js        # estado do motor + próximos passos (CONTINUAR.md)
 node estado-spyhub.js --diag # + sonda ao vivo no Chrome (aba, campo, botão)
+node e2e-spyhub-rota.js      # E2E ao vivo da rota (consome consulta)
+node e2e-painel-visual.js    # E2E visual pela tela em modo demo (consome consulta)
 ```
 
 O teste de rotas chama o router em memória (sem abrir porta) e não faz nenhuma
-consulta real ao SpyHub.
+consulta real ao SpyHub. Os dois E2E são ao vivo e ficam fora do `npm test`.
