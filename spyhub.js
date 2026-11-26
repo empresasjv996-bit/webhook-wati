@@ -46,9 +46,9 @@ const URL_LOGIN = process.env.SPYHUB_LOGIN_URL || (URL_BASE + '/login');
 
 /* Módulos de consulta do SpyHub. Cada URL tem a PRÓPRIA cota (100 consultas):
    quando o selo chega a 100/100 (ou o site avisa do limite), o motor repete o
-   mesmo CPF no módulo seguinte — a verificação não para nem reprova por isso. */
-/* A ordem importa: o Tracker é o módulo que devolve o número certo (o
-   /search/avancada fica por último, só como reserva de cota). */
+   mesmo CPF no módulo seguinte — a verificação não para nem reprova por isso.
+   A ORDEM importa: o Tracker é o que devolve o número certo; o /search/avancada
+   ficou por último, só como reserva de cota. */
 const MODULOS_PADRAO = [
     {
         id: 'tracker',
