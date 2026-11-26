@@ -107,6 +107,24 @@ node spyhub.js fechar                       # fecha o Chrome do SpyHub
 e `reprovados-spyhub.txt` no diretório atual e **encerra o processo ao terminar**
 (fecha o socket CDP; a janela do Chrome continua aberta para a próxima consulta).
 
+### Windows CMD (atalho)
+
+Na raiz do projeto: dê dois cliques em `spyhub-cmd.bat` (ou arraste o `.txt`/`.csv` para cima
+dele), ou rode:
+
+```cmd
+spyhub-cmd.bat listas\minha-lista.csv
+spyhub-cmd.bat
+```
+
+O `.bat` fixa o diretório do projeto (o motor lê o `.env` do cwd), aceita arrastar-e-soltar,
+mostra o resultado e deixa o Chrome aberto — a próxima execução é mais rápida (a primeira,
+com o Chrome fechado, paga o cold start e o login).
+
+Para acelerar em lote, opcionalmente reduza `SPYHUB_INTERVALO_MS` (padrão 1200; ex.: 600)
+com moderação — intervalo muito curto aumenta o risco de bloqueio. Não reduza
+`SPYHUB_ESPERA_RESULTADO` sem necessidade: ele é a paciência para a SPA carregar.
+
 ## E2E do caminho do painel (ao vivo)
 
 `node e2e-spyhub-rota.js [arquivo.csv|txt]` sobe um Express mínimo com a **rota real**
@@ -149,6 +167,39 @@ motivo.
   Ponto e vírgula dentro do texto vira vírgula para não quebrar colunas.
 - **Reprovados (TXT):** para cada registro, `### CPF - finais XXXX - motivo`,
   seguido da ficha original completa (pronta para conferir/reprocessar).
+
+## Como rodar no seu PC (atalho de duplo clique)
+
+O motor precisa de um Chrome instalado, então a tela do painel só executa onde
+existe navegador: no seu Windows — não no runtime Node do Render.
+
+1. Duplo clique em **`abrir-painel-spyhub.bat`**: sobe o painel em `MODO_DEMO=1`
+   na porta 3100 e abre o navegador. Se já existir um painel na porta, o atalho
+   apenas abre o navegador (não sobe um segundo servidor).
+2. Entre com `admin@qgcteam.com` / `123456` e abra **Contatos ▾ → Verificação SpyHub**.
+3. Cole a lista e clique em **Executar Verificação**.
+
+No modo demo o banco é em memória e o envio da Wati fica desligado
+(`banco.modoDemo` curto-circuita o envio), mas as credenciais do SpyHub vêm do
+`.env`: a consulta é real, 1 crédito por CPF. Feche a janela (ou Ctrl+C) para
+encerrar.
+
+Equivalente por terminal:
+
+```powershell
+$env:MODO_DEMO='1'; $env:PORT='3100'; node index.js
+```
+
+Sem painel, direto no motor:
+
+```powershell
+node spyhub.js analisar listas\entrada.txt   # grátis: valida o formato da lista
+node spyhub.js testar   listas\entrada.txt   # consulta real -> aprovados-spyhub.csv + reprovados-spyhub.txt
+```
+
+O `testar` sobrescreve `aprovados-spyhub.csv` e `reprovados-spyhub.txt` a cada
+execução; renomeie se quiser histórico. O painel guarda o job só em memória —
+baixe os exports antes de encerrar o Node.
 
 ## Problemas comuns
 
